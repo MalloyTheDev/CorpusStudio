@@ -74,6 +74,7 @@ from typing import Any, Callable, Iterator
 from loop.controller import HUMAN_GATED_OBLIGATIONS, LoopState, Observation, Phase
 from loop.driver import Directive
 from loop.orchestrate import CAP_WRITE, LoopContext, LoopOrchestrateError
+from loop_adapters.target_profile import TargetProfile, load_profile
 from loop_adapters.single_agent import (
     AgentClient,
     AgentError,
@@ -278,7 +279,7 @@ _ADDED_LINE_SECRET_PATTERNS: tuple[tuple["re.Pattern[str]", str], ...] = (
 )
 
 
-def _scan_text(text: str, what: str) -> list[str]:
+def _scan_text(text: str, what: str, max_bytes: int = _MAX_RATIONALE_BYTES) -> list[str]:
     """Reasons a piece of AGENT-CONTROLLED PROSE must not be published (empty = clear).
 
     The rationale reaches the pushed commit message AND the ``gh pr create --body`` verbatim, so it leaves
@@ -287,8 +288,8 @@ def _scan_text(text: str, what: str) -> list[str]:
     remote and the PR while every content check passed. Prose is therefore bounded and scanned with the
     SAME credential patterns."""
     reasons: list[str] = []
-    if len(text.encode("utf-8", "replace")) > _MAX_RATIONALE_BYTES:
-        reasons.append(f"{what} exceeds {_MAX_RATIONALE_BYTES} bytes")
+    if len(text.encode("utf-8", "replace")) > max_bytes:
+        reasons.append(f"{what} exceeds {max_bytes} bytes")
     bad = _forbidden_char(text)
     if bad:
         reasons.append(f"{what} contains an invisible/format character ({bad})")
@@ -354,15 +355,12 @@ def _compile_pathglob(glob: str) -> "re.Pattern[str]":
     return re.compile("".join(out) + r"\Z")
 
 
-_WRITABLE_RES: tuple["re.Pattern[str]", ...] = tuple(_compile_pathglob(g.casefold()) for g in _WRITABLE_GLOBS)
-
-
-def _path_is_writable(path: str) -> bool:
+def _path_is_writable(path: str, profile: TargetProfile) -> bool:
     """Is ``path`` inside the allowed writable surface? Matched CASE-FOLDED, so `Engine/`, `SCRIPTS/` and
     every other case variant can only ever SHRINK the surface, never widen it (the repo carries
     ``core.ignorecase=true``, so on a case-insensitive checkout a variant IS the real path)."""
     folded = path.replace("\\", "/").casefold()
-    return any(rx.match(folded) for rx in _WRITABLE_RES)
+    return any(_compile_pathglob(g.casefold()).match(folded) for g in profile.writable_globs)
 
 
 @dataclass(frozen=True)
@@ -426,7 +424,7 @@ def _realized_changes(wt: Path, base_oid: str, tree_oid: str) -> list[_ChangeRec
     return records
 
 
-def _read_blob(wt: Path, oid: str, path: str) -> str | None:
+def _read_blob(wt: Path, oid: str, path: str, max_bytes: int = _MAX_BLOB_BYTES) -> str | None:
     """The realized blob's text, or None when it is binary / unreadable as text. Bounded: an untrusted blob
     larger than :data:`_MAX_BLOB_BYTES` is refused rather than slurped. Reads the OBJECT (not the worktree
     file), because `.gitattributes` eol normalization means the committed bytes can differ from both the
@@ -436,8 +434,8 @@ def _read_blob(wt: Path, oid: str, path: str) -> str | None:
         size = int(size_out)
     except ValueError as exc:
         raise WriteAdapterError(f"cannot size blob for {path}: {size_out!r}") from exc
-    if size > _MAX_BLOB_BYTES:
-        raise WriteAdapterError(f"{path} is {size} bytes (> {_MAX_BLOB_BYTES}); refusing an oversized blob")
+    if size > max_bytes:
+        raise WriteAdapterError(f"{path} is {size} bytes (> {max_bytes}); refusing an oversized blob")
     proc = subprocess.run(  # noqa: S603 - fixed argv, no shell; bytes because the blob is untrusted.
         ["git", "-C", str(wt), "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=",
          "cat-file", "blob", oid], capture_output=True, timeout=_GIT_TIMEOUT_S)
@@ -457,7 +455,8 @@ def _read_blob(wt: Path, oid: str, path: str) -> str | None:
         return None
 
 
-def _classify_candidate_changes(wt: Path, base_oid: str, tree_oid: str) -> list[str]:
+def _classify_candidate_changes(wt: Path, base_oid: str, tree_oid: str,
+                                profile: TargetProfile) -> list[str]:
     """Reasons the realized candidate must NOT be published (empty = clear). Runs against what GIT actually
     staged, so rename sources, copy destinations, mode flips and binary payloads are all visible.
 
@@ -469,8 +468,9 @@ def _classify_candidate_changes(wt: Path, base_oid: str, tree_oid: str) -> list[
     records = _realized_changes(wt, base_oid, tree_oid)
     if not records:
         return ["the candidate changed nothing"]
-    if len(records) > _MAX_CHANGED_PATHS:
-        reasons.append(f"touches {len(records)} paths (> {_MAX_CHANGED_PATHS}; needs human review)")
+    if len(records) > profile.max_changed_paths:
+        reasons.append(f"touches {len(records)} paths (> {profile.max_changed_paths}; "
+                       "needs human review)")
     for rec in records:
         shown = rec.path or rec.src_path
         # MODIFY-ONLY. A create/delete/rename/copy/typechange is refused outright: creates are how
@@ -482,13 +482,13 @@ def _classify_candidate_changes(wt: Path, base_oid: str, tree_oid: str) -> list[
         if rec.src_mode != _MODE_REGULAR or rec.dst_mode != _MODE_REGULAR:
             reasons.append(f"{shown} (mode {rec.src_mode}->{rec.dst_mode}: not an ordinary file)")
             continue
-        if not _path_is_writable(rec.path):
+        if not _path_is_writable(rec.path, profile):
             reasons.append(f"{rec.path} (outside the writable surface)")
             continue
-        if not _SAFE_BASENAME.match(rec.path.rsplit("/", 1)[-1]):
+        if not profile.basename_ok(rec.path.rsplit("/", 1)[-1]):
             reasons.append(f"{rec.path} (unsafe module basename)")
             continue
-        content = _read_blob(wt, rec.dst_oid, rec.path)
+        content = _read_blob(wt, rec.dst_oid, rec.path, profile.max_blob_bytes)
         if content is None:
             reasons.append(f"{rec.path} (binary or non-UTF-8 content)")
             continue
@@ -497,8 +497,8 @@ def _classify_candidate_changes(wt: Path, base_oid: str, tree_oid: str) -> list[
         # split on "\n" ONLY - str.splitlines() also breaks on U+2028/U+2029/U+0085, which git, the diff
         # renderer and the Python tokenizer do NOT, so it under-measured a physical line by ~19x (measured).
         longest = max((len(line.encode("utf-8", "replace")) for line in content.split("\n")), default=0)
-        if longest > _MAX_LINE_BYTES:
-            reasons.append(f"{rec.path} has a {longest}-byte line (> {_MAX_LINE_BYTES})")
+        if longest > profile.max_line_bytes:
+            reasons.append(f"{rec.path} has a {longest}-byte line (> {profile.max_line_bytes})")
             continue
         bad = _forbidden_char(content)
         if bad:
@@ -551,14 +551,16 @@ def _classify_candidate_changes(wt: Path, base_oid: str, tree_oid: str) -> list[
             reasons.append("the candidate contains a binary change")
             continue
         touched += int(added) + int(removed)
-    if touched > _MAX_CHANGED_LINES:
-        reasons.append(f"changes {touched} lines (> {_MAX_CHANGED_LINES}; needs human review)")
+    if touched > profile.max_changed_lines:
+        reasons.append(f"changes {touched} lines (> {profile.max_changed_lines}; "
+                       "needs human review)")
     # BYTES as well as lines: `git diff --cached` is the patch a reviewer actually reads, and a line
     # count alone does not bound it (measured: ~990 KB on one physical line reports "1 insertion(+)").
     patch_bytes = len(_git(wt, "diff-tree", "-p", "--no-renames", "--full-index", "--binary",
                            base_oid, tree_oid).stdout.encode("utf-8", "replace"))
-    if patch_bytes > _MAX_CHANGED_BYTES:
-        reasons.append(f"the patch is {patch_bytes} bytes (> {_MAX_CHANGED_BYTES}; needs human review)")
+    if patch_bytes > profile.max_changed_bytes:
+        reasons.append(f"the patch is {patch_bytes} bytes (> {profile.max_changed_bytes}; "
+                       "needs human review)")
     return reasons
 
 # gh subcommands the WRITE adapter permits: the read-only allowlist PLUS ``pr create``. Everything else -
@@ -669,7 +671,8 @@ def _worker_reachable_paths(wt: Path, base_oid: str, run_cs_assure: Any) -> froz
 
 
 def _assure_candidate(wt: Path, base_oid: str, run_cs_assure: Any, changed_paths: list[str],
-                      candidate_commit: str) -> tuple[Observation, str, str | None]:
+                      candidate_commit: str,
+                      profile: TargetProfile) -> tuple[Observation, str, str | None]:
     """STATIC candidate assurance: classify the candidate via ``cs_assure impact`` (obligation / policy
     analysis over the diff) and return ``(observation, reason, impact_record_digest)``. ``SUCCESS`` = clear
     to publish; a human-gated / worker-closure / other blocking obligation returns the routing observation
@@ -695,7 +698,10 @@ def _assure_candidate(wt: Path, base_oid: str, run_cs_assure: Any, changed_paths
     # `--base <base_oid>` pins the same base the classifier used; passing the branch NAME resolved the
     # LOCAL ref while the candidate was branched from origin/<base>, so the assessed change set was not
     # the classified one (measured: it fired obligations belonging to someone else's merged commit).
-    code, out, err = run_cs_assure(wt, "impact", "--scope", "head", "--base", base_oid)
+    argv = ["impact", "--scope", "head", "--base", base_oid]
+    if profile.obligations_policy:
+        argv += ["--policy", profile.obligations_policy]
+    code, out, err = run_cs_assure(wt, *argv)
     if code != 0:
         raise WriteAdapterError(f"candidate impact refused (exit {code}): {err.strip()[:200]}")
     try:
@@ -735,8 +741,12 @@ def _assure_candidate(wt: Path, base_oid: str, run_cs_assure: Any, changed_paths
     # repo, e.g. platform/worker_protocol.py and platform/backends.py, imported at module level by
     # platform/worker.py) and those sit INSIDE the writable surface. Editing one changes worker execution
     # bytes with the lineage gate silent, so consult the reachability analysis too and route it the same way.
-    reach = _worker_reachable_paths(wt, base_oid, run_cs_assure)
-    hit = sorted(p for p in changed_paths if p in reach)
+    # OPT-IN: the worker import closure is a CorpusStudio concept. Requiring it for a repo with no ML
+    # worker would fail closed forever, so a profile that does not declare it skips the check entirely.
+    hit: list[str] = []
+    if profile.require_worker_reachability:
+        reach = _worker_reachable_paths(wt, base_oid, run_cs_assure)
+        hit = sorted(p for p in changed_paths if p in reach)
     if hit:
         return (Observation.WORKER_LINEAGE_IMPACT,
                 f"candidate touches the worker import closure: {', '.join(hit[:4])}", digest)
@@ -880,7 +890,7 @@ def _remote_ref_oid(repo_root: Path, branch: str) -> str:
 def _make_write_executor(agent_client: AgentClient, repo_root: Path, base: str, proposals_dir: Path,
                          worktrees_dir: Path, gh_runner: Callable[..., "tuple[int, str, str]"],
                          branch_prefix: str, run_cs_assure: Any, ci_attested_safe: bool,
-                         expected_head_box: list):  # noqa: ANN202
+                         expected_head_box: list, profile: TargetProfile):  # noqa: ANN202
     """The write executor. At EXECUTE: PROPOSE (agent, CONFINED to a disposable detached worktree) -> seal
     -> APPLY the exact diff in a SEPARATE, pristine detached worktree -> CLASSIFY WHAT GIT REALIZED against
     the writable ALLOWLIST (status/mode/path/basename/bounds + a secret scan over blob content) -> commit ->
@@ -936,8 +946,9 @@ def _make_write_executor(agent_client: AgentClient, repo_root: Path, base: str, 
             #    later step is expressed against THIS oid, so the thing classified, committed, assured and
             #    pushed is provably one object rather than four that happened to agree.
             tree_oid = _git(wt, "write-tree").stdout.strip()
-            violations = _classify_candidate_changes(wt, base_oid, tree_oid)
-            violations += _scan_text(rationale, "the rationale") + _scan_text(state.goal or "", "the goal")
+            violations = _classify_candidate_changes(wt, base_oid, tree_oid, profile)
+            violations += (_scan_text(rationale, "the rationale", profile.max_rationale_bytes)
+                           + _scan_text(state.goal or "", "the goal", profile.max_rationale_bytes))
             if violations:
                 raise WriteAdapterError("refusing the candidate: " + "; ".join(violations[:8]))
 
@@ -965,8 +976,8 @@ def _make_write_executor(agent_client: AgentClient, repo_root: Path, base: str, 
 
             # 6) ASSURE THE COMMIT (--scope head, --base base_oid) - see _assure_candidate.
             realized = [r.path for r in _realized_changes(wt, base_oid, tree_oid) if r.path]
-            observation, reason, impact_digest = _assure_candidate(wt, base_oid, run_cs_assure, realized,
-                                                                   candidate_commit)
+            observation, reason, impact_digest = _assure_candidate(
+                wt, base_oid, run_cs_assure, realized, candidate_commit, profile)
             identity = {"base_oid": base_oid, "candidate_tree_oid": tree_oid,
                         "candidate_commit": candidate_commit}
             if observation is not Observation.SUCCESS:
@@ -1049,7 +1060,9 @@ def build_context(repo_root: Path | str, base: str = "main", *, agent_client: Ag
                   proposals_dir: Path | str | None = None, worktrees_dir: Path | str | None = None,
                   gh_runner: Any = None, branch_prefix: str = "cs-agent/", run_cs_assure: Any = None,
                   pr_ref: str | None = None, ci_attested_safe: bool = False,
-                  sandbox: Any = None, require_sandbox: bool = False) -> LoopContext:
+                  sandbox: Any = None, require_sandbox: bool = False,
+                  profile: TargetProfile | str = "corpusstudio",
+                  assurance_root: Path | str | None = None) -> LoopContext:
     """A WRITE-CAPABLE, single-agent :class:`LoopContext` (Phase 7.1). ``capabilities={CAP_WRITE}`` - the
     capability gate REFUSES to run it without ``--allow-capabilities write``. It applies the agent's sealed
     diff in an isolated worktree, commits, pushes a branch, and opens a PR; it NEVER merges (``write_gh``
@@ -1062,6 +1075,10 @@ def build_context(repo_root: Path | str, base: str = "main", *, agent_client: Ag
     it, and this adapter cannot verify someone else's CI by parsing it (every attempt failed open), so the
     person who can actually change the workflows asserts it."""
     root = Path(repo_root)
+    prof = profile if isinstance(profile, TargetProfile) else load_profile(profile)
+    # The TRUSTED assurance tooling need not live in the TARGET: pointing the loop at another
+    # repository is exactly the case where it does not. Defaults to the target for CorpusStudio.
+    trusted_root = Path(assurance_root) if assurance_root is not None else root
     wdir_probe = Path(worktrees_dir) if worktrees_dir is not None else default_worktrees_dir(root)
     if require_sandbox and sandbox is None:
         raise SandboxUnavailable(
@@ -1083,11 +1100,12 @@ def build_context(repo_root: Path | str, base: str = "main", *, agent_client: Ag
     # against the candidate worktree) and the loop's own OBSERVE/VERIFY (against the dev tree). Default to
     # the SANITIZED-env cs_assure runner so no assurance subprocess inherits secrets, and WRAP it so a
     # candidate is always analyzed by the TRUSTED dev-tree tool (never the candidate's own scripts/).
-    assure = _trusted_cs_assure(root, run_cs_assure if run_cs_assure is not None else _sanitized_cs_assure)
+    assure = _trusted_cs_assure(trusted_root,
+                                run_cs_assure if run_cs_assure is not None else _sanitized_cs_assure)
     kwargs: dict[str, Any] = {
         "repo_root": root, "base": base,
         "executor": _make_write_executor(client, root, base, pdir, wdir, gh, branch_prefix, assure,
-                                         ci_attested_safe, _expected_head_box),
+                                         ci_attested_safe, _expected_head_box, prof),
         "reviewer": lambda _state: [],
         "critic": _signoff_critic,
         "multi_agent": False,               # single-agent: no delegated wave (verify_paths is a 7.3 concern)
