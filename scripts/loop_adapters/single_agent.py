@@ -527,7 +527,7 @@ def _resolve_base_oid(repo_root: Path, base: str) -> str:
 
 
 def _make_executor(agent_client: AgentClient, repo_root: Path, base: str, proposals_dir: Path,
-                   worktrees_dir: Path):  # noqa: ANN202
+                   worktrees_dir: Path, limits: dict[str, Any] | None = None):  # noqa: ANN202
     """Build the propose-only executor. At EXECUTE it runs the agent CONFINED to a disposable worktree and
     seals the returned diff; at DECOMPOSE it installs one self-owned placeholder task (so the graph phases
     proceed without a delegated, write-capable sub-agent); at every other executor phase it advances."""
@@ -552,6 +552,9 @@ def _make_executor(agent_client: AgentClient, repo_root: Path, base: str, propos
                 _confined_home(worktrees_dir) as home:
             request = {"goal": state.goal, "goal_id": state.goal_id, "base_oid": base_oid,
                        "repo_root": str(repo_root), "_cwd": str(wt), "_home": str(home),
+                       # the SAME bounds the write path would enforce: a propose-only run that suggests
+                       # changes 7.1 would refuse teaches the operator nothing.
+                       "_limits": limits or {},
                        "directive": {"phase": directive.phase, "action": directive.action,
                                      "allowed_paths": list(directive.allowed_paths)}}
             result = agent_client.propose(request)  # RAISES on failure -> step escalates (fail-closed)
@@ -581,7 +584,8 @@ def _signoff_critic(_state: LoopState) -> list[Criterion]:
 
 def build_context(repo_root: Path | str, base: str = "main", *, agent_client: AgentClient | None = None,
                   proposals_dir: Path | str | None = None, worktrees_dir: Path | str | None = None,
-                  pr_ref: str | None = None, run_cs_assure: Any = None, gh_runner: Any = None) -> LoopContext:
+                  pr_ref: str | None = None, run_cs_assure: Any = None, gh_runner: Any = None,
+                  profile: Any = None, sandbox: Any = None) -> LoopContext:
     """A READ-ONLY, propose-only :class:`LoopContext` driven by a real single agent. ``capabilities`` is
     EMPTY (the capability gate runs it with no opt-in). The executor runs ``agent_client`` (defaulting to
     the out-of-process :class:`ClaudeSubprocessClient`) CONFINED to a disposable, detached worktree at
@@ -590,12 +594,22 @@ def build_context(repo_root: Path | str, base: str = "main", *, agent_client: Ag
     exercises the real CI read + merge gate, still guaranteed not to merge (``dangerous=True`` escalates
     first and the gh runner refuses mutations)."""
     root = Path(repo_root)
-    client = agent_client if agent_client is not None else ClaudeSubprocessClient()
+    limits: dict[str, Any] = {}
+    if profile is not None:
+        from loop_adapters.target_profile import TargetProfile, load_profile
+        prof = profile if isinstance(profile, TargetProfile) else load_profile(profile)
+        limits = {"writable_globs": list(prof.writable_globs),
+                  "max_changed_paths": prof.max_changed_paths,
+                  "max_changed_lines": prof.max_changed_lines,
+                  "max_changed_bytes": prof.max_changed_bytes}
+    if sandbox is not None:
+        verify_sandbox(sandbox, Path(worktrees_dir) if worktrees_dir else default_worktrees_dir(root))
+    client = agent_client if agent_client is not None else ClaudeSubprocessClient(sandbox=sandbox)
     pdir = Path(proposals_dir) if proposals_dir is not None else _default_proposals_dir(root)
     wtdir = Path(worktrees_dir) if worktrees_dir is not None else default_worktrees_dir(root)
     kwargs: dict[str, Any] = {
         "repo_root": root, "base": base,
-        "executor": _make_executor(client, root, base, pdir, wtdir),
+        "executor": _make_executor(client, root, base, pdir, wtdir, limits),
         "reviewer": lambda _state: [],
         "critic": _signoff_critic,
         "multi_agent": False,                 # single-agent: no delegated (write-capable) sub-agents
