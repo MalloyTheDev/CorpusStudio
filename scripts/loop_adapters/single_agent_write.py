@@ -105,6 +105,11 @@ def _sanitize_branch_suffix(goal_id: str) -> str:
 
 _GIT_TIMEOUT_S = 120
 _GH_TIMEOUT_S = 60
+# A FIXED commit timestamp makes the candidate commit CONTENT-ADDRESSED: identical content yields an
+# identical oid, so a resumed or re-run goal reproduces the same commit instead of a new one every time
+# (measured: without this, identical content produced two different commit oids).
+_FIXED_DATE = "@0 +0000"
+
 _CS_ASSURE_TIMEOUT_S = 1800  # a bounded cs_assure call (impact is fast; the dev-tree gate can take minutes)
 
 
@@ -370,14 +375,18 @@ class _ChangeRecord:
     src_path: str    # "" unless the record carries a distinct source
 
 
-def _realized_changes(wt: Path, base_oid: str) -> list[_ChangeRecord]:
+def _realized_changes(wt: Path, base_oid: str, tree_oid: str) -> list[_ChangeRecord]:
     """The change set GIT actually realized in the candidate worktree, via PLUMBING:
 
-        git diff-index --cached -r --no-renames -z <base_oid>
+        git diff-tree -r --no-renames -z <base_oid> <tree_oid>
 
     Every element of that command is load-bearing (all measured on git 2.43.0):
-      * ``diff-index`` (plumbing) IGNORES ``diff.renames`` config; porcelain ``git diff`` honours it, so a
-        repo/global ``diff.renames=copies`` would silently change what we see.
+      * ``diff-tree`` on the CAPTURED TREE OID, not the index: measured byte-identical to
+        ``diff-index --cached``, but it pins the subject. The index is mutable - a concurrent ``git add``
+        between classification and commit was measured to change the committed tree - so classifying the
+        tree makes "the object classified IS the object committed" true by construction.
+      * plumbing IGNORES ``diff.renames`` config; porcelain ``git diff`` honours it, so a repo/global
+        ``diff.renames=copies`` would silently change what we see.
       * ``--no-renames`` is passed ALONE. ``--no-renames -M0 -C0`` still prints ``R100 <src> <dst>`` because
         ``-M0`` means "detect a rename at 0% similarity" - it RE-ENABLES detection. With detection off, a
         rename decomposes into ``D <source>`` + ``A <dest>``, which is the ONLY way the deleted source of a
@@ -388,7 +397,7 @@ def _realized_changes(wt: Path, base_oid: str) -> list[_ChangeRecord]:
 
     Never parses the unified diff: extended headers (``rename from`` / ``copy from`` / mode / binary) are
     invisible to a ``---``/``+++`` scanner, which is exactly how three separate holes got through."""
-    proc = _git(wt, "diff-index", "--cached", "-r", "--no-renames", "-z", base_oid)
+    proc = _git(wt, "diff-tree", "-r", "--no-renames", "-z", base_oid, tree_oid)
     fields = proc.stdout.split("\0")
     records: list[_ChangeRecord] = []
     i = 0
@@ -446,7 +455,7 @@ def _read_blob(wt: Path, oid: str, path: str) -> str | None:
         return None
 
 
-def _classify_candidate_changes(wt: Path, base_oid: str) -> list[str]:
+def _classify_candidate_changes(wt: Path, base_oid: str, tree_oid: str) -> list[str]:
     """Reasons the realized candidate must NOT be published (empty = clear). Runs against what GIT actually
     staged, so rename sources, copy destinations, mode flips and binary payloads are all visible.
 
@@ -455,7 +464,7 @@ def _classify_candidate_changes(wt: Path, base_oid: str) -> list[str]:
     lines; and any apparent secret in the REALIZED BLOB CONTENT (which is the only layer that catches a
     ``copy from`` - a copy leaves its source untouched, so git reports only the allowed destination)."""
     reasons: list[str] = []
-    records = _realized_changes(wt, base_oid)
+    records = _realized_changes(wt, base_oid, tree_oid)
     if not records:
         return ["the candidate changed nothing"]
     if len(records) > _MAX_CHANGED_PATHS:
@@ -532,7 +541,7 @@ def _classify_candidate_changes(wt: Path, base_oid: str) -> list[str]:
                     reasons.append(f"the candidate adds {label}")
                     break
 
-    numstat = _git(wt, "diff", "--cached", "--numstat", "--no-renames", base_oid).stdout
+    numstat = _git(wt, "diff-tree", "-r", "--no-renames", "--numstat", base_oid, tree_oid).stdout
     touched = 0
     for line in numstat.splitlines():
         added, removed = line.split("\t", 2)[:2]
@@ -544,7 +553,8 @@ def _classify_candidate_changes(wt: Path, base_oid: str) -> list[str]:
         reasons.append(f"changes {touched} lines (> {_MAX_CHANGED_LINES}; needs human review)")
     # BYTES as well as lines: `git diff --cached` is the patch a reviewer actually reads, and a line
     # count alone does not bound it (measured: ~990 KB on one physical line reports "1 insertion(+)").
-    patch_bytes = len(_git(wt, "diff", "--cached", "--no-renames", base_oid).stdout.encode("utf-8", "replace"))
+    patch_bytes = len(_git(wt, "diff-tree", "-p", "--no-renames", "--full-index", "--binary",
+                           base_oid, tree_oid).stdout.encode("utf-8", "replace"))
     if patch_bytes > _MAX_CHANGED_BYTES:
         reasons.append(f"the patch is {patch_bytes} bytes (> {_MAX_CHANGED_BYTES}; needs human review)")
     return reasons
@@ -587,7 +597,8 @@ def write_gh(repo_root: Path | str) -> Callable[..., "tuple[int, str, str]"]:
     return run
 
 
-def _git(cwd: Path, *args: str, stdin: str | None = None) -> subprocess.CompletedProcess[str]:
+def _git(cwd: Path, *args: str, stdin: str | None = None,
+         env_extra: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
     """Run ``git -C <cwd> <args>`` (fixed argv, no shell, bounded) with HOOKS PINNED OFF. Raises
     :class:`WriteAdapterError` on a non-zero exit or an un-runnable git.
 
@@ -599,7 +610,8 @@ def _git(cwd: Path, *args: str, stdin: str | None = None) -> subprocess.Complete
     try:
         proc = subprocess.run(  # noqa: S603 - fixed argv, no shell, hooks + fsmonitor disabled.
             ["git", "-C", str(cwd), "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=", *args],
-            input=stdin, capture_output=True, text=True, timeout=_GIT_TIMEOUT_S)
+            input=stdin, capture_output=True, text=True, timeout=_GIT_TIMEOUT_S,
+            env={**os.environ, **env_extra} if env_extra else None)
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise WriteAdapterError(f"git {' '.join(args[:2])} could not run: {exc}") from exc
     if proc.returncode != 0:
@@ -626,11 +638,11 @@ def _apply_worktree(repo_root: Path, base_oid: str, worktrees_dir: Path) -> Iter
             pass  # best-effort disposal; a leftover worktree is GC-able, never data loss
 
 
-def _worker_reachable_paths(wt: Path, base: str, run_cs_assure: Any) -> frozenset[str]:
+def _worker_reachable_paths(wt: Path, base_oid: str, run_cs_assure: Any) -> frozenset[str]:
     """Every path in the WORKER'S REAL IMPORT CLOSURE for the candidate (declared + undeclared-reachable),
     via ``cs_assure worker-reachability``. FAIL-CLOSED: a refusal / unusable record raises, so an
     uncomputable closure never reads as "touches no worker code"."""
-    code, out, err = run_cs_assure(wt, "worker-reachability", "--base", base)
+    code, out, err = run_cs_assure(wt, "worker-reachability", "--scope", "head", "--base", base_oid)
     if code != 0:
         raise WriteAdapterError(f"candidate worker-reachability refused (exit {code}): {err.strip()[:200]}")
     try:
@@ -654,8 +666,8 @@ def _worker_reachable_paths(wt: Path, base: str, run_cs_assure: Any) -> frozense
     return frozenset(paths)
 
 
-def _assure_candidate(wt: Path, base: str, run_cs_assure: Any,
-                      changed_paths: list[str]) -> tuple[Observation, str, str | None]:
+def _assure_candidate(wt: Path, base_oid: str, run_cs_assure: Any, changed_paths: list[str],
+                      candidate_commit: str) -> tuple[Observation, str, str | None]:
     """STATIC candidate assurance: classify the candidate via ``cs_assure impact`` (obligation / policy
     analysis over the diff) and return ``(observation, reason, impact_record_digest)``. ``SUCCESS`` = clear
     to publish; a human-gated / worker-closure / other blocking obligation returns the routing observation
@@ -674,7 +686,14 @@ def _assure_candidate(wt: Path, base: str, run_cs_assure: Any,
     prevents for the propose step. The DYNAMIC gate (which must execute the candidate) is therefore
     delegated to CI's isolated sandbox on the opened PR, where the human merges only on green. Fail closed:
     an unusable / refused impact record raises :class:`WriteAdapterError` (-> the loop escalates)."""
-    code, out, err = run_cs_assure(wt, "impact", "--base", base)
+    # `--scope head` binds the assessment to the COMMIT. The default (workspace) assesses the MUTABLE
+    # WORKING TREE, which is a different object: measured on a candidate whose commit edits
+    # platform/worker.py while the worktree is reverted, workspace reported `fired=[]` and head reported
+    # `['worker-closure']` - the gate said clean about a commit that fires a human-gated obligation.
+    # `--base <base_oid>` pins the same base the classifier used; passing the branch NAME resolved the
+    # LOCAL ref while the candidate was branched from origin/<base>, so the assessed change set was not
+    # the classified one (measured: it fired obligations belonging to someone else's merged commit).
+    code, out, err = run_cs_assure(wt, "impact", "--scope", "head", "--base", base_oid)
     if code != 0:
         raise WriteAdapterError(f"candidate impact refused (exit {code}): {err.strip()[:200]}")
     try:
@@ -689,6 +708,18 @@ def _assure_candidate(wt: Path, base: str, run_cs_assure: Any,
         # A well-formed impact record ALWAYS has a (possibly empty) list; a missing one is malformed /
         # schema-drifted - fail closed (do not conflate 'uncomputable' with 'nothing fired').
         raise WriteAdapterError("candidate impact record has no fired_obligations list")
+    # BIND the record to this candidate. Without this, "an impact record exists" says nothing about
+    # WHICH object it assessed - a naive identity check would certify a record that reported fired=[]
+    # for a different subject entirely.
+    payload_scope = payload.get("scope")
+    provenance = data.get("provenance") if isinstance(data, dict) else None
+    head_oid = provenance.get("head_oid") if isinstance(provenance, dict) else None
+    if payload_scope != "head":
+        raise WriteAdapterError(f"candidate impact scope is {payload_scope!r}, not 'head' (wrong subject)")
+    if head_oid != candidate_commit:
+        raise WriteAdapterError(
+            f"candidate impact assessed {str(head_oid)[:12]!r}, not the candidate commit "
+            f"{candidate_commit[:12]!r} (the assessment is about a different object)")
     ids = {o["id"] for o in fired if isinstance(o, dict) and isinstance(o.get("id"), str)}
     digest = data.get("record_digest") if isinstance(data, dict) else None
     digest = digest if isinstance(digest, str) else None
@@ -702,7 +733,7 @@ def _assure_candidate(wt: Path, base: str, run_cs_assure: Any,
     # repo, e.g. platform/worker_protocol.py and platform/backends.py, imported at module level by
     # platform/worker.py) and those sit INSIDE the writable surface. Editing one changes worker execution
     # bytes with the lineage gate silent, so consult the reachability analysis too and route it the same way.
-    reach = _worker_reachable_paths(wt, base, run_cs_assure)
+    reach = _worker_reachable_paths(wt, base_oid, run_cs_assure)
     hit = sorted(p for p in changed_paths if p in reach)
     if hit:
         return (Observation.WORKER_LINEAGE_IMPACT,
@@ -715,7 +746,8 @@ def _assure_candidate(wt: Path, base: str, run_cs_assure: Any,
 
 
 def _record_candidate_assurance(state: LoopState, record: dict[str, Any], branch: str, observation: Observation,
-                                reason: str, impact_digest: str | None, *, published: bool) -> None:
+                                reason: str, impact_digest: str | None, *, published: bool,
+                                identity: dict[str, str] | None = None) -> None:
     """Store the CANDIDATE's assurance outcome on the loop state (audit trail): the observation the static
     impact classified for the candidate worktree, why, whether it was published, and the sealed impact
     digest. Kept OUT of the completeness ``evidence`` index (a clean candidate is not a human sign-off - the
@@ -729,6 +761,10 @@ def _record_candidate_assurance(state: LoopState, record: dict[str, Any], branch
         "record_digest": record["record_digest"], "branch": branch,
         "observation": observation.value, "reason": reason,
         "published": published, "impact_record_digest": impact_digest,
+        # The durable identity of what was assured. Without it the impact digest does not say WHICH object
+        # it assessed once the disposable worktree is gone - this is what a human triaging an escalation
+        # (and 7.1.4's resume) needs to line the remote branch up against the assurance.
+        **(identity or {}),
     }
 
 
@@ -744,9 +780,46 @@ def _pr_body(rationale: str) -> str:
     return _PR_DISCLOSURE + (rationale or "_No rationale supplied by the agent._")
 
 
+def _verify_commit_identity(wt: Path, commit: str, tree_oid: str, base_oid: str) -> None:
+    """Assert the built commit IS the classified candidate: its tree is the tree that passed
+    classification, and its parent is exactly the base that classification was computed against.
+
+    A tree-only check is NOT enough - ``git commit-tree`` was measured producing a commit with an
+    identical tree but a hostile parent (and a message carrying a token), which a tree comparison alone
+    accepts. Fail-closed: any mismatch raises rather than publishing an object we did not assure."""
+    built_tree = _git(wt, "rev-parse", f"{commit}^{{tree}}").stdout.strip()
+    if built_tree != tree_oid:
+        raise WriteAdapterError(f"commit tree {built_tree[:12]} != classified tree {tree_oid[:12]}")
+    parents = _git(wt, "rev-list", "--parents", "-n", "1", commit).stdout.split()[1:]
+    if parents != [base_oid]:
+        raise WriteAdapterError(f"commit parents {parents} != [{base_oid}] (base drift)")
+
+
+def _remote_ref_oid(repo_root: Path, branch: str) -> str:
+    """The oid the REMOTE actually has for ``refs/heads/<branch>``, or "" if absent. Fail-closed.
+
+    Two measured traps. (1) ``git ls-remote <url> <pattern>`` matches the ref TAIL, so a decoy
+    ``refs/heads/decoy/refs/heads/cs-agent/x`` also matches and a naive ``head -1`` reads the DECOY's oid -
+    so every row is parsed and exactly one exact full-ref match is required. (2) ``ls-remote origin``
+    ignores ``remote.origin.pushurl``, so with a pushurl configured the push lands on one remote and the
+    verification reads another (there is no ``ls-remote --push``) - so the PUSH url is resolved explicitly.
+    """
+    url = _git(repo_root, "remote", "get-url", "--push", "origin").stdout.strip()
+    if not url:
+        raise WriteAdapterError("cannot resolve the push URL for origin; refusing to verify blind")
+    want = f"refs/heads/{branch}"
+    matches = [ln.split("\t") for ln in
+               _git(repo_root, "ls-remote", url, want).stdout.splitlines() if "\t" in ln]
+    exact = [oid for oid, ref in matches if ref == want]
+    if len(exact) > 1:
+        raise WriteAdapterError(f"remote reports {len(exact)} refs for {want} (ambiguous); refusing")
+    return exact[0] if exact else ""
+
+
 def _make_write_executor(agent_client: AgentClient, repo_root: Path, base: str, proposals_dir: Path,
                          worktrees_dir: Path, gh_runner: Callable[..., "tuple[int, str, str]"],
-                         branch_prefix: str, run_cs_assure: Any, ci_attested_safe: bool):  # noqa: ANN202
+                         branch_prefix: str, run_cs_assure: Any, ci_attested_safe: bool,
+                         expected_head_box: list):  # noqa: ANN202
     """The write executor. At EXECUTE: PROPOSE (agent, CONFINED to a disposable detached worktree) -> seal
     -> APPLY the exact diff in a SEPARATE, pristine detached worktree -> CLASSIFY WHAT GIT REALIZED against
     the writable ALLOWLIST (status/mode/path/basename/bounds + a secret scan over blob content) -> commit ->
@@ -797,65 +870,88 @@ def _make_write_executor(agent_client: AgentClient, repo_root: Path, base: str, 
         with _apply_worktree(repo_root, base_oid, worktrees_dir) as wt:
             # `git apply` itself refuses `../`, `.git/`, `.GIT/`, `git~1/` and beyond-a-symlink paths, so a
             # candidate cannot write outside the worktree (we never pass --directory/--unsafe-paths/-p0).
-            _git(wt, "apply", "--index", "-", stdin=diff)  # a diff that does not apply cleanly fails closed
-            # 3) CLASSIFY WHAT GIT REALIZED (never the diff text): allowlist + status + mode + basename +
-            #    bounds + a secret scan over realized BLOB CONTENT. This is the layer that sees a
-            #    `rename from` source (as its own D record) and a `copy from` payload (as blob bytes).
-            violations = _classify_candidate_changes(wt, base_oid)
-            # The rationale is agent-controlled prose that reaches the commit message AND the PR body
-            # verbatim - it leaves the machine like content does, so it gets the same scan + bounds.
+            _git(wt, "apply", "--index", "-", stdin=diff)
+            # 3) CAPTURE THE IDENTITY. write-tree freezes the staged content as an immutable object; every
+            #    later step is expressed against THIS oid, so the thing classified, committed, assured and
+            #    pushed is provably one object rather than four that happened to agree.
+            tree_oid = _git(wt, "write-tree").stdout.strip()
+            violations = _classify_candidate_changes(wt, base_oid, tree_oid)
             violations += _scan_text(rationale, "the rationale") + _scan_text(state.goal or "", "the goal")
             if violations:
                 raise WriteAdapterError("refusing the candidate: " + "; ".join(violations[:8]))
-            _git(wt, "-c", "user.name=corpusstudio-agent", "-c", "user.email=agent@corpusstudio.local",
-                 "commit", "-m", f"{state.goal or 'agent change'}\n\n{rationale}\n\n"
-                 "[autonomous single-agent proposal - NOT yet human-reviewed; static candidate "
-                 "assurance only, the dynamic gate runs in CI and a human reviews + merges the PR]")
-            # CANDIDATE ASSURANCE (STATIC): classify the CANDIDATE worktree via `cs_assure impact`
-            # (self-modify / sealed-research / worker-closure / policy) - NOT the dev tree, and NOT the
-            # code-executing gate (running the untrusted candidate's pytest locally would be arbitrary code
-            # execution with the operator's env; the dynamic gate is CI's job on the opened PR). A refusal
-            # raises here -> the loop escalates (fail closed).
-            realized = [r.path for r in _realized_changes(wt, base_oid) if r.path]
-            observation, reason, impact_digest = _assure_candidate(wt, base, run_cs_assure, realized)
+
+            # 4) COMMIT FROM THE TREE, not from the index. `git commit` re-reads the index, so a concurrent
+            #    `git add` between classification and commit was measured to change the committed tree;
+            #    `commit-tree` takes the classified oid directly and touches no index. Dates are pinned so
+            #    identical content yields an identical commit oid (content-addressed, resume-safe).
+            message = (f"{state.goal or 'agent change'}\n\n{rationale}\n\n"
+                       "[autonomous single-agent proposal - NOT yet human-reviewed; static candidate "
+                       "assurance only, the dynamic gate runs in CI and a human reviews + merges the PR]")
+            candidate_commit = _git(
+                wt, "-c", "user.name=corpusstudio-agent", "-c", "user.email=agent@corpusstudio.local",
+                "-c", "commit.gpgsign=false",
+                "commit-tree", tree_oid, "-p", base_oid, "-m", message,
+                env_extra={"GIT_AUTHOR_DATE": _FIXED_DATE, "GIT_COMMITTER_DATE": _FIXED_DATE},
+            ).stdout.strip()
+
+            # 5) RE-VERIFY the object we just built (see _verify_commit_identity).
+            _verify_commit_identity(wt, candidate_commit, tree_oid, base_oid)
+
+            # `commit-tree` builds the object but does NOT move HEAD, so point the worktree's HEAD at it -
+            # otherwise `--scope head` would assess the BASE commit and report a clean, entirely truthful
+            # assessment of the wrong object. update-ref (not `reset`) because it touches no index/worktree.
+            _git(wt, "update-ref", "HEAD", candidate_commit)
+
+            # 6) ASSURE THE COMMIT (--scope head, --base base_oid) - see _assure_candidate.
+            realized = [r.path for r in _realized_changes(wt, base_oid, tree_oid) if r.path]
+            observation, reason, impact_digest = _assure_candidate(wt, base_oid, run_cs_assure, realized,
+                                                                   candidate_commit)
+            identity = {"base_oid": base_oid, "candidate_tree_oid": tree_oid,
+                        "candidate_commit": candidate_commit}
             if observation is not Observation.SUCCESS:
-                # The candidate is NOT clear -> publish NOTHING. Record the block and return the classified
-                # observation so the controller routes it (human-gated / worker / policy -> escalate).
                 _record_candidate_assurance(state, record, branch, observation, reason, impact_digest,
-                                            published=False)
+                                            published=False, identity=identity)
                 return observation
-            # PREFLIGHT: pushing hands the candidate to CI, which EXECUTES it. Refuse if this repo's CI
-            # would run it with a credential-bearing checkout before a human reviews it - fail closed
-            # rather than rely on "a human merges only on green" (merging later does not un-run the code).
             unmet = _publish_precondition_unmet(ci_attested_safe)
             if unmet:
                 raise WriteAdapterError(f"refusing to publish: {unmet}")
-            # CLEAR candidate -> PUBLISH: push the committed candidate to the branch (by refspec, from the
-            # detached HEAD - no local branch was ever created) and open a PR. NEVER merges. CI runs the
-            # dynamic gate on the PR in its sandbox; a human merges only on green.
-            _git(wt, "push", "-u", "origin", f"HEAD:refs/heads/{branch}")
-            # Reference the sealed proposal AS SOON AS the branch is live, not after `gh pr create`: a gh
-            # failure used to leave a pushed branch on the remote with NO record of it on the loop state,
-            # so the human triaging the escalation could not find what had been published.
+
+            # 7) PUBLISH BY EXPLICIT OID with a create-only lease. An explicit <oid>:<ref> refspec cannot
+            #    publish anything but the assured commit, and --force-with-lease is enforced REMOTE-SIDE:
+            #    a plain push over a tip that happens to be an ANCESTOR was measured to succeed SILENTLY,
+            #    which would rewrite the head of an already-open (possibly approved) PR.
+            _git(wt, "push", "--force-with-lease=" + f"refs/heads/{branch}:", "origin",
+                 f"{candidate_commit}:refs/heads/{branch}")
+            remote_oid = _remote_ref_oid(repo_root, branch)
+            if remote_oid != candidate_commit:
+                raise WriteAdapterError(
+                    f"remote {branch} is {remote_oid[:12] or '(absent)'}, not the assured candidate "
+                    f"{candidate_commit[:12]}; refusing to open a PR for an object we did not assure")
+            identity["remote_oid"] = remote_oid
+            # Record the publish AS SOON AS the branch is live on the remote - before `gh pr create`,
+            # which can fail. #710 fixed exactly this: a gh failure used to leave a pushed branch with no
+            # record on the loop state, so the human triaging the escalation could not find it.
+            _record_candidate_assurance(state, record, branch, observation,
+                                        f"{reason}; branch pushed, PR not yet opened", impact_digest,
+                                        published=True, identity=identity)
             refs = state.review_state.get("agent_proposals")
             if not isinstance(refs, list):
                 refs = state.review_state["agent_proposals"] = []
             refs.append({"record_digest": record["record_digest"], "branch": branch,
                          "path": str(proposal_path),
-                         "changed_paths": record["payload"]["changed_paths"], "pr": ""})
-            # Record the PUSH immediately: the branch is now live on the remote (and CI may already be
-            # running on it). If `gh pr create` fails below we raise, and the human triaging that escalation
-            # must be able to SEE the orphaned branch rather than find an empty review_state.
-            _record_candidate_assurance(state, record, branch, observation,
-                                        f"{reason}; branch pushed, PR not yet opened", impact_digest,
-                                        published=True)
+                         "changed_paths": record["payload"]["changed_paths"], "pr": "",
+                         "candidate_commit": candidate_commit, "candidate_tree_oid": tree_oid})
+            # The loop's head-bound merge gate now has a commit to bind to (it HOLDs if the PR head ever
+            # differs). Nothing set this before, so the guard was dead on every shipped path.
+            for box in expected_head_box:
+                box.expected_head = candidate_commit
             code, pr_out, err = gh_runner("pr", "create", "--head", branch, "--base", base,
                                           "--title", (state.goal or "agent change")[:120],
                                           "--body", _pr_body(rationale))
             if code != 0:
                 raise WriteAdapterError(f"gh pr create failed (exit {code}): {err.strip()[:200]}")
             _record_candidate_assurance(state, record, branch, observation, reason, impact_digest,
-                                        published=True)
+                                        published=True, identity=identity)
             refs[-1]["pr"] = pr_out.strip()
         return Observation.SUCCESS
 
@@ -882,6 +978,10 @@ def build_context(repo_root: Path | str, base: str = "main", *, agent_client: Ag
     pdir = Path(proposals_dir) if proposals_dir is not None else _default_proposals_dir(root)
     wdir = Path(worktrees_dir) if worktrees_dir is not None else default_worktrees_dir(root)
     gh = gh_runner or write_gh(root)
+    # LoopContext is a mutable dataclass and INTEGRATE runs later in the SAME process, so the executor can
+    # bind the merge gate to the commit it actually published. The box is filled in below once the context
+    # exists (the executor closes over the list, not the context).
+    _expected_head_box: list = []
     # The SAME assurance runner drives BOTH the candidate assurance (static `impact` in the executor,
     # against the candidate worktree) and the loop's own OBSERVE/VERIFY (against the dev tree). Default to
     # the SANITIZED-env cs_assure runner so no assurance subprocess inherits secrets, and WRAP it so a
@@ -890,7 +990,7 @@ def build_context(repo_root: Path | str, base: str = "main", *, agent_client: Ag
     kwargs: dict[str, Any] = {
         "repo_root": root, "base": base,
         "executor": _make_write_executor(client, root, base, pdir, wdir, gh, branch_prefix, assure,
-                                         ci_attested_safe),
+                                         ci_attested_safe, _expected_head_box),
         "reviewer": lambda _state: [],
         "critic": _signoff_critic,
         "multi_agent": False,               # single-agent: no delegated wave (verify_paths is a 7.3 concern)
@@ -901,7 +1001,9 @@ def build_context(repo_root: Path | str, base: str = "main", *, agent_client: Ag
     }
     if pr_ref is not None:
         kwargs["pr_ref"] = pr_ref
-    return LoopContext(**kwargs)
+    ctx = LoopContext(**kwargs)
+    _expected_head_box.append(ctx)
+    return ctx
 
 
 # Re-export so `AgentError` (the confined-propose transport error) and the shared worktree-dir resolver are
