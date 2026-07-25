@@ -315,8 +315,34 @@ def test_run_refuses_a_write_capable_adapter_without_explicit_opt_in(tmp_path: P
     refused = _run(state, "run", "--adapters", str(adapter), "--repo-root", str(REPO_ROOT))
     assert refused.returncode == 2 and "capabilities" in refused.stderr  # fail closed, nothing run
     ok = _run(state, "run", "--adapters", str(adapter), "--repo-root", str(REPO_ROOT),
-              "--allow-capabilities", "write")
+              "--allow-capabilities", "write", "--sandbox", "none")
     assert ok.returncode == 0, ok.stderr  # with the explicit opt-in it runs (finalizes)
+
+
+def test_run_refuses_a_write_capable_adapter_without_an_explicit_sandbox_choice(tmp_path: Path) -> None:
+    # The sandbox seam, its verification and the confined HOME all existed and were UNREACHABLE from this
+    # entrypoint: build_context() was called without a sandbox, so an operator driving the shipped CLI got
+    # an UNSANDBOXED agent and no diagnostic said so. Opting into `write` is therefore NOT enough - the
+    # confinement the untrusted agent gets has to be stated, so the weaker choice can never be the default.
+    state = tmp_path / "loop.json"
+    _run(state, "init", "--goal", "g")
+    adapter = tmp_path / "w.py"
+    adapter.write_text(_WRITE_ADAPTER)
+    refused = _run(state, "run", "--adapters", str(adapter), "--repo-root", str(REPO_ROOT),
+                   "--allow-capabilities", "write")
+    assert refused.returncode == 2 and "--sandbox" in refused.stderr
+    # A read-only adapter is unaffected: it has no agent to confine, so demanding the flag would be noise.
+    ro = tmp_path / "ro.py"
+    ro.write_text(_ADAPTER)
+    assert _run(state, "run", "--adapters", str(ro), "--repo-root", str(REPO_ROOT)).returncode == 0
+
+
+def test_sandbox_flag_builds_a_runner_and_refuses_an_unknown_name() -> None:
+    from loop_adapters.single_agent import BubblewrapSandbox
+    assert isinstance(cs_loop._sandbox_from("bubblewrap"), BubblewrapSandbox)
+    assert cs_loop._sandbox_from("none") is None and cs_loop._sandbox_from(None) is None
+    with pytest.raises(cs_loop.LoopStateError):
+        cs_loop._sandbox_from("chroot")  # never silently degrade an unknown sandbox to "no sandbox"
 
 
 def test_run_exit_codes_distinguish_the_outcome(tmp_path: Path) -> None:

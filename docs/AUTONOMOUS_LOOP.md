@@ -114,10 +114,13 @@ may *do*:
   **never merges**: `write_gh` allows `pr create` + reads but refuses `pr merge` (and every other
   mutation), and `dangerous=True` escalates the merge gate - a human reviews + merges the PR. Any failure
   (a diff that won't apply, a drifted apply, a denied path, a secret, a blocked candidate, a failed
-  PR-create) fails closed and both worktrees are disposed; the main tree is left pristine. **Not yet
-  production-safe:** a persistent-worktree correction loop + independent reviewer (7.1.2b), exact candidate
-  identity (7.1.3), crash recovery + draft PRs (7.1.4), and a live canary + local dynamic sandbox (7.1.5)
-  must land before 7.1 runs against a real repository.
+  PR-create) fails closed and both worktrees are disposed; the main tree is left pristine. The mandated
+  sequence has landed - candidate assurance (7.1.2), exact candidate identity (7.1.3), crash-resumable
+  idempotent DRAFT publish (7.1.4), and the verified sandbox seam (7.1.5) - and the runtime has since
+  produced real draft PRs against a foreign repository, driven end-to-end through `cs_loop run`. **What
+  that does and does not prove:** it is *canary* evidence from a throwaway target, not a warrant for
+  unattended use. Every published candidate is still a DRAFT a human reviews and merges, CI is still the
+  only executor of candidate code, and the surface is still bounded by an operator-owned target profile.
 - The **autonomous merge** path (Phase 7.2) - evidence-bound `merge_gate` + the obligation-resolution
   producer - remains future, review-gated, and needs its own explicit authorization; its seams
   (`expected_head`, `required_checks`, the head-scope impact) already exist. All adapter code is under the
@@ -129,6 +132,14 @@ may *do*:
   boundary the #7 write-runtime is gated behind (it complements, never replaces, the merge gate).
   Additionally, a **write-capable + multi-agent** context with no `verify_paths` is refused at
   construction (a delegated wave that can write must not fall back to agent self-report).
+- **Sandbox gate.** A write-capable adapter is *also* refused without an explicit
+  `--sandbox {bubblewrap,none}`. The seam, its verification and the confined HOME all existed while being
+  UNREACHABLE from the CLI - `build_context()` was called without a sandbox, so an operator driving the
+  shipped entrypoint silently got an **unsandboxed** agent. Opting into `write` is therefore not enough:
+  the confinement an untrusted agent gets must be a stated decision, never the weaker default. `bubblewrap`
+  is PROVEN to confine before the agent runs (a planted canary outside the bound surfaces must be
+  unreadable) and is REFUSED if it cannot, so it never silently degrades; `none` accepts cwd +
+  sanitized-env + confined-HOME confinement, which is defence in depth and **not** a boundary.
 - **Exit-code taxonomy** (so automation reads the outcome without parsing stdout): `cs_loop run` →
   `0` FINALIZE, `3` HELD (paused on CI), `4` ESCALATED, `5` STOPPED; `campaign` → `6` when not every goal
   finalized; `2` is a fail-closed refusal throughout.

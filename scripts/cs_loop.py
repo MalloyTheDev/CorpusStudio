@@ -335,6 +335,34 @@ def _enforce_capabilities(ctx, allowed):  # noqa: ANN001,ANN202 - a LoopContext
     return ctx
 
 
+def _sandbox_from(name: str | None):  # noqa: ANN202 - a SandboxRunner
+    """Build the OS sandbox the operator asked for. Constructing it does NOT trust it: the adapter
+    VERIFIES that it actually confines before the agent runs (a sandbox that runs but does not isolate is
+    worse than none, because an operator would grant unattended use on the strength of it)."""
+    if name in (None, "none"):
+        return None
+    if name == "bubblewrap":
+        from loop_adapters.single_agent import BubblewrapSandbox
+        return BubblewrapSandbox()
+    raise LoopStateError(f"unknown --sandbox {name!r}")
+
+
+def _require_sandbox_for_write(ctx, sandbox_choice: str | None) -> None:  # noqa: ANN001
+    """A WRITE-capable run must make an explicit sandbox decision.
+
+    The sandbox seam, its verification and the confined HOME all existed and were UNREACHABLE from this
+    entrypoint - `build_context(repo_root, base)` never passed one - so an operator using the shipped CLI
+    silently got an UNSANDBOXED agent. That is the same shape as the earlier `--ci-attested-safe` gap: a
+    control that exists, is tested, and cannot be turned on. Refusing an unstated choice makes the
+    decision visible instead of defaulting to the weaker one."""
+    from loop.orchestrate import LoopContext, WRITE_CAPABILITIES
+    if isinstance(ctx, LoopContext) and (ctx.capabilities & WRITE_CAPABILITIES) and sandbox_choice is None:
+        raise LoopStateError(
+            "a write-capable adapter needs an explicit --sandbox choice (bubblewrap|none): the agent is "
+            "untrusted and the confinement it gets must be a decision, not a default. Use "
+            "--sandbox bubblewrap for OS isolation, or --sandbox none to accept cwd/env confinement only.")
+
+
 def _build_context(module, args: argparse.Namespace):  # noqa: ANN001,ANN202 - a LoopContext
     """Call the adapter's ``build_context(repo_root, base)``, additionally passing the operator's
     ``--ci-attested-safe`` assertion IF that adapter accepts it.
@@ -349,6 +377,7 @@ def _build_context(module, args: argparse.Namespace):  # noqa: ANN001,ANN202 - a
         "ci_attested_safe": bool(getattr(args, "ci_attested_safe", False)),
         "profile": getattr(args, "target_profile", None),
         "assurance_root": getattr(args, "assurance_root", None),
+        "sandbox": _sandbox_from(getattr(args, "sandbox", None)),
     }
     try:
         params = inspect.signature(module.build_context).parameters
@@ -362,7 +391,9 @@ def _build_context(module, args: argparse.Namespace):  # noqa: ANN001,ANN202 - a
 
 def _context(args: argparse.Namespace):  # noqa: ANN202 - a LoopContext
     ctx = _build_context(_load_adapters(args.adapters), args)
-    return _enforce_capabilities(_wire_ledger(ctx, _default_ledger(args)), _allowed_capabilities(args))
+    ctx = _enforce_capabilities(_wire_ledger(ctx, _default_ledger(args)), _allowed_capabilities(args))
+    _require_sandbox_for_write(ctx, getattr(args, "sandbox", None))
+    return ctx
 
 
 def _cmd_run(args: argparse.Namespace) -> int:
@@ -490,6 +521,12 @@ def main(argv: list[str] | None = None) -> int:
         p.add_argument("--ledger", default="",
                        help="cross-goal learning ledger JSON (default: <git-dir>/corpusstudio-loop/ledger.json)")
         p.add_argument("--max-steps", type=int, default=200)
+        p.add_argument("--sandbox", choices=("bubblewrap", "none"),
+                       help="OS isolation for the untrusted agent. REQUIRED for a write-capable adapter - "
+                            "the confinement an agent gets must be an explicit decision, not a default. "
+                            "'bubblewrap' is verified to actually confine before the agent runs (it is "
+                            "refused if it cannot); 'none' accepts cwd + sanitized-env + confined-HOME "
+                            "confinement only, which is defence in depth, NOT a boundary.")
         p.add_argument("--target-profile", metavar="NAME_OR_PATH",
                        help="the TARGET PROFILE naming what the loop may change in this repository "
                             "(a name under scripts/loop/profiles/, or a path). Operator-owned and read "
