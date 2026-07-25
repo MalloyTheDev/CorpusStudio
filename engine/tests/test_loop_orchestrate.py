@@ -20,7 +20,13 @@ if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
 from loop.controller import Decision, LoopState, Observation, Phase  # noqa: E402
-from loop.orchestrate import LoopContext, LoopOrchestrateError, run_loop, step  # noqa: E402
+from loop.orchestrate import (  # noqa: E402
+    LoopContext,
+    LoopOrchestrateError,
+    _verify_completeness,
+    run_loop,
+    step,
+)
 from loop.router import AgentResult  # noqa: E402
 from loop.tasks import decompose  # noqa: E402
 
@@ -555,3 +561,62 @@ def test_run_loop_seeds_and_records_the_learning_ledger(tmp_path: Path) -> None:
     assert state.current_phase is Phase.FINALIZE  # finalized on evidence-bound completion
     assert "sha256:prior-dead-end" in state.failed_approaches  # seeded from the ledger
     assert json.loads(ledger.read_text())[-1]["goal"] == "g1"  # this goal recorded for the next
+
+
+# --------------------------------------------------- task lifecycle + completion honesty (independent review)
+
+
+def test_a_raising_executor_leaves_the_task_re_dispatchable(tmp_path) -> None:
+    """MEASURED by an independent review: `_execute` set the task ACTIVE then called the executor; when the
+    executor RAISED (every write-adapter safety refusal does), the status was never updated. ACTIVE is
+    neither PENDING (ready_tasks skips it) nor DONE (_all_done is False), so the agent could NEVER be
+    re-invoked - the first time any guard fired, the goal became permanently unexecutable. That is exactly
+    the operational pressure that gets safety guards loosened."""
+    calls = {"n": 0}
+
+    def executor(state: LoopState, directive):  # noqa: ANN001,ANN202
+        if state.current_phase is Phase.DECOMPOSE and not state.task_graph:
+            state.task_graph = [{"id": "t1", "description": "d", "owner": "self",
+                                 "allowed_paths": [], "depends_on": [], "status": "PENDING"}]
+            return Observation.SUCCESS
+        if state.current_phase is not Phase.EXECUTE:
+            return Observation.SUCCESS
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise LoopOrchestrateError("a safety refusal (e.g. a denied path)")
+        return Observation.SUCCESS
+
+    state = LoopState(goal="g", goal_id="g1", current_phase=Phase.RECEIVE_GOAL)
+    ctx = LoopContext(repo_root=tmp_path, executor=executor, run_cs_assure=_cs_assure())
+    run_loop(state, ctx, max_steps=40)
+    # the refusal escalates (fail-closed, terminal for THIS run) - the bug was the state it left behind
+    assert state.current_phase is Phase.ESCALATED
+    statuses = {t["id"]: t["status"] for t in state.task_graph}
+    assert statuses["t1"] == "PENDING", (
+        f"a raising executor left the task {statuses['t1']!r}; ACTIVE is neither re-dispatchable nor done, "
+        "so the agent could never be re-invoked and the goal was permanently unexecutable")
+    # RESUME (what a human does after diagnosing): the executor must actually run again
+    before = calls["n"]
+    state.current_phase = Phase.EXECUTE
+    state.termination_reason = None
+    step(state, ctx)
+    assert calls["n"] > before, "the executor was never re-invoked on resume"
+
+
+def test_finalize_refuses_while_a_task_is_not_done(tmp_path) -> None:
+    """MEASURED by an independent review through the real CLI: a goal whose task FAILED (the write adapter
+    refused the candidate, nothing published) still reached FINALIZE with 'completion criteria satisfied'
+    and exit 0 once a human granted the sign-off criterion - the loop claiming success for work it never
+    did. An unfinished task graph is an unmet criterion, whatever the critic says."""
+    state = LoopState(goal="g", goal_id="g1", current_phase=Phase.VERIFY)
+    state.task_graph = [{"id": "t1", "description": "d", "owner": "self",
+                         "allowed_paths": [], "depends_on": [], "status": "FAILED"}]
+    ctx = LoopContext(repo_root=tmp_path, executor=lambda s, d: Observation.SUCCESS,
+                      critic=lambda s: [], run_cs_assure=_cs_assure())
+    observation, reason = _verify_completeness(state, ctx, Observation.SUCCESS, "gate green")
+    assert observation is Observation.AUTHORIZATION_REQUIRED
+    assert "not DONE" in reason and "t1" in reason
+    # ...and with the task DONE the task-graph objection is gone (any residual verdict comes from the
+    # critic, which is a separate concern)
+    state.task_graph[0]["status"] = "DONE"
+    assert "not DONE" not in _verify_completeness(state, ctx, Observation.SUCCESS, "gate green")[1]

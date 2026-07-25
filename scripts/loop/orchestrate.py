@@ -260,6 +260,17 @@ def _verify_completeness(state: LoopState, ctx: LoopContext, observation: Observ
     if ctx.critic is None:
         return (Observation.AUTHORIZATION_REQUIRED,
                 "gate green but no completeness evaluator - goal completion is unproven")
+    # THE TASK GRAPH IS PART OF COMPLETION. `_all_done` was consulted only inside `_execute`, so a goal
+    # whose task FAILED (e.g. the write adapter refused the candidate and nothing was ever published) could
+    # still reach FINALIZE with "completion criteria satisfied" and exit 0 once a human granted the
+    # sign-off criterion - the loop reporting success for work it never did. Measured end-to-end through
+    # the real CLI. An unfinished task graph is an unmet criterion, whatever the critic says.
+    unfinished = sorted(t.get("id", "?") for t in state.task_graph
+                        if isinstance(t, dict) and t.get("status") != TaskStatus.DONE.value)
+    if unfinished:
+        return (Observation.AUTHORIZATION_REQUIRED,
+                f"gate green but {len(unfinished)} task(s) are not DONE: {unfinished}; "
+                "the goal is not complete (a failed/blocked task is not a finished goal)")
     verdict = check_completeness(state, ctx.critic)
     if not verdict.complete:
         _append_completeness_tasks(state, verdict)
@@ -284,7 +295,11 @@ def _execute(state: LoopState, ctx: LoopContext, directive: Directive) -> PhaseR
             # then map its result via the shared status_for (SUCCESS->DONE, PROGRESS->PENDING, else FAILED).
             task = unbounded_ready[0]
             set_status(state, task.id, TaskStatus.ACTIVE)
-            observation = ctx.executor(state, next_directive(state))
+            try:  # a raising executor must leave the task RE-DISPATCHABLE, not stranded at ACTIVE
+                observation = ctx.executor(state, next_directive(state))
+            except Exception:
+                set_status(state, task.id, TaskStatus.PENDING)
+                raise
             status = status_for(observation)
             set_status(state, task.id, status)
             if status is TaskStatus.FAILED:
@@ -320,7 +335,17 @@ def _execute(state: LoopState, ctx: LoopContext, directive: Directive) -> PhaseR
         # so the loop NEVER advances / finalizes with a task left PENDING (external review #4).
         for task in ready_tasks(parse_tasks(state.task_graph)):
             set_status(state, task.id, TaskStatus.ACTIVE)
-            observation = ctx.executor(state, next_directive(state))
+            # A RAISING executor must not strand the task at ACTIVE. ACTIVE is neither PENDING (so
+            # ready_tasks() skips it) nor DONE (so _all_done is False), so the agent could never be
+            # re-invoked and the goal became permanently unexecutable - measured: the FIRST time any
+            # write-adapter guard fired (a denied path, a transient `gh` failure), every later EXECUTE
+            # returned CHANGES_REQUESTED without calling the executor at all. A refusal has to leave the
+            # task RE-DISPATCHABLE so the loop can diagnose and try again.
+            try:
+                observation = ctx.executor(state, next_directive(state))
+            except Exception:
+                set_status(state, task.id, TaskStatus.PENDING)
+                raise
             status = status_for(observation)
             set_status(state, task.id, status)
             if status is TaskStatus.FAILED:
