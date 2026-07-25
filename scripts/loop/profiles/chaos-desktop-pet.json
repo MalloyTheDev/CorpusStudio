@@ -1,6 +1,9 @@
 {
   "name": "chaos-desktop-pet",
   "description": "github.com/MalloyTheDev/chaos-desktop-pet - a throwaway canary target. No CI, so nothing executes a pushed candidate; the surface is its Python source under src/. No worker closure (no ML worker exists) and no obligations policy of its own.",
-  "writable_globs": ["src/**/*.py"],
-  "require_worker_reachability": false
+  "writable_globs": [
+    "src/**/*.py"
+  ],
+  "require_worker_reachability": false,
+  "obligations_policy": "policies/generic.json"
 }

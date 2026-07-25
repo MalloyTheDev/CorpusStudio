@@ -84,6 +84,15 @@ class TargetProfile:
     def basename_ok(self, basename: str) -> bool:
         return bool(self._basename_re.match(basename))
 
+    def resolved_policy(self) -> Path | None:
+        """The obligations policy as an ABSOLUTE path, resolved against the profile directory unless it is
+        already absolute. Operator-owned by construction: the target repo cannot supply or edit it, which
+        is what lets a repo with no assurance tooling of its own still be judged."""
+        if not self.obligations_policy:
+            return None
+        path = Path(self.obligations_policy)
+        return path if path.is_absolute() else (PROFILE_DIR / path).resolve()
+
 
 def load_profile(source: str | Path) -> TargetProfile:
     """Load a profile by NAME (from the shipped ``scripts/loop/profiles/``) or by explicit path.

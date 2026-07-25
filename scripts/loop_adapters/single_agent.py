@@ -361,10 +361,11 @@ CONSTRAINTS (a proposal violating any of these is refused by the runtime, so do 
 Read the code first (Read/Grep/Glob are available; you cannot edit, run shell, or reach the network).
 
 Reply with ONE JSON object and NOTHING else:
-{{"unified_diff": "<a unified diff that applies with `git apply` at the repository root>",
+{{"files": {{"<repo-relative path>": "<the COMPLETE new contents of that file>"}},
   "rationale": "<one or two sentences on what you changed and why>"}}
 
-The diff must use `--- a/<path>` and `+++ b/<path>` headers with correct @@ hunks."""
+Give the ENTIRE file, not a fragment and not a diff - the runtime computes the diff itself with git.
+Preserve everything you are not deliberately changing, byte for byte."""
 
 
 def render_prompt(request: dict[str, Any]) -> str:
@@ -409,18 +410,48 @@ def _unwrap_envelope(stdout: str) -> Any:
         raise AgentError(f"the agent's reply is not one JSON object: {exc}") from exc
 
 
-def _validate_proposal(raw: Any) -> tuple[str, str]:
-    """Fail-closed validation of the agent's response into ``(unified_diff, rationale)``. Untrusted input:
-    a non-dict, a missing/non-string ``unified_diff``, or a non-string ``rationale`` all raise."""
+# A repo-relative path the agent may name. Anything absolute, parent-traversing, or `.git`-adjacent is
+# refused BEFORE anything is written - the classifier would catch it afterwards, but nothing untrusted
+# should reach the filesystem on the strength of "we will check later".
+_SAFE_REL_PATH = re.compile(r"[A-Za-z0-9_.][A-Za-z0-9_./-]*\Z")
+_MAX_FILE_BYTES = 1 << 20
+
+
+def _validate_proposal(raw: Any) -> tuple[dict[str, str], str]:
+    """Fail-closed validation of the agent's response into ``({path: contents}, rationale)``.
+
+    THE AGENT RETURNS WHOLE FILES, NOT A DIFF. Measured on the first real write run: the model emitted
+    `@@ -1,5 +1,17 @@` for a hunk whose body held 20 new lines, and `git apply` refused it as a corrupt
+    patch. LLMs are unreliable at hunk arithmetic and reliable at producing file content, and the runtime
+    has not needed the model's diff since 7.1.3 - classification reads the REALIZED TREE, and the sealed
+    record can carry a diff GIT computed, which is authoritative rather than model-authored.
+
+    Untrusted input: a non-dict, a missing/empty ``files`` map, a non-string path or content, an unsafe or
+    traversing path, or an oversized file all raise."""
     if not isinstance(raw, dict):
         raise AgentError(f"agent response is not an object (got {type(raw).__name__})")
-    diff = raw.get("unified_diff")
-    if not isinstance(diff, str):
-        raise AgentError("agent response has no string 'unified_diff'")
+    files = raw.get("files")
+    if not isinstance(files, dict) or not files:
+        raise AgentError("agent response has no non-empty 'files' object")
+    clean: dict[str, str] = {}
+    for path, content in files.items():
+        if not isinstance(path, str) or not isinstance(content, str):
+            raise AgentError(f"agent response has a non-string path/content entry: {path!r}")
+        # NB: never `lstrip("./")` here - it strips a CHARACTER SET, so "../escape.py" becomes
+        # "escape.py" and traversal is silently normalized away instead of refused. Segments are
+        # inspected explicitly instead.
+        norm = path.replace("\\", "/")
+        segments = norm.split("/")
+        if (norm.startswith("/") or not _SAFE_REL_PATH.match(norm)
+                or any(seg in ("", ".", "..") for seg in segments) or segments[0] == ".git"):
+            raise AgentError(f"agent named an unsafe path {path!r}")
+        if len(content.encode("utf-8", "replace")) > _MAX_FILE_BYTES:
+            raise AgentError(f"agent returned {path!r} larger than {_MAX_FILE_BYTES} bytes")
+        clean[norm] = content
     rationale = raw.get("rationale", "")
     if not isinstance(rationale, str):
         raise AgentError("agent response 'rationale' is not a string")
-    return diff, rationale
+    return clean, rationale
 
 
 # The read-only tool policy for the PROPOSE phase: the agent may inspect the checkout but not edit it, run
@@ -482,8 +513,8 @@ class ClaudeSubprocessClient:
             raise AgentError(f"claude output exceeded {self.max_output_bytes} bytes; refusing oversized output")
         if proc.returncode != 0:
             raise AgentError(f"claude exited {proc.returncode}: {proc.stderr.strip()[:200]}")
-        diff, rationale = _validate_proposal(_unwrap_envelope(proc.stdout))
-        return {"unified_diff": diff, "rationale": rationale}
+        files, rationale = _validate_proposal(_unwrap_envelope(proc.stdout))
+        return {"files": files, "rationale": rationale}
 
 
 def _changed_paths_of(unified_diff: str) -> list[str]:
@@ -558,7 +589,19 @@ def _make_executor(agent_client: AgentClient, repo_root: Path, base: str, propos
                        "directive": {"phase": directive.phase, "action": directive.action,
                                      "allowed_paths": list(directive.allowed_paths)}}
             result = agent_client.propose(request)  # RAISES on failure -> step escalates (fail-closed)
-        diff, rationale = _validate_proposal(result)
+            files, rationale = _validate_proposal(result)
+            # The agent returns WHOLE FILES; materialise them in the DISPOSABLE worktree and let GIT
+            # produce the diff for the sealed record. Still zero writes to the repository - this tree is
+            # thrown away - but the recorded diff is authoritative rather than model-authored, and the
+            # model is never asked to do hunk arithmetic it gets wrong.
+            for rel, content in files.items():
+                dest = (wt / rel).resolve()
+                if not str(dest).startswith(str(wt.resolve()) + "/"):
+                    raise AgentError(f"agent path {rel!r} resolves outside the disposable worktree")
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                dest.write_text(content, encoding="utf-8")
+            _git(wt, "add", "-A")
+            diff = _git(wt, "diff", "--cached", "--no-renames", "--full-index").stdout
         record = _seal_proposal({"goal_id": state.goal_id, "base_oid": base_oid, "unified_diff": diff,
                                  "changed_paths": _changed_paths_of(diff), "rationale": rationale})
         # Persist the sealed proposal OUTSIDE the working tree (content-addressed) and reference it.

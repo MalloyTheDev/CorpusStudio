@@ -700,7 +700,10 @@ def _assure_candidate(wt: Path, base_oid: str, run_cs_assure: Any, changed_paths
     # the classified one (measured: it fired obligations belonging to someone else's merged commit).
     argv = ["impact", "--scope", "head", "--base", base_oid]
     if profile.obligations_policy:
-        argv += ["--policy", profile.obligations_policy]
+        # Resolved against the PROFILE's own directory (operator-owned) and passed ABSOLUTE, so the
+        # candidate is judged by a policy it cannot supply or edit. A target repo need not carry any
+        # assurance tooling of its own - which is the normal case for anything but CorpusStudio.
+        argv += ["--policy", str(profile.resolved_policy())]
     code, out, err = run_cs_assure(wt, *argv)
     if code != 0:
         raise WriteAdapterError(f"candidate impact refused (exit {code}): {err.strip()[:200]}")
@@ -780,16 +783,27 @@ def _record_candidate_assurance(state: LoopState, record: dict[str, Any], branch
     }
 
 
-_PR_DISCLOSURE = (
-    "> **Machine-authored, NOT yet human-reviewed.** Opened autonomously by the CorpusStudio "
-    "single-agent write runtime (7.1). Only STATIC candidate assurance has run; the dynamic gate runs in "
-    "CI on this PR, and a human reviews and merges. Read the diff on that basis.\n\n")
+def _target_has_ci(repo_root: Path) -> bool:
+    """Does this repository have CI that will run on the pushed branch?"""
+    wf = repo_root / ".github" / "workflows"
+    return wf.is_dir() and any(wf.glob("*.yml")) or (wf.is_dir() and any(wf.glob("*.yaml")))
 
 
-def _pr_body(rationale: str) -> str:
-    """The PR body, led by the machine-authored disclosure. The commit message alone was not enough: the
-    PR is what a reviewer reads first, and an autonomously-opened PR must SAY so where it is seen."""
-    return _PR_DISCLOSURE + (rationale or "_No rationale supplied by the agent._")
+def _pr_body(rationale: str, has_ci: bool) -> str:
+    """The PR body, led by a disclosure that is TRUE FOR THIS TARGET.
+
+    The first version hardcoded "the dynamic gate runs in CI on this PR" - and the very first real run
+    published to a repository with NO CI AT ALL, so the disclosure asserted a check that would never
+    happen. A disclosure a reviewer relies on must not overclaim; where nothing will run, it says so, and
+    the reviewer knows the diff is all the assurance there is."""
+    dynamic = ("the dynamic gate (lint/type/tests) runs in CI on this PR"
+               if has_ci else
+               "**this repository has no CI, so NOTHING will run these changes** - static assurance and "
+               "your reading of the diff are the only checks")
+    return ("> **Machine-authored, NOT yet human-reviewed.** Opened autonomously by the CorpusStudio "
+            "single-agent write runtime (7.1). Only STATIC candidate assurance has run; "
+            f"{dynamic}, and a human reviews and merges. Read the diff on that basis.\n\n"
+            + (rationale or "_No rationale supplied by the agent._"))
 
 
 def _verify_commit_identity(wt: Path, commit: str, tree_oid: str, base_oid: str) -> None:
@@ -935,23 +949,37 @@ def _make_write_executor(agent_client: AgentClient, repo_root: Path, base: str, 
                                    "max_changed_bytes": profile.max_changed_bytes},
                        "directive": {"phase": directive.phase, "action": directive.action,
                                      "allowed_paths": list(directive.allowed_paths)}}
-            diff, rationale = _validate_proposal(agent_client.propose(request))  # RAISES -> fail-closed
-        record = _seal_proposal({"goal_id": state.goal_id, "base_oid": base_oid, "unified_diff": diff,
-                                 "changed_paths": _changed_paths_of(diff),  # descriptive ONLY - never a gate
-                                 "rationale": rationale})
-        proposal_path = _write_proposal_record(proposals_dir, record)  # content-addressed, OUTSIDE the tree
+            files, rationale = _validate_proposal(agent_client.propose(request))  # RAISES -> fail-closed
+        record_files = files
 
         branch = f"{branch_prefix}{_sanitize_branch_suffix(state.goal_id)}"
         # 2) APPLY + CLASSIFY + ASSURE in a pristine DETACHED worktree the agent never touched, so the
         #    commit is deterministically the sealed diff and nothing else; publish only if it is clear.
         with _apply_worktree(repo_root, base_oid, worktrees_dir) as wt:
-            # `git apply` itself refuses `../`, `.git/`, `.GIT/`, `git~1/` and beyond-a-symlink paths, so a
-            # candidate cannot write outside the worktree (we never pass --directory/--unsafe-paths/-p0).
-            _git(wt, "apply", "--index", "-", stdin=diff)
+            # MATERIALISE the agent's files, then let GIT compute the diff. The model used to be asked
+            # for a unified diff and got the hunk arithmetic wrong (measured on the first real write run:
+            # `@@ -1,5 +1,17 @@` over a 20-line body -> "corrupt patch at line 24"). Paths were already
+            # validated as safe repo-relative names; each is re-resolved against the worktree root here so
+            # nothing can escape it even if that validation is ever loosened.
+            for rel, content in record_files.items():
+                dest = (wt / rel).resolve()
+                if not str(dest).startswith(str(wt.resolve()) + "/"):
+                    raise WriteAdapterError(f"agent path {rel!r} resolves outside the candidate worktree")
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                dest.write_text(content, encoding="utf-8")
+            _git(wt, "add", "-A")
             # 3) CAPTURE THE IDENTITY. write-tree freezes the staged content as an immutable object; every
             #    later step is expressed against THIS oid, so the thing classified, committed, assured and
             #    pushed is provably one object rather than four that happened to agree.
             tree_oid = _git(wt, "write-tree").stdout.strip()
+            # The sealed record carries the diff GIT produced from the realized tree - authoritative,
+            # rather than whatever the model claimed its change was.
+            diff = _git(wt, "diff-tree", "-p", "--no-renames", "--full-index", base_oid, tree_oid).stdout
+            record = _seal_proposal({"goal_id": state.goal_id, "base_oid": base_oid, "unified_diff": diff,
+                                     "changed_paths": _changed_paths_of(diff),
+                                     "agent_files": sorted(record_files),
+                                     "rationale": rationale})
+            proposal_path = _write_proposal_record(proposals_dir, record)
             violations = _classify_candidate_changes(wt, base_oid, tree_oid, profile)
             violations += (_scan_text(rationale, "the rationale", profile.max_rationale_bytes)
                            + _scan_text(state.goal or "", "the goal", profile.max_rationale_bytes))
@@ -1050,7 +1078,7 @@ def _make_write_executor(agent_client: AgentClient, repo_root: Path, base: str, 
                 # STRUCTURAL signal that survives a body edit - unlike the text disclosure alone.
                 code, pr_out, err = gh_runner("pr", "create", "--draft", "--head", branch, "--base", base,
                                               "--title", (state.goal or "agent change")[:120],
-                                              "--body", _pr_body(rationale))
+                                              "--body", _pr_body(rationale, _target_has_ci(repo_root)))
                 if code != 0:
                     raise WriteAdapterError(f"gh pr create failed (exit {code}): {err.strip()[:200]}")
             _journal_write(journal, "PR_OPENED", pr_url=pr_out.strip())

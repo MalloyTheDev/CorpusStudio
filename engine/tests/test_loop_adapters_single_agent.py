@@ -26,12 +26,13 @@ import loop_adapters.single_agent as sa  # noqa: E402
 from loop.controller import LoopState, Phase  # noqa: E402
 from loop.orchestrate import run_loop  # noqa: E402
 
+_FILES = {"README.md": "new\n"}          # the agent returns WHOLE FILES; git computes the diff
 _DIFF = "--- a/README.md\n+++ b/README.md\n@@ -1 +1 @@\n-old\n+new\n"
 
 
 class _StubAgent:
     def __init__(self, response: dict | None = None) -> None:
-        self.response = response if response is not None else {"unified_diff": _DIFF, "rationale": "tweak"}
+        self.response = response if response is not None else {"files": _FILES, "rationale": "tweak"}
         self.calls = 0
         self.seen_cwd: str | None = None
         self.cwd_was_dir: bool | None = None
@@ -144,13 +145,13 @@ def test_the_sealed_proposal_record_verifies(tmp_path: Path) -> None:
     envelope = {k: v for k, v in record.items() if k != "record_digest"}
     redigest = hashlib.sha256(json.dumps(envelope, sort_keys=True, ensure_ascii=True).encode("utf-8")).hexdigest()
     assert record["record_digest"] == f"sha256:{redigest}"
-    assert record["payload"]["unified_diff"] == _DIFF
+    assert "README.md" in record["payload"]["unified_diff"]   # git-computed, not model-authored
 
 
 def test_a_malformed_agent_response_fails_closed(tmp_path: Path) -> None:
     # untrusted output: a non-string unified_diff must RAISE (AgentError) -> the loop escalates, never
     # advances on garbage and never applies anything.
-    state = _run(tmp_path, _StubAgent({"unified_diff": 123, "rationale": "x"}))
+    state = _run(tmp_path, _StubAgent({"files": 123, "rationale": "x"}))
     assert state.current_phase is Phase.ESCALATED
     assert "AgentError" in (state.termination_reason or "")
 
@@ -162,8 +163,12 @@ def test_validate_proposal_is_fail_closed() -> None:
     with pytest.raises(sa.AgentError):
         sa._validate_proposal(["not", "a", "dict"])
     with pytest.raises(sa.AgentError):
-        sa._validate_proposal({"rationale": "no diff"})
-    assert sa._validate_proposal({"unified_diff": "d", "rationale": "r"}) == ("d", "r")
+        sa._validate_proposal({"rationale": "no files"})
+    with pytest.raises(sa.AgentError):                       # traversal is refused BEFORE any write
+        sa._validate_proposal({"files": {"../escape.py": "x"}})
+    with pytest.raises(sa.AgentError):
+        sa._validate_proposal({"files": {".git/config": "x"}})
+    assert sa._validate_proposal({"files": {"a.py": "c"}, "rationale": "r"}) == ({"a.py": "c"}, "r")
 
 
 def test_changed_paths_of_ignores_dev_null() -> None:
@@ -206,10 +211,10 @@ def test_claude_subprocess_client_parses_and_validates_a_good_response(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     # the REAL envelope: the agent's payload is nested in `result` as a string (see _REAL_ENVELOPE)
     good = json.dumps({"type": "result", "subtype": "success", "is_error": False,
-                       "result": json.dumps({"unified_diff": "d", "rationale": "r", "extra": "ignored"})})
+                       "result": json.dumps({"files": {"a.py": "c"}, "rationale": "r", "extra": "ignored"})})
     monkeypatch.setattr(sa.subprocess, "run", lambda *a, **k: _FakeProc(0, good))
     got = sa.ClaudeSubprocessClient().propose({"goal": "g", "_cwd": str(tmp_path)})
-    assert got == {"unified_diff": "d", "rationale": "r"}
+    assert got == {"files": {"a.py": "c"}, "rationale": "r"}
 
 
 def test_claude_subprocess_client_fails_closed_on_a_nonzero_exit(
@@ -267,7 +272,7 @@ def test_the_subprocess_client_runs_with_a_sanitized_env_and_the_confined_cwd(
     def fake_run(*a: object, **k: object) -> _FakeProc:
         captured.update(k)
         return _FakeProc(0, json.dumps({"type": "result", "subtype": "success", "is_error": False,
-                                        "result": json.dumps({"unified_diff": "d", "rationale": "r"})}))
+                                        "result": json.dumps({"files": {"a.py": "c"}, "rationale": "r"})}))
 
     monkeypatch.setattr(sa.subprocess, "run", fake_run)
     sa.ClaudeSubprocessClient().propose({"goal": "g", "_cwd": str(tmp_path)})
@@ -380,7 +385,7 @@ def test_the_transport_wraps_the_agent_when_a_sandbox_is_supplied(tmp_path: Path
     def fake_run(a, **k):  # noqa: ANN001,ANN202
         seen["argv"] = list(a)
         return _FakeProc(0, json.dumps({"type": "result", "subtype": "success", "is_error": False,
-                                        "result": json.dumps({"unified_diff": "d", "rationale": "r"})}))
+                                        "result": json.dumps({"files": {"a.py": "c"}, "rationale": "r"})}))
     monkeypatch.setattr(sa.subprocess, "run", fake_run)
     client = sa.ClaudeSubprocessClient(sandbox=_Recording())
     client.propose({"goal": "g", "_cwd": str(tmp_path), "_home": str(tmp_path / "h")})
@@ -436,22 +441,22 @@ def _envelope(result_text: str, **over) -> str:
 
 
 def test_the_transport_unwraps_the_real_claude_envelope(tmp_path: Path, monkeypatch) -> None:
-    payload = json.dumps({"unified_diff": "--- a/x\n+++ b/x\n", "rationale": "r"})
+    payload = json.dumps({"files": {"x.py": "contents\n"}, "rationale": "r"})
     monkeypatch.setattr(sa.subprocess, "run", lambda *a, **k: _FakeProc(0, _envelope(payload)))
     got = sa.ClaudeSubprocessClient().propose({"goal": "g", "_cwd": str(tmp_path)})
-    assert got == {"unified_diff": "--- a/x\n+++ b/x\n", "rationale": "r"}
+    assert got == {"files": {"x.py": "contents\n"}, "rationale": "r"}
 
 
 def test_the_transport_accepts_a_single_markdown_fence(tmp_path: Path, monkeypatch) -> None:
     # models very often fence JSON; a single fence is unambiguous, anything else is refused
-    fenced = '```json\n{"unified_diff": "d", "rationale": "r"}\n```'
+    fenced = '```json\n{"files": {"a.py": "c"}, "rationale": "r"}\n```'
     monkeypatch.setattr(sa.subprocess, "run", lambda *a, **k: _FakeProc(0, _envelope(fenced)))
     assert sa.ClaudeSubprocessClient().propose({"goal": "g", "_cwd": str(tmp_path)})["rationale"] == "r"
 
 
 @pytest.mark.parametrize("stdout,why", [
     (_envelope("pong"), "prose instead of JSON"),
-    (_envelope('{"rationale": "r"}'), "no unified_diff"),
+    (_envelope('{"rationale": "r"}'), "no files"),
     (json.dumps({**_REAL_ENVELOPE, "is_error": True}), "the CLI reported an error"),
     (json.dumps({**_REAL_ENVELOPE, "subtype": "error_max_turns"}), "a non-success subtype"),
     (json.dumps({**_REAL_ENVELOPE, "result": None}), "result is not a string"),
@@ -472,7 +477,8 @@ def test_the_agent_is_actually_told_what_to_return_and_the_bounds() -> None:
                                "_limits": {"writable_globs": ["src/**/*.py"], "max_changed_paths": 2,
                                            "max_changed_lines": 60, "max_changed_bytes": 8192}})
     assert "tidy a docstring" in prompt
-    assert "unified_diff" in prompt and "rationale" in prompt
+    assert "files" in prompt and "rationale" in prompt
+    assert "COMPLETE new contents" in prompt   # whole files, never a diff
     assert "src/**/*.py" in prompt                      # the surface it may touch
     assert "MODIFY EXISTING FILES ONLY" in prompt       # the rule that refuses the most candidates
     # a request with no limits still renders, and says plainly that nothing is writable
