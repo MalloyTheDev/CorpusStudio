@@ -116,6 +116,12 @@ class LoopContext:
     multi_agent: bool = False
     couplings: tuple[DocCoupling, ...] = DEFAULT_COUPLINGS
     run_cs_assure: CsAssureRunner = _run_cs_assure
+    # Whether a gate the LOOP can run exists for this target. False for any repository that does not
+    # carry an assurance gate spec - the normal case once the loop is pointed at another repo. The loop
+    # then ESCALATES at OBSERVE/VERIFY instead of running a gate that does not exist (which failed with
+    # an opaque "gate spec could not be read", so a successful publish terminated on a misleading
+    # reason) and instead of assuming green (which would invent assurance it never performed).
+    local_gate: bool = True
     store_path: Path | None = None
     ledger_path: Path | None = None  # cross-goal learning ledger (seed at start, record at terminal)
     lock_timeout: float = DEFAULT_LOCK_TIMEOUT  # wait for the single-writer state-file lock before failing closed
@@ -421,6 +427,13 @@ def _dispatch(state: LoopState, ctx: LoopContext) -> PhaseResult:
         return _execute(state, ctx, directive)
 
     if phase in (Phase.OBSERVE, Phase.VERIFY):
+        if not ctx.local_gate:
+            # No gate exists here, so there is nothing honest to observe: the candidate's own assurance
+            # (recorded by the adapter) is the authority, and a human reviews what was published.
+            return PhaseResult(
+                Observation.AUTHORIZATION_REQUIRED,
+                "no local gate is configured for this target, so the loop cannot verify it here - "
+                "a human reviews the published candidate")
         result = observe(ctx.repo_root, ctx.base, run_cs_assure=ctx.run_cs_assure)
         record_evidence(state, result)  # structured evidence for the semantic completeness check
         observation, reason = result.observation, result.reason
@@ -524,6 +537,13 @@ def step(state: LoopState, ctx: LoopContext) -> Transition | None:
     if result.evidence is not None and result.evidence not in state.assurance_records:
         state.assurance_records.append(result.evidence)
     transition = apply(state, result.observation, fingerprint=result.fingerprint, note=result.note)
+    # A phase that RETURNS a non-success observation used to lose its reason entirely: the operator saw
+    # only "escalated on AUTHORIZATION_REQUIRED" while the phase had said exactly what was wrong and what
+    # to do. (A phase that RAISES kept its message, so the two paths reported very differently.) The
+    # reason is the whole point of an honest escalation, so it is preserved on the terminal state.
+    if state.is_terminal and result.note and result.note not in (state.termination_reason or ""):
+        state.termination_reason = f"{state.termination_reason}: {result.note}" \
+            if state.termination_reason else result.note
     if ctx.store_path is not None:
         save(state, ctx.store_path)
     return transition

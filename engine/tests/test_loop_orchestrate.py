@@ -620,3 +620,41 @@ def test_finalize_refuses_while_a_task_is_not_done(tmp_path) -> None:
     # critic, which is a separate concern)
     state.task_graph[0]["status"] = "DONE"
     assert "not DONE" not in _verify_completeness(state, ctx, Observation.SUCCESS, "gate green")[1]
+
+
+def test_a_target_with_no_local_gate_escalates_honestly(tmp_path) -> None:
+    """MEASURED on the first real foreign-repo run: after successfully publishing a draft PR, the loop
+    terminated with "gate spec could not be read" - an opaque failure about CorpusStudio's own tooling,
+    not about the thing the operator needs to do. Where no gate exists the loop must say so and escalate,
+    never invent a green signal for assurance it did not perform."""
+    ctx = LoopContext(repo_root=tmp_path, executor=lambda s, d: Observation.SUCCESS,
+                      local_gate=False, run_cs_assure=_cs_assure())
+    state = LoopState(goal="g", goal_id="g1", current_phase=Phase.OBSERVE)
+    step(state, ctx)
+    assert state.current_phase is Phase.ESCALATED
+    reason = (state.termination_reason or "") + " " + " ".join(state.blockers or [])
+    assert "no local gate" in reason and "human reviews" in reason
+    assert "gate spec could not be read" not in reason
+
+
+def test_a_target_WITH_a_local_gate_still_runs_it(tmp_path) -> None:
+    # the default is unchanged: CorpusStudio carries a gate spec and the loop runs it as before
+    ctx = LoopContext(repo_root=tmp_path, executor=lambda s, d: Observation.SUCCESS,
+                      run_cs_assure=_cs_assure())
+    assert ctx.local_gate is True
+    state = LoopState(goal="g", goal_id="g1", current_phase=Phase.OBSERVE)
+    step(state, ctx)
+    assert state.current_phase is not Phase.ESCALATED     # a green gate advances normally
+
+
+def test_a_returned_escalation_keeps_its_reason(tmp_path) -> None:
+    """A phase that RETURNS a non-success observation used to lose its reason entirely - the operator saw
+    only "escalated on AUTHORIZATION_REQUIRED" while the phase had said exactly what was wrong. A phase
+    that RAISES kept its message, so the two paths reported very differently. The reason IS the escalation."""
+    def executor(state: LoopState, directive):  # noqa: ANN001,ANN202
+        return Observation.POLICY_BLOCK
+    ctx = LoopContext(repo_root=tmp_path, executor=executor, run_cs_assure=_cs_assure())
+    state = LoopState(goal="g", goal_id="g1", current_phase=Phase.EXECUTE)
+    step(state, ctx)
+    assert state.current_phase is Phase.ESCALATED
+    assert "executed the change" in (state.termination_reason or ""), state.termination_reason

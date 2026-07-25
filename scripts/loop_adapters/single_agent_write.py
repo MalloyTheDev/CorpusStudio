@@ -113,6 +113,8 @@ _GH_TIMEOUT_S = 60
 # (measured: without this, identical content produced two different commit oids).
 _FIXED_DATE = "@0 +0000"
 
+_DEFAULT_GATE_RELPATH = "scripts/assurance/policy/gate.json"
+
 _CS_ASSURE_TIMEOUT_S = 1800  # a bounded cs_assure call (impact is fast; the dev-tree gate can take minutes)
 
 
@@ -1146,6 +1148,9 @@ def build_context(repo_root: Path | str, base: str = "main", *, agent_client: Ag
         "capabilities": frozenset({CAP_WRITE}),
         "gh_runner": gh,
         "run_cs_assure": assure,
+        # A gate the loop can run exists only if the profile names one, or the target carries the
+        # default spec itself (CorpusStudio does; a foreign repo does not).
+        "local_gate": bool(prof.resolved_gate()) or (root / _DEFAULT_GATE_RELPATH).is_file(),
         "dangerous": True,                  # the merge gate ESCALATES: a human merges the PR, never the loop
     }
     if pr_ref is not None:
