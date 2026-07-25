@@ -17,4 +17,4 @@ pydantic==2.13.4
 # enables new default rules turns a green tree red with no code change (ruff 0.16.0 flagged ~950
 # pre-existing findings: RUF100 / UP045 / B008 / I001 / ...). Bump intentionally: raise this pin in its own
 # PR that also resolves whatever the new ruff flags (or freezes an explicit rule set).
-ruff==0.15.21
+ruff==0.16.0
