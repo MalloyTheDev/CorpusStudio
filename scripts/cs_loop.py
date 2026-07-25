@@ -335,8 +335,26 @@ def _enforce_capabilities(ctx, allowed):  # noqa: ANN001,ANN202 - a LoopContext
     return ctx
 
 
+def _build_context(module, args: argparse.Namespace):  # noqa: ANN001,ANN202 - a LoopContext
+    """Call the adapter's ``build_context(repo_root, base)``, additionally passing the operator's
+    ``--ci-attested-safe`` assertion IF that adapter accepts it.
+
+    Kept signature-driven so the generic adapter contract stays ``build_context(repo_root, base)``: an
+    adapter that publishes (pushing hands the candidate to CI, which EXECUTES it before any human review)
+    declares a ``ci_attested_safe`` parameter and is refused unless the operator passes the flag. An
+    adapter without the parameter is unaffected."""
+    import inspect
+    kwargs = {}
+    try:
+        if "ci_attested_safe" in inspect.signature(module.build_context).parameters:
+            kwargs["ci_attested_safe"] = bool(getattr(args, "ci_attested_safe", False))
+    except (TypeError, ValueError):
+        pass  # un-introspectable callable: pass nothing, so the adapter keeps its fail-closed default
+    return module.build_context(Path(args.repo_root), args.base, **kwargs)
+
+
 def _context(args: argparse.Namespace):  # noqa: ANN202 - a LoopContext
-    ctx = _load_adapters(args.adapters).build_context(Path(args.repo_root), args.base)
+    ctx = _build_context(_load_adapters(args.adapters), args)
     return _enforce_capabilities(_wire_ledger(ctx, _default_ledger(args)), _allowed_capabilities(args))
 
 
@@ -408,7 +426,7 @@ def _cmd_campaign(args: argparse.Namespace) -> int:
             return _enforce_capabilities(_wire_ledger(gctx, ledger), allowed)  # per-goal capability gate
         outcomes = run_campaign(goals, context_for=context_for, store_dir=store_dir, max_steps=args.max_steps)
     else:
-        ctx = _enforce_capabilities(_wire_ledger(module.build_context(Path(args.repo_root), args.base),
+        ctx = _enforce_capabilities(_wire_ledger(_build_context(module, args),
                                                  ledger), allowed)
         outcomes = run_campaign(goals, ctx, store_dir=store_dir, max_steps=args.max_steps)
     _emit({"outcomes": [{"goal_id": o.goal_id, "final_phase": o.final_phase, "finalized": o.finalized,
@@ -465,6 +483,12 @@ def main(argv: list[str] | None = None) -> int:
         p.add_argument("--ledger", default="",
                        help="cross-goal learning ledger JSON (default: <git-dir>/corpusstudio-loop/ledger.json)")
         p.add_argument("--max-steps", type=int, default=200)
+        p.add_argument("--ci-attested-safe", action="store_true",
+                       help="operator attestation that CI can safely execute an agent-authored candidate "
+                            "(no credential-persisting checkout; no secret-bearing step in a job that runs "
+                            "candidate code). Pushing EXECUTES the candidate in CI BEFORE human review, and "
+                            "the loop cannot verify another system's CI - so a publishing adapter refuses "
+                            "without this. Default off (fail-closed).")
         p.add_argument("--allow-capabilities", nargs="*", default=[], metavar="CAP",
                        help="effect capabilities the adapter is PERMITTED to declare (e.g. write merge); "
                             "empty = read-only/propose-only only. A write-capable adapter is REFUSED "

@@ -183,7 +183,8 @@ def test_a_pr_create_failure_fails_closed(tmp_path: Path) -> None:
     def gh_refuses(*argv: str) -> tuple[int, str, str]:
         return (1, "", "gh: not authenticated") if argv[:2] == ("pr", "create") else (0, "", "")
     ctx = saw.build_context(root, "main", agent_client=_StubAgent(), proposals_dir=tmp_path / "p",
-                            worktrees_dir=tmp_path / "w", gh_runner=gh_refuses, run_cs_assure=_cs_assure_green())
+                            worktrees_dir=tmp_path / "w", gh_runner=gh_refuses,
+                            run_cs_assure=_cs_assure_green(), ci_attested_safe=True)
     state = LoopState(goal="g", goal_id="g1", current_phase=Phase.RECEIVE_GOAL)
     run_loop(state, ctx)
     assert state.current_phase is Phase.ESCALATED  # a failed PR-create escalates; the worktree is still disposed
@@ -492,3 +493,52 @@ def test_a_gh_failure_after_the_push_still_records_the_live_branch(tmp_path: Pat
     assert "cs-agent/g1" in _g(remote, "branch", "--list", "cs-agent/g1").stdout   # the branch IS live...
     ca = state.review_state["candidate_assurance"]                                  # ...and it is recorded
     assert ca["published"] is True and "PR not yet opened" in ca["reason"]
+
+
+def test_a_pre_existing_credential_shaped_line_does_not_brick_a_file(tmp_path: Path) -> None:
+    """HIGH (6th pass): the loose credential heuristic ran over the WHOLE blob, so cli.py - which already
+    contains `api_key: Optional[str] = typer.Option(` at main - could NEVER be edited, and could never fix
+    the line blocking it. High-confidence token formats still scan the whole blob (that is what catches a
+    `copy from`); the loose heuristic now only sees ADDED lines."""
+    root, _remote = _repo_with_remote(tmp_path)
+    target = root / _TARGET
+    target.write_text("api_key: Optional[str] = option(\nold = 1\n")   # pre-existing, credential-SHAPED
+    _g(root, "add", "-A")
+    _g(root, "commit", "-q", "-m", "pre-existing")
+    base = _g(root, "rev-parse", "HEAD").stdout.strip()
+    diff = (f"--- a/{_TARGET}\n+++ b/{_TARGET}\n@@ -1,2 +1,3 @@\n"
+            " api_key: Optional[str] = option(\n+# a docstring fix\n old = 1\n")
+    with saw._apply_worktree(root, base, tmp_path / "wt") as wt:
+        saw._git(wt, "apply", "--index", "-", stdin=diff)
+        assert saw._classify_candidate_changes(wt, base) == []      # the innocent edit is PUBLISHABLE
+    # ...but a real token the candidate ADDS is still refused
+    bad = (f"--- a/{_TARGET}\n+++ b/{_TARGET}\n@@ -1,2 +1,3 @@\n"
+           " api_key: Optional[str] = option(\n+K = \"gho_" + "a" * 36 + "\"\n old = 1\n")
+    with saw._apply_worktree(root, base, tmp_path / "wt") as wt:
+        saw._git(wt, "apply", "--index", "-", stdin=bad)
+        assert saw._classify_candidate_changes(wt, base)
+
+
+def test_ordinary_prose_and_code_are_not_flagged_as_secrets() -> None:
+    # false positives kill the rung: every one of these is innocent and must pass.
+    for ok in ("refactor the task-oriented-configuration helper",
+               "fix the disk-space-management-check docstring",
+               "api_key: Optional[str] = typer.Option(",
+               'password = os.environ["PW"]'):
+        assert saw._scan_text(ok, "the rationale") == [], ok
+    # ...while real credential shapes still fail closed
+    for bad in ("K = \"gho_" + "a" * 36 + "\"", "oauth_token: gho_" + "a" * 36,
+                'password = "hunter2hunter2"', "-----BEGIN RSA PRIVATE KEY-----"):
+        assert saw._scan_text(bad, "the rationale"), bad
+
+
+def test_the_cache_dir_must_be_absolute(tmp_path, monkeypatch) -> None:
+    # MEDIUM (6th pass): a RELATIVE XDG_CACHE_HOME made `git -C <repo> worktree add <relpath>` resolve
+    # against the REPO ROOT, putting the confined agent back inside the tree with the operator's .git a
+    # fixed walk away - the pass-5 RCE restored silently. Anything non-absolute is discarded.
+    monkeypatch.setenv("XDG_CACHE_HOME", ".cache")
+    monkeypatch.setenv("HOME", str(tmp_path))
+    d = sa.default_worktrees_dir(tmp_path)
+    assert d.is_absolute() and tmp_path.resolve() in d.parents or d.is_absolute()
+    monkeypatch.setenv("XDG_CACHE_HOME", "")
+    assert sa.default_worktrees_dir(tmp_path).is_absolute()

@@ -13,22 +13,29 @@ Safety (why this is the least-capable *write* rung):
   * The untrusted agent runs CONFINED (phase 7.1.1): cwd inside a disposable, detached worktree at ``base``
     (never the developer's tree, never the apply worktree) with a sanitized (secret-free) environment and a
     read-only tool policy. Whatever it writes there is discarded; only the diff it RETURNS is used.
-  * SENSITIVE-PATH DENIAL (phase 7.1.2, pre-apply, fail closed): the sealed diff is refused before it is
-    applied if it touches a protected path (the loop-controller / assurance / agent config, CI + supply
-    chain, sealed research), a credential-shaped file (``.env``, ``*.pem``, ``*.key``, ...), a symlink /
-    file-mode / binary change, or too many files. A human makes those edits.
+  * WRITABLE-SURFACE ALLOWLIST (phase 7.1.2, fail closed): the change set GIT REALIZED - not the diff text
+    - must lie inside ``engine/corpus_studio/**/*.py``, be MODIFY-ONLY (status ``M``), use ordinary-file
+    modes (100644), carry a safe module basename, and stay within bounds (2 paths / 60 lines / 8 KiB patch
+    / 400 B per line / 1 MiB blob). Anything not positively matched is refused, so an unforeseen path is
+    denied by construction and a case variant simply fails to match. A denylist was tried first and failed
+    three adversarial passes (case variants, ``rename from`` hiding a denied source, ``copy from``
+    exfiltrating a key with no ``+`` lines).
   * The unit of change is the agent's OWN sealed diff, applied deterministically with ``git apply`` into a
-    SEPARATE pristine DETACHED worktree the agent never touched - the agent does not edit arbitrarily. The
-    applied change is verified to match the sealed proposal's ``changed_paths`` (integrity, fail closed),
-    and the added lines are scanned for apparent secrets (defense-in-depth; CI gitleaks is the backstop).
+    SEPARATE pristine DETACHED worktree the agent never touched - the agent does not edit arbitrarily.
+    High-confidence credential formats are scanned over the REALIZED BLOB (which is what catches a
+    ``copy from``); a looser heuristic scans only the lines the candidate ADDS, so pre-existing content can
+    never make a file permanently unpublishable. Invisible / format characters are refused BY UNICODE
+    CATEGORY, so the rendered diff cannot differ from the executed bytes.
   * CANDIDATE ASSURANCE (phase 7.1.2, STATIC): the candidate worktree is classified via ``cs_assure
     impact`` (self-modify / sealed-research / worker-closure / policy obligations) - a STATIC analysis run
     by the TRUSTED dev-tree tool pointed at the candidate with ``--start-dir`` (never the candidate's own
     ``scripts/cs_assure.py``, which would execute a candidate-added shadow stdlib module off
     ``sys.path[0]``; the wholesale ``scripts/`` denial is the independent second layer). No untrusted
     candidate code is imported or executed. The branch is pushed + the PR opened ONLY when the
-    candidate classifies clear; a human-gated / worker / policy obligation publishes NOTHING and returns the
-    classified observation so the loop escalates. Because the apply worktree is DETACHED and the branch is
+    candidate classifies clear AND the operator has attested CI safety (``ci_attested_safe``, default
+    FALSE - see :func:`_publish_precondition_unmet`); a human-gated / worker / policy obligation, or a hit
+    in the worker IMPORT CLOSURE, publishes NOTHING and returns the classified observation so the loop
+    escalates. Because the apply worktree is DETACHED and the branch is
     created by refspec only on a clear candidate, a blocked candidate leaves no orphaned local branch.
     The DYNAMIC gate (ruff/mypy/PYTEST) is deliberately NOT run locally: pytest collection would EXECUTE the
     untrusted candidate's code with the operator's environment (arbitrary code execution + secret exposure -
@@ -207,7 +214,7 @@ _SECRET_PATTERNS: tuple[tuple["re.Pattern[str]", str], ...] = (
     (re.compile(r"github_pat_[A-Za-z0-9_]{50,}"), "a GitHub fine-grained PAT"),
     (re.compile(r"AIza[A-Za-z0-9_-]{35}"), "a Google API key"),
     (re.compile(r"\bASIA[0-9A-Z]{16}\b"), "an AWS temporary access key id"),
-    (re.compile(r"sk-(?:proj-)?[A-Za-z0-9_-]{20,}"), "an OpenAI API key"),
+    (re.compile(r"(?<![A-Za-z0-9_-])sk-(?:proj-)?[A-Za-z0-9]{20,}"), "an OpenAI API key"),
     (re.compile(r"glpat-[A-Za-z0-9_-]{20,}"), "a GitLab token"),
     (re.compile(r"pypi-AgEIcHlwaS5vcmc[A-Za-z0-9_-]{10,}"), "a PyPI token"),
     (re.compile(r"(?m)^\s*machine\s+\S+.*\n?\s*(?:login|password)\s+\S+"), "a .netrc credential"),
@@ -216,11 +223,18 @@ _SECRET_PATTERNS: tuple[tuple["re.Pattern[str]", str], ...] = (
     (re.compile(r"sk-ant-[A-Za-z0-9_-]{20,}"), "an Anthropic API key"),
     (re.compile(r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----"), "a private key block"),
     (re.compile(r"(?i)aws_secret_access_key\s*[=:]\s*[A-Za-z0-9/+]{40}"), "an AWS secret access key"),
-    # quoted (code) OR bare (YAML/env/ini) - a quotes-only regex missed `oauth_token: gho_...` verbatim
-    # out of ~/.config/gh/hosts.yml, which is exactly the shape an agent can read off disk.
+)
+
+# A LOOSE heuristic, scanned ONLY over lines the candidate ADDS - never the whole blob. Over the whole
+# blob it made files permanently unpublishable: `api_key: Optional[str] = typer.Option(` in cli.py
+# (PRE-EXISTING, unmodified) matched, so rung 7.1 could never edit the largest file in its own writable
+# surface, and could never fix the line that blocked it. The value charset excludes brackets/parens/spaces
+# so a type annotation (`Optional[str]`) or an env lookup (`os.environ["PW"]`) no longer matches, while a
+# real quoted secret or a bare `oauth_token: gho_...` (YAML, as ~/.config/gh/hosts.yml writes it) does.
+_ADDED_LINE_SECRET_PATTERNS: tuple[tuple["re.Pattern[str]", str], ...] = (
     (re.compile(r"""(?i)(?:secret|password|passwd|api[_-]?key|access[_-]?token|oauth_token)"""
-                r"""\s*[=:]\s*(?:['"][^'"]{12,}['"]|\S{12,})"""),
-     "a hardcoded credential"),
+                r"""\s*[=:]\s*(?:['"][^'"]{12,}['"]|[A-Za-z0-9+/=_-]{20,})"""),
+     "an apparent hardcoded credential"),
 )
 
 
@@ -238,7 +252,7 @@ def _scan_text(text: str, what: str) -> list[str]:
     bad = _forbidden_char(text)
     if bad:
         reasons.append(f"{what} contains an invisible/format character ({bad})")
-    for pat, label in _SECRET_PATTERNS:
+    for pat, label in (*_SECRET_PATTERNS, *_ADDED_LINE_SECRET_PATTERNS):
         if pat.search(text):
             reasons.append(f"{what} contains {label}")
             break
@@ -438,10 +452,22 @@ def _classify_candidate_changes(wt: Path, base_oid: str) -> list[str]:
         if bad:
             reasons.append(f"{rec.path} contains an invisible/format character ({bad})")
             continue
+        # HIGH-CONFIDENCE token formats only, over the WHOLE blob - these never legitimately appear in
+        # source, and whole-blob is what catches a `copy from` (which delivers content with no `+` lines).
         for pat, label in _SECRET_PATTERNS:
             if pat.search(content):
                 reasons.append(f"{rec.path} contains {label}")
                 break
+    # The LOOSE heuristic runs ONLY over the lines the candidate ADDS (git's own -U0 diff output, not our
+    # parsing of agent text), so pre-existing content can never make a file unpublishable.
+    for line in _git(wt, "diff", "--cached", "-U0", "--no-renames", base_oid).stdout.splitlines():
+        if not line.startswith("+") or line.startswith("+++"):
+            continue
+        for pat, label in _ADDED_LINE_SECRET_PATTERNS:
+            if pat.search(line[1:]):
+                reasons.append(f"the candidate adds {label}")
+                break
+
     numstat = _git(wt, "diff", "--cached", "--numstat", "--no-renames", base_oid).stdout
     touched = 0
     for line in numstat.splitlines():

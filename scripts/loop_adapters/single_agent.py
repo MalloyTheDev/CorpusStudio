@@ -28,6 +28,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shutil
 import subprocess  # noqa: S404 - fixed-argv git / claude only; never a shell string.
 import uuid
 from contextlib import contextmanager
@@ -101,7 +102,15 @@ def _detached_worktree(repo_root: Path, base_oid: str, worktrees_dir: Path) -> I
         try:
             _git(repo_root, "worktree", "remove", "--force", str(wt))
         except AgentError:
-            pass  # best-effort disposal; a leftover worktree is GC-able, never data loss
+            # The agent can defeat `worktree remove` by corrupting the `.git` gitfile inside its own cwd
+            # (measured), which would otherwise leave its bytes on disk AND a stale registration in the
+            # operator's repo forever. Fall back to deleting the tree ourselves and pruning the
+            # registration, so disposal is not opt-out for the untrusted party.
+            shutil.rmtree(wt, ignore_errors=True)
+            try:
+                _git(repo_root, "worktree", "prune")
+            except AgentError:
+                pass  # genuinely best-effort now; nothing of the agent's survives on disk
 
 
 def default_worktrees_dir(repo_root: Path) -> Path:
@@ -121,8 +130,15 @@ def default_worktrees_dir(repo_root: Path) -> Path:
     sitting three levels above the untrusted process's working directory."""
     root = repo_root.resolve()
     key = hashlib.sha256(str(root).encode("utf-8")).hexdigest()[:12]
-    cache = os.environ.get("XDG_CACHE_HOME") or ""
-    base = Path(cache) if cache else Path.home() / ".cache"
+    # The XDG spec says a RELATIVE value here is invalid and must be ignored - and it matters:
+    # `XDG_CACHE_HOME=.cache` made `git -C <repo> worktree add <relpath>` resolve against the REPO ROOT,
+    # putting the confined agent back inside the working tree with the operator's .git a fixed walk away
+    # (measured: the pass-5 RCE restored in full, silently). Anything non-absolute is discarded.
+    candidates = (os.environ.get("XDG_CACHE_HOME") or "", str(Path.home() / ".cache"))
+    base = next((Path(c) for c in candidates if c and Path(c).is_absolute()), None)
+    if base is None:  # no absolute cache dir available at all -> fail closed rather than guess
+        raise AgentError("cannot resolve an ABSOLUTE cache directory for the confined worktree "
+                         "(XDG_CACHE_HOME and HOME are both unusable); refusing to place it relatively")
     return base / "corpusstudio-loop" / "worktrees" / f"{root.name}-{key}"
 
 
