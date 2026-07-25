@@ -70,7 +70,21 @@ def _assure_runner(*, obligations=(), worker_reachable=()):
         "changeset": {"payload": {"changed_paths": []}},
         "doclint": {"finding_count": 0},
     }
-    return lambda _r, *a: (0, json.dumps(rec.get(a[0] if a else "", {})), "")
+    def run(root, *a):
+        sub = a[0] if a else ""
+        body = json.loads(json.dumps(rec.get(sub, {})))     # deep copy per call
+        if sub in ("impact", "worker-reachability"):
+            # answer about the SUBJECT the adapter asked about. _trusted_cs_assure runs the TRUSTED
+            # dev-tree tool and points it at the candidate with --start-dir, so the subject is that dir -
+            # not `root`, which is the dev repo.
+            argv = list(a)
+            subject = argv[argv.index("--start-dir") + 1] if "--start-dir" in argv else str(root)
+            head = subprocess.run(["git", "-C", subject, "rev-parse", "HEAD"],
+                                  capture_output=True, text=True).stdout.strip()
+            body.setdefault("payload", {})["scope"] = "head"
+            body.setdefault("provenance", {})["head_oid"] = head
+        return (0, json.dumps(body), "")
+    return run
 
 
 def _cs_assure_green():
@@ -456,9 +470,9 @@ def test_the_worker_import_closure_blocks_the_publish(tmp_path: Path) -> None:
 def test_an_unusable_worker_reachability_record_fails_closed(tmp_path: Path) -> None:
     # an uncomputable closure must never read as "touches no worker code"
     with pytest.raises(saw.WriteAdapterError):
-        saw._worker_reachable_paths(tmp_path, "main", lambda _r, *a: (2, "", "refused"))
+        saw._worker_reachable_paths(tmp_path, "b" * 40, lambda _r, *a: (2, "", "refused"))
     with pytest.raises(saw.WriteAdapterError):
-        saw._worker_reachable_paths(tmp_path, "main", lambda _r, *a: (0, "not json", ""))
+        saw._worker_reachable_paths(tmp_path, "b" * 40, lambda _r, *a: (0, "not json", ""))
 
 
 def test_the_candidates_own_analysis_is_not_completeness_evidence(tmp_path: Path) -> None:
@@ -513,13 +527,15 @@ def test_a_pre_existing_credential_shaped_line_does_not_brick_a_file(tmp_path: P
             " api_key: Optional[str] = option(\n+# a docstring fix\n old = 1\n")
     with saw._apply_worktree(root, base, tmp_path / "wt") as wt:
         saw._git(wt, "apply", "--index", "-", stdin=diff)
-        assert saw._classify_candidate_changes(wt, base) == []      # the innocent edit is PUBLISHABLE
+        tree = saw._git(wt, "write-tree").stdout.strip()
+        assert saw._classify_candidate_changes(wt, base, tree) == []   # the innocent edit is PUBLISHABLE
     # ...but a real token the candidate ADDS is still refused
     bad = (f"--- a/{_TARGET}\n+++ b/{_TARGET}\n@@ -1,2 +1,3 @@\n"
            " api_key: Optional[str] = option(\n+K = \"gho_" + "a" * 36 + "\"\n old = 1\n")
     with saw._apply_worktree(root, base, tmp_path / "wt") as wt:
         saw._git(wt, "apply", "--index", "-", stdin=bad)
-        assert saw._classify_candidate_changes(wt, base)
+        tree = saw._git(wt, "write-tree").stdout.strip()
+        assert saw._classify_candidate_changes(wt, base, tree)
 
 
 def test_ordinary_prose_and_code_are_not_flagged_as_secrets() -> None:
@@ -576,7 +592,8 @@ def _classify_one(tmp_path: Path, path: str, body: str = "x = 1\n",
             + "".join(f"+{ln}\n" for ln in body.splitlines()))
     with saw._apply_worktree(root, base, tmp_path / "wt") as wt:
         saw._git(wt, "apply", "--index", "-", stdin=diff)
-        return saw._classify_candidate_changes(wt, base)
+        tree = saw._git(wt, "write-tree").stdout.strip()
+        return saw._classify_candidate_changes(wt, base, tree)
 
 
 def test_rule_allowlist_is_the_only_thing_blocking_an_out_of_surface_path(tmp_path: Path) -> None:
@@ -664,7 +681,8 @@ def _classify_staged(tmp_path: Path, root: Path, base: str, mutate) -> list[str]
     with saw._apply_worktree(root, base, tmp_path / "wtx") as wt:
         mutate(wt)
         saw._git(wt, "add", "-A")
-        return saw._classify_candidate_changes(wt, base)
+        tree = saw._git(wt, "write-tree").stdout.strip()
+        return saw._classify_candidate_changes(wt, base, tree)
 
 
 def _write(wt: Path, rel: str, content) -> None:
@@ -759,7 +777,7 @@ def test_a_well_formed_but_keyless_worker_reachability_record_fails_closed(tmp_p
     for payload in ({}, {"reachable_undeclared": []}, {"undeclared_reachable": None, "worker_roots": [],
                                                        "added_reachable": [], "distribution_impacting_paths": []}):
         with pytest.raises(saw.WriteAdapterError, match="worker-reachability"):
-            saw._worker_reachable_paths(tmp_path, "main",
+            saw._worker_reachable_paths(tmp_path, "b" * 40,
                                         lambda _r, *a, p=payload: (0, json.dumps({"payload": p}), ""))
     # a complete record still resolves
     good = {"undeclared_reachable": ["a.py"], "worker_roots": [], "added_reachable": [],
@@ -774,11 +792,14 @@ def test_a_blocking_obligation_that_is_not_human_gated_still_blocks(tmp_path: Pa
     def assure(_r, *a):
         if a and a[0] == "impact":
             return (0, json.dumps({"record_digest": "sha256:i", "payload": {
+                "scope": "head",
                 "fired_obligations": [{"id": "evaluation-honesty", "severity": "blocking"}],
-                "base_policy_available": True, "change_set_fingerprint": "cs:x"}}), "")
+                "base_policy_available": True, "change_set_fingerprint": "cs:x"},
+                "provenance": {"head_oid": "c" * 40}}), "")
         return (0, json.dumps({"payload": {"undeclared_reachable": [], "worker_roots": [],
                                            "added_reachable": [], "distribution_impacting_paths": []}}), "")
-    observation, reason, _d = saw._assure_candidate(tmp_path, "main", assure, ["engine/corpus_studio/x.py"])
+    observation, reason, _d = saw._assure_candidate(tmp_path, "b" * 40, assure,
+                                                    ["engine/corpus_studio/x.py"], "c" * 40)
     assert observation is saw.Observation.POLICY_BLOCK and "evaluation-honesty" in reason
 
 
@@ -876,3 +897,134 @@ def test_the_candidate_branches_from_the_remote_base_not_the_local_one(tmp_path:
     branch = [b.strip("* ") for b in _g(remote, "branch", "--list").stdout.splitlines() if "cs-agent" in b][0]
     files = _g(remote, "ls-tree", "-r", "--name-only", branch).stdout.split()
     assert "operator-only.txt" not in files, "the operator's unpushed commit was published as the agent's"
+
+
+# ----------------------------------------------------------- exact candidate identity (phase 7.1.3)
+
+
+def test_the_published_commit_is_provably_the_assured_object(tmp_path: Path) -> None:
+    """The identity chain: the tree that was CLASSIFIED is the tree COMMITTED, the commit ASSURED is the
+    commit PUSHED, and all of it is recorded. Previously these were four objects related only by
+    'nothing bad happened in between'."""
+    root, remote = _repo_with_remote(tmp_path)
+    state = LoopState(goal="tidy", goal_id="g1", current_phase=Phase.RECEIVE_GOAL)
+    run_loop(state, _build(tmp_path, root, _StubAgent(), []))
+    ca = state.review_state["candidate_assurance"]
+    commit, tree = ca["candidate_commit"], ca["candidate_tree_oid"]
+    # the remote carries EXACTLY the assured commit...
+    assert ca["remote_oid"] == commit
+    branch = ca["branch"]
+    assert _g(remote, "rev-parse", branch).stdout.strip() == commit
+    # ...whose tree is the classified tree, and whose parent is the base we classified against
+    assert _g(remote, "rev-parse", f"{commit}^{{tree}}").stdout.strip() == tree
+    assert _g(remote, "rev-list", "--parents", "-n", "1", commit).stdout.split()[1:] == [ca["base_oid"]]
+    # and the loop's head-bound merge gate is now bound to it (nothing set this seam before)
+    assert state.review_state["agent_proposals"][0]["candidate_commit"] == commit
+
+
+def test_the_candidate_commit_is_content_addressed(tmp_path: Path) -> None:
+    # pinned dates: identical content must yield an identical commit oid, so a resumed/re-run goal
+    # reproduces the same object instead of a fresh one each time.
+    oids = []
+    for i in range(2):
+        d = tmp_path / f"r{i}"
+        d.mkdir()
+        root, _rem = _repo_with_remote(d)
+        st = LoopState(goal="tidy", goal_id="g1", current_phase=Phase.RECEIVE_GOAL)
+        run_loop(st, _build(d, root, _StubAgent(), []))
+        oids.append(st.review_state["candidate_assurance"]["candidate_commit"])
+    assert oids[0] == oids[1], f"commit oid is not deterministic: {oids}"
+
+
+def test_assurance_that_assessed_a_different_object_is_refused(tmp_path: Path) -> None:
+    """The measured live defect this phase closes: the adapter assessed the MUTABLE WORKING TREE
+    (`--scope workspace`, the default) while the COMMIT is what gets pushed. On a candidate whose commit
+    edits worker bytes and whose worktree is reverted, workspace reported fired=[] and head reported
+    ['worker-closure'] - the gate said clean about a commit that fires a human-gated obligation."""
+    # a record about the wrong scope is refused...
+    def wrong_scope(_r, *a):
+        if a and a[0] == "impact":
+            return (0, json.dumps({"record_digest": "sha256:i",
+                                   "payload": {"scope": "workspace", "fired_obligations": [],
+                                               "base_policy_available": True},
+                                   "provenance": {"head_oid": "c" * 40}}), "")
+        return (0, json.dumps({"payload": {"undeclared_reachable": [], "worker_roots": [],
+                                           "added_reachable": [], "distribution_impacting_paths": []}}), "")
+    with pytest.raises(saw.WriteAdapterError, match="scope"):
+        saw._assure_candidate(tmp_path, "b" * 40, wrong_scope, [], "c" * 40)
+
+    # ...and so is a record about a DIFFERENT commit
+    def wrong_head(_r, *a):
+        if a and a[0] == "impact":
+            return (0, json.dumps({"record_digest": "sha256:i",
+                                   "payload": {"scope": "head", "fired_obligations": [],
+                                               "base_policy_available": True},
+                                   "provenance": {"head_oid": "d" * 40}}), "")
+        return (0, json.dumps({"payload": {"undeclared_reachable": [], "worker_roots": [],
+                                           "added_reachable": [], "distribution_impacting_paths": []}}), "")
+    with pytest.raises(saw.WriteAdapterError, match="different object"):
+        saw._assure_candidate(tmp_path, "b" * 40, wrong_head, [], "c" * 40)
+
+
+def test_the_remote_ref_check_requires_an_exact_single_match(tmp_path: Path) -> None:
+    """`git ls-remote <url> <pattern>` matches the ref TAIL, so a decoy `refs/heads/decoy/refs/heads/X`
+    also matches and a naive `head -1` reads the DECOY's oid."""
+    root, remote = _repo_with_remote(tmp_path)
+    head = _g(root, "rev-parse", "HEAD").stdout.strip()
+    _g(root, "push", "-q", "origin", f"{head}:refs/heads/decoy/refs/heads/cs-agent/x")
+    assert saw._remote_ref_oid(root, "cs-agent/x") == ""        # the decoy is NOT our ref
+    _g(root, "push", "-q", "origin", f"{head}:refs/heads/cs-agent/x")
+    assert saw._remote_ref_oid(root, "cs-agent/x") == head      # the real one is found exactly
+
+
+def test_commit_identity_verification_rejects_a_wrong_tree_or_parent(tmp_path: Path) -> None:
+    """These guards only fire when something is already wrong, so the happy path never exercises them -
+    they are asserted directly. A tree-only check is not enough: commit-tree can produce an identical
+    tree under a HOSTILE PARENT (carrying someone else's history and an attacker-chosen message)."""
+    root, _remote = _repo_with_remote(tmp_path)
+    base = _g(root, "rev-parse", "HEAD").stdout.strip()
+    tree = _g(root, "rev-parse", "HEAD^{tree}").stdout.strip()
+    good = _g(root, "commit-tree", tree, "-p", base, "-m", "ok").stdout.strip()
+    saw._verify_commit_identity(root, good, tree, base)                       # the honest case passes
+
+    # same tree, WRONG parent (an orphan) -> refused
+    orphan = _g(root, "commit-tree", tree, "-m", "orphan").stdout.strip()
+    with pytest.raises(saw.WriteAdapterError, match="parents"):
+        saw._verify_commit_identity(root, orphan, tree, base)
+    # right parent, WRONG tree -> refused
+    with pytest.raises(saw.WriteAdapterError, match="!= classified tree"):
+        saw._verify_commit_identity(root, good, "0" * 40, base)
+
+
+def test_a_remote_that_does_not_carry_the_assured_commit_blocks_the_pr(tmp_path: Path, monkeypatch) -> None:
+    """If the ref the remote actually holds is not our commit, no PR may be opened for it - the push
+    receipt is `ls-remote`, never git push's own output (which echoes the source spec, not a remote oid)."""
+    root, _remote = _repo_with_remote(tmp_path)
+    calls: list = []
+    monkeypatch.setattr(saw, "_remote_ref_oid", lambda *a, **k: "f" * 40)   # remote holds something else
+    state = LoopState(goal="g", goal_id="g1", current_phase=Phase.RECEIVE_GOAL)
+    run_loop(state, _build(tmp_path, root, _StubAgent(), calls), max_steps=25)
+    assert ("pr", "create") not in [c[:2] for c in calls]
+    assert "not the assured candidate" in (state.termination_reason or "")
+
+
+def test_the_push_names_the_candidate_commit_explicitly(tmp_path: Path) -> None:
+    """The refspec is `<oid>:refs/heads/<branch>`, not `HEAD:...` - an explicit oid cannot publish
+    anything but the assured commit even if HEAD moves, and the lease is create-only."""
+    root, _remote = _repo_with_remote(tmp_path)
+    seen: list = []
+    real = saw._git
+
+    def spy(cwd, *args, **kw):
+        if args and args[0] == "push":
+            seen.append(list(args))
+        return real(cwd, *args, **kw)
+    import unittest.mock as _m
+    with _m.patch.object(saw, "_git", spy):
+        state = LoopState(goal="g", goal_id="g1", current_phase=Phase.RECEIVE_GOAL)
+        run_loop(state, _build(tmp_path, root, _StubAgent(), []))
+    commit = state.review_state["candidate_assurance"]["candidate_commit"]
+    assert seen, "no push was attempted"
+    argv = seen[0]
+    assert any(a.startswith(f"{commit}:refs/heads/") for a in argv), argv
+    assert any(a.startswith("--force-with-lease=") for a in argv), argv
