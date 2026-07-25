@@ -795,6 +795,65 @@ def _verify_commit_identity(wt: Path, commit: str, tree_oid: str, base_oid: str)
         raise WriteAdapterError(f"commit parents {parents} != [{base_oid}] (base drift)")
 
 
+# ---------------------------------------------------------------- crash-resumable publish (phase 7.1.4)
+# The publish is several EXTERNAL effects in sequence (push, then `gh pr create`). `step()` persists loop
+# state after a dispatch and in its except branch, but a SIGKILL or Ctrl-C between them bypasses both, so
+# the remote can hold an agent-authored branch that loop state has never heard of. The journal is written
+# BEFORE each effect, so a resumed or re-run goal can tell "already done" from "never started".
+_JOURNAL_STATES = ("PUSH_INTENDED", "PUSHED", "PR_OPENED")
+
+
+def _journal_path(proposals_dir: Path, goal_id: str, candidate_commit: str) -> Path:
+    """One journal file per (goal, candidate). Keyed by the CONTENT-ADDRESSED commit oid, so re-running a
+    goal with identical content lands on the same journal - which is what makes resume idempotent."""
+    slug = _sanitize_branch_suffix(goal_id).replace("/", "-")
+    return proposals_dir / "journal" / f"{slug}-{candidate_commit[:12]}.json"
+
+
+def _journal_write(path: Path, state_name: str, **fields: Any) -> None:
+    """Record intent BEFORE the effect it describes. Best-effort by design: a journal that cannot be
+    written must not block the publish (it is an aid to recovery, not a gate), but a journal that CAN be
+    written is always written first."""
+    if state_name not in _JOURNAL_STATES:
+        raise WriteAdapterError(f"unknown journal state {state_name!r}")
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        existing = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+        if not isinstance(existing, dict):
+            existing = {}
+        existing.update({"state": state_name, **fields})
+        path.write_text(json.dumps(existing, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    except (OSError, ValueError):
+        pass
+
+
+def _journal_read(path: Path) -> dict[str, Any]:
+    """The recorded publish state, or {} when absent/unreadable (treated as 'never started')."""
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _existing_pr_url(gh_runner: Callable[..., "tuple[int, str, str]"], branch: str) -> str:
+    """The URL of an OPEN PR already opened for ``branch``, or "". Used to make re-publishing idempotent
+    instead of opening a duplicate PR for the same candidate. A gh failure returns "" - the caller then
+    attempts creation, and a genuine duplicate is refused by gh itself."""
+    code, out, _err = gh_runner("pr", "list", "--head", branch, "--state", "open",
+                                "--json", "url", "--limit", "1")
+    if code != 0:
+        return ""
+    try:
+        rows = json.loads(out)
+    except (ValueError, RecursionError):
+        return ""
+    if isinstance(rows, list) and rows and isinstance(rows[0], dict):
+        url = rows[0].get("url")
+        return url if isinstance(url, str) else ""
+    return ""
+
+
 def _remote_ref_oid(repo_root: Path, branch: str) -> str:
     """The oid the REMOTE actually has for ``refs/heads/<branch>``, or "" if absent. Fail-closed.
 
@@ -916,21 +975,39 @@ def _make_write_executor(agent_client: AgentClient, repo_root: Path, base: str, 
             if unmet:
                 raise WriteAdapterError(f"refusing to publish: {unmet}")
 
-            # 7) PUBLISH BY EXPLICIT OID with a create-only lease. An explicit <oid>:<ref> refspec cannot
-            #    publish anything but the assured commit, and --force-with-lease is enforced REMOTE-SIDE:
-            #    a plain push over a tip that happens to be an ANCESTOR was measured to succeed SILENTLY,
-            #    which would rewrite the head of an already-open (possibly approved) PR.
-            _git(wt, "push", "--force-with-lease=" + f"refs/heads/{branch}:", "origin",
-                 f"{candidate_commit}:refs/heads/{branch}")
+            # 7) PUBLISH - crash-resumable and idempotent. The candidate commit is content-addressed
+            #    (7.1.3), so re-running the same goal with the same content produces the SAME oid: a
+            #    re-push is a no-op and an existing PR is reused instead of duplicated.
+            journal = _journal_path(proposals_dir, state.goal_id or "goal", candidate_commit)
+            prior = _journal_read(journal)
             remote_oid = _remote_ref_oid(repo_root, branch)
+
+            if remote_oid and remote_oid != candidate_commit:
+                # Someone else's commit is on our branch (a concurrent run, a leftover, a human). NEVER
+                # clobber it - the lease would refuse anyway, but refusing here says WHY.
+                raise WriteAdapterError(
+                    f"remote {branch} already holds {remote_oid[:12]}, not this candidate "
+                    f"{candidate_commit[:12]}; refusing to overwrite someone else's branch")
+            if remote_oid == candidate_commit:
+                reason = f"{reason}; branch already published (resumed)"
+            else:
+                # WRITE-AHEAD: record the intent before the effect, so a SIGKILL between push and PR
+                # leaves a durable trace instead of an orphan nobody knows about.
+                _journal_write(journal, "PUSH_INTENDED", goal_id=state.goal_id, branch=branch,
+                               base_oid=base_oid, candidate_commit=candidate_commit,
+                               candidate_tree_oid=tree_oid)
+                #    An explicit <oid>:<ref> refspec cannot publish anything but the assured commit, and
+                #    --force-with-lease is enforced REMOTE-SIDE: a plain push over a tip that happens to
+                #    be an ANCESTOR was measured to succeed SILENTLY, rewriting an open PR's head.
+                _git(wt, "push", "--force-with-lease=" + f"refs/heads/{branch}:{remote_oid}", "origin",
+                     f"{candidate_commit}:refs/heads/{branch}")
+                remote_oid = _remote_ref_oid(repo_root, branch)
+                _journal_write(journal, "PUSHED", remote_oid=remote_oid)
             if remote_oid != candidate_commit:
                 raise WriteAdapterError(
                     f"remote {branch} is {remote_oid[:12] or '(absent)'}, not the assured candidate "
                     f"{candidate_commit[:12]}; refusing to open a PR for an object we did not assure")
             identity["remote_oid"] = remote_oid
-            # Record the publish AS SOON AS the branch is live on the remote - before `gh pr create`,
-            # which can fail. #710 fixed exactly this: a gh failure used to leave a pushed branch with no
-            # record on the loop state, so the human triaging the escalation could not find it.
             _record_candidate_assurance(state, record, branch, observation,
                                         f"{reason}; branch pushed, PR not yet opened", impact_digest,
                                         published=True, identity=identity)
@@ -941,15 +1018,23 @@ def _make_write_executor(agent_client: AgentClient, repo_root: Path, base: str, 
                          "path": str(proposal_path),
                          "changed_paths": record["payload"]["changed_paths"], "pr": "",
                          "candidate_commit": candidate_commit, "candidate_tree_oid": tree_oid})
-            # The loop's head-bound merge gate now has a commit to bind to (it HOLDs if the PR head ever
-            # differs). Nothing set this before, so the guard was dead on every shipped path.
             for box in expected_head_box:
                 box.expected_head = candidate_commit
-            code, pr_out, err = gh_runner("pr", "create", "--head", branch, "--base", base,
-                                          "--title", (state.goal or "agent change")[:120],
-                                          "--body", _pr_body(rationale))
-            if code != 0:
-                raise WriteAdapterError(f"gh pr create failed (exit {code}): {err.strip()[:200]}")
+
+            # Reuse an OPEN PR for this branch rather than duplicating it (a resumed run, or a crash
+            # after `gh pr create` succeeded but before its URL was recorded).
+            pr_out = prior.get("pr_url", "") or _existing_pr_url(gh_runner, branch)
+            if pr_out:
+                reason = f"{reason}; existing PR reused"
+            else:
+                # DRAFT: machine-authored code must not be one click from merge, and draft state is a
+                # STRUCTURAL signal that survives a body edit - unlike the text disclosure alone.
+                code, pr_out, err = gh_runner("pr", "create", "--draft", "--head", branch, "--base", base,
+                                              "--title", (state.goal or "agent change")[:120],
+                                              "--body", _pr_body(rationale))
+                if code != 0:
+                    raise WriteAdapterError(f"gh pr create failed (exit {code}): {err.strip()[:200]}")
+            _journal_write(journal, "PR_OPENED", pr_url=pr_out.strip())
             _record_candidate_assurance(state, record, branch, observation, reason, impact_digest,
                                         published=True, identity=identity)
             refs[-1]["pr"] = pr_out.strip()
