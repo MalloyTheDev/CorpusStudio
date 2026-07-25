@@ -9,6 +9,7 @@ apply) fails closed. A local bare remote makes ``git push`` work offline; ``gh``
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -92,7 +93,12 @@ def _cs_assure_green():
 
 
 def _g(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True, check=True)
+    # Fixture commits use PINNED dates so a base commit is reproducible across repos. Without this the
+    # base oid depends on the wall clock (second resolution), which made the content-addressing test flaky:
+    # two fixture repos straddling a second boundary get different bases, hence different candidates.
+    env = {**os.environ, "GIT_AUTHOR_DATE": "@0 +0000", "GIT_COMMITTER_DATE": "@0 +0000"}
+    return subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True, check=True,
+                          env=env)
 
 
 def _repo_with_remote(tmp_path: Path) -> tuple[Path, Path]:

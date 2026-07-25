@@ -327,3 +327,79 @@ def test_the_propose_executor_hands_the_agent_a_confined_home(tmp_path: Path) ->
     assert seen.get("home_existed") is True, "the agent was not given a confined HOME"
     assert Path(seen["_home"]).resolve() != Path.home().resolve()
     assert not Path(seen["_home"]).exists(), "the confined home must be disposed after the propose"
+
+
+# ------------------------------------------------------------------ agent sandboxing (phase 7.1.5)
+
+
+class _NoIsolationSandbox:
+    """Runs the command with NO confinement - what a broken/misconfigured sandbox looks like."""
+
+    def wrap(self, argv, *, cwd, home):  # noqa: ANN001,ANN201
+        return argv
+
+
+class _DenyingSandbox:
+    """Confines by refusing to read anything outside the bound surfaces (what a working one does)."""
+
+    def wrap(self, argv, *, cwd, home):  # noqa: ANN001,ANN201
+        return ("/bin/sh", "-c", "echo __DENIED__")
+
+
+def test_verify_sandbox_catches_one_that_runs_but_does_not_isolate(tmp_path: Path) -> None:
+    """Presence is not proof. A sandbox that executes but does not confine is WORSE than none: it turns a
+    known gap into a false assurance, and an operator would grant unattended use on the strength of it.
+    The probe plants a canary secret outside the bound surfaces and asserts it cannot be read."""
+    with pytest.raises(sa.SandboxUnavailable, match="does not isolate"):
+        sa.verify_sandbox(_NoIsolationSandbox(), tmp_path)
+
+
+def test_verify_sandbox_accepts_one_that_denies(tmp_path: Path) -> None:
+    sa.verify_sandbox(_DenyingSandbox(), tmp_path)          # no raise
+
+
+def test_verify_sandbox_fails_closed_when_the_sandbox_cannot_run(tmp_path: Path) -> None:
+    class _Missing:
+        def wrap(self, argv, *, cwd, home):  # noqa: ANN001,ANN201
+            return ("definitely-not-a-real-sandbox-xyz", *argv)
+    with pytest.raises(sa.SandboxUnavailable):
+        sa.verify_sandbox(_Missing(), tmp_path)
+
+
+def test_the_transport_wraps_the_agent_when_a_sandbox_is_supplied(tmp_path: Path, monkeypatch) -> None:
+    seen: dict = {}
+
+    class _Recording:
+        def wrap(self, argv, *, cwd, home):  # noqa: ANN001,ANN201
+            seen["cwd"], seen["home"] = str(cwd), str(home)
+            return ("SANDBOXED", *argv)
+
+    def fake_run(a, **k):  # noqa: ANN001,ANN202
+        seen["argv"] = list(a)
+        return _FakeProc(0, json.dumps({"unified_diff": "d", "rationale": "r"}))
+    monkeypatch.setattr(sa.subprocess, "run", fake_run)
+    client = sa.ClaudeSubprocessClient(sandbox=_Recording())
+    client.propose({"goal": "g", "_cwd": str(tmp_path), "_home": str(tmp_path / "h")})
+    assert seen["argv"][0] == "SANDBOXED", seen["argv"]
+    assert seen["cwd"] == str(tmp_path) and seen["home"] == str(tmp_path / "h")
+    # ...and with no sandbox the argv is unwrapped (the seam is opt-in, never silently assumed)
+    sa.ClaudeSubprocessClient().propose({"goal": "g", "_cwd": str(tmp_path)})
+    assert seen["argv"][0] != "SANDBOXED"
+
+
+def test_bubblewrap_argv_binds_only_the_worktree_and_home(tmp_path: Path) -> None:
+    argv = sa.BubblewrapSandbox().wrap(("claude", "-p"), cwd=tmp_path / "wt", home=tmp_path / "home")
+    assert argv[0] == "bwrap" and "--unshare-all" in argv       # no network, no shared namespaces
+    binds = [argv[i + 1] for i, a in enumerate(argv) if a == "--bind"]
+    assert binds == [str(tmp_path / "wt"), str(tmp_path / "home")]   # the ONLY writable surfaces
+    assert list(argv[-2:]) == ["claude", "-p"]
+
+
+def test_verify_sandbox_fails_closed_when_the_sandbox_exits_nonzero(tmp_path: Path) -> None:
+    # distinct from "cannot run": the sandbox EXISTS and executes but errors out (exactly what bwrap does
+    # on a host with apparmor_restrict_unprivileged_userns=1). It must not be read as confinement.
+    class _Erroring:
+        def wrap(self, argv, *, cwd, home):  # noqa: ANN001,ANN201
+            return ("/bin/sh", "-c", "echo 'bwrap: setting up uid map: Permission denied' >&2; exit 1")
+    with pytest.raises(sa.SandboxUnavailable, match="exited 1"):
+        sa.verify_sandbox(_Erroring(), tmp_path)
