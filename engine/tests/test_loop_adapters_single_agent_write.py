@@ -1005,7 +1005,10 @@ def test_a_remote_that_does_not_carry_the_assured_commit_blocks_the_pr(tmp_path:
     state = LoopState(goal="g", goal_id="g1", current_phase=Phase.RECEIVE_GOAL)
     run_loop(state, _build(tmp_path, root, _StubAgent(), calls), max_steps=25)
     assert ("pr", "create") not in [c[:2] for c in calls]
-    assert "not the assured candidate" in (state.termination_reason or "")
+    # either refusal is correct - the property is that no PR is opened for an object we did not assure
+    # (the pre-push check now catches a foreign branch first; the post-push receipt catches the rest)
+    reason = state.termination_reason or ""
+    assert "not the assured candidate" in reason or "refusing to overwrite" in reason, reason
 
 
 def test_the_push_names_the_candidate_commit_explicitly(tmp_path: Path) -> None:
@@ -1028,3 +1031,102 @@ def test_the_push_names_the_candidate_commit_explicitly(tmp_path: Path) -> None:
     argv = seen[0]
     assert any(a.startswith(f"{commit}:refs/heads/") for a in argv), argv
     assert any(a.startswith("--force-with-lease=") for a in argv), argv
+
+
+# ------------------------------------------------------ crash recovery + safe publish (phase 7.1.4)
+
+
+def test_the_pr_is_opened_as_a_draft(tmp_path: Path) -> None:
+    """Machine-authored code must not be one click from merge. Draft is a STRUCTURAL signal that survives
+    someone editing the PR body, unlike the text disclosure alone."""
+    root, _remote = _repo_with_remote(tmp_path)
+    calls: list = []
+    run_loop(LoopState(goal="g", goal_id="g1", current_phase=Phase.RECEIVE_GOAL),
+             _build(tmp_path, root, _StubAgent(), calls))
+    create = [c for c in calls if c[:2] == ("pr", "create")]
+    assert create and "--draft" in create[0], create
+
+
+def test_re_running_the_same_goal_republishes_idempotently(tmp_path: Path) -> None:
+    """7.1.3 made the candidate commit content-addressed, so an identical re-run produces the SAME oid:
+    the push is a no-op and the existing PR is reused rather than duplicated."""
+    root, remote = _repo_with_remote(tmp_path)
+    calls: list = []
+    ctx1 = _build(tmp_path, root, _StubAgent(), calls)
+    run_loop(LoopState(goal="g", goal_id="g1", current_phase=Phase.RECEIVE_GOAL), ctx1)
+    first = [c for c in calls if c[:2] == ("pr", "create")]
+    assert len(first) == 1
+
+    # a second run of the same goal: the branch is already at our commit, and an open PR exists
+    calls2: list = []
+
+    def gh_with_existing(*argv: str) -> tuple[int, str, str]:
+        calls2.append(tuple(argv))
+        if argv[:2] == ("pr", "list"):
+            return (0, json.dumps([{"url": "https://example/pull/1"}]), "")
+        if argv[:2] == ("pr", "create"):
+            return (0, "https://example/pull/2\n", "")
+        return (0, "", "")
+    ctx2 = saw.build_context(root, "main", agent_client=_StubAgent(), proposals_dir=tmp_path / "prop",
+                             worktrees_dir=tmp_path / "wt", gh_runner=gh_with_existing,
+                             run_cs_assure=_cs_assure_green(), ci_attested_safe=True)
+    state2 = LoopState(goal="g", goal_id="g1", current_phase=Phase.RECEIVE_GOAL)
+    run_loop(state2, ctx2)
+    assert ("pr", "create") not in [c[:2] for c in calls2], "a duplicate PR was opened on re-run"
+    ca = state2.review_state["candidate_assurance"]
+    assert "resumed" in ca["reason"] or "reused" in ca["reason"], ca["reason"]
+    # exactly one branch, still carrying the assured commit
+    assert _g(remote, "rev-parse", ca["branch"]).stdout.strip() == ca["candidate_commit"]
+
+
+def test_a_foreign_commit_on_our_branch_is_never_overwritten(tmp_path: Path) -> None:
+    root, remote = _repo_with_remote(tmp_path)
+    # put a DIFFERENT commit on the branch the goal would use
+    branch = "cs-agent/" + saw._sanitize_branch_suffix("g1")
+    head = _g(root, "rev-parse", "HEAD").stdout.strip()
+    _g(root, "push", "-q", "origin", f"{head}:refs/heads/{branch}")
+    calls: list = []
+    state = LoopState(goal="g", goal_id="g1", current_phase=Phase.RECEIVE_GOAL)
+    run_loop(state, _build(tmp_path, root, _StubAgent(), calls), max_steps=25)
+    assert ("pr", "create") not in [c[:2] for c in calls]
+    assert "refusing to overwrite" in (state.termination_reason or "")
+    assert _g(remote, "rev-parse", branch).stdout.strip() == head   # untouched
+
+
+def test_the_publish_journal_records_intent_before_each_effect(tmp_path: Path) -> None:
+    """A SIGKILL between push and `gh pr create` bypasses both of step()'s persistence points, so the
+    remote could hold an agent-authored branch loop state never heard of. The journal is the durable trace."""
+    root, _remote = _repo_with_remote(tmp_path)
+    state = LoopState(goal="g", goal_id="g1", current_phase=Phase.RECEIVE_GOAL)
+    run_loop(state, _build(tmp_path, root, _StubAgent(), []))
+    ca = state.review_state["candidate_assurance"]
+    jp = saw._journal_path(tmp_path / "prop", "g1", ca["candidate_commit"])
+    entry = saw._journal_read(jp)
+    assert entry["state"] == "PR_OPENED"
+    assert entry["candidate_commit"] == ca["candidate_commit"]
+    assert entry["branch"] == ca["branch"] and entry["pr_url"]
+    # an unreadable/absent journal is "never started", never a crash
+    assert saw._journal_read(tmp_path / "nope.json") == {}
+
+
+def test_the_journal_records_push_intent_even_when_the_push_fails(tmp_path: Path) -> None:
+    """The write-ahead property: intent is durable BEFORE the effect. If the process dies (or the push
+    fails) the journal still names the branch and commit that may now be live on the remote - which is the
+    whole point, since a SIGKILL bypasses both of step()'s persistence points."""
+    root, _remote = _repo_with_remote(tmp_path)
+    real = saw._git
+
+    def push_fails(cwd, *args, **kw):
+        if args and args[0] == "push":
+            raise saw.WriteAdapterError("simulated network failure mid-publish")
+        return real(cwd, *args, **kw)
+    import unittest.mock as _m
+    state = LoopState(goal="g", goal_id="g1", current_phase=Phase.RECEIVE_GOAL)
+    with _m.patch.object(saw, "_git", push_fails):
+        run_loop(state, _build(tmp_path, root, _StubAgent(), []), max_steps=25)
+    assert state.current_phase is Phase.ESCALATED
+    journals = sorted((tmp_path / "prop" / "journal").glob("*.json"))
+    assert journals, "no write-ahead record survived the failed push"
+    entry = saw._journal_read(journals[0])
+    assert entry["state"] == "PUSH_INTENDED"          # intent was durable BEFORE the effect
+    assert entry["branch"].startswith("cs-agent/g1-") and entry["candidate_commit"]
