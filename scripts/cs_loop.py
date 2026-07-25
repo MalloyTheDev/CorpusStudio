@@ -347,20 +347,70 @@ def _sandbox_from(name: str | None):  # noqa: ANN202 - a SandboxRunner
     raise LoopStateError(f"unknown --sandbox {name!r}")
 
 
-def _require_sandbox_for_write(ctx, sandbox_choice: str | None) -> None:  # noqa: ANN001
-    """A WRITE-capable run must make an explicit sandbox decision.
+def _sandbox_kwargs(fn, args: argparse.Namespace) -> "tuple[dict, frozenset[str]]":  # noqa: ANN001
+    """The optional kwargs ``fn`` can actually RECEIVE, and its parameter names.
 
-    The sandbox seam, its verification and the confined HOME all existed and were UNREACHABLE from this
-    entrypoint - `build_context(repo_root, base)` never passed one - so an operator using the shipped CLI
-    silently got an UNSANDBOXED agent. That is the same shape as the earlier `--ci-attested-safe` gap: a
-    control that exists, is tested, and cannot be turned on. Refusing an unstated choice makes the
-    decision visible instead of defaulting to the weaker one."""
-    from loop.orchestrate import LoopContext, WRITE_CAPABILITIES
-    if isinstance(ctx, LoopContext) and (ctx.capabilities & WRITE_CAPABILITIES) and sandbox_choice is None:
+    Signature-driven so the generic adapter contract stays ``build_context(repo_root, base)``. But a
+    silently DROPPED kwarg is only acceptable when dropping it is the safe direction. It is for
+    ``ci_attested_safe`` (default False = refuse to publish); it INVERTS for ``sandbox``, whose default
+    None is the *less* safe value - so a requested sandbox that cannot be delivered is REFUSED here rather
+    than dropped. Otherwise `--sandbox bubblewrap` would report success while wiring nothing, which is
+    worse than having no flag at all: it manufactures confidence instead of merely lacking a control."""
+    import inspect
+    choice = getattr(args, "sandbox", None)
+    runner = _sandbox_from(choice)
+    optional = {
+        "ci_attested_safe": bool(getattr(args, "ci_attested_safe", False)),
+        "profile": getattr(args, "target_profile", None),
+        "assurance_root": getattr(args, "assurance_root", None),
+        "sandbox": runner,
+    }
+    try:
+        params = frozenset(inspect.signature(fn).parameters)
+    except (TypeError, ValueError):
+        # Un-introspectable: we cannot PROVE the sandbox would arrive, so we must not pretend it did.
+        if runner is not None:
+            raise LoopStateError(
+                "--sandbox was requested but the adapter's build_context cannot be introspected, so the "
+                "sandbox cannot be proven to reach the agent; refusing rather than running unisolated")
+        return {}, frozenset()
+    if runner is not None and "sandbox" not in params:
         raise LoopStateError(
-            "a write-capable adapter needs an explicit --sandbox choice (bubblewrap|none): the agent is "
-            "untrusted and the confinement it gets must be a decision, not a default. Use "
-            "--sandbox bubblewrap for OS isolation, or --sandbox none to accept cwd/env confinement only.")
+            f"--sandbox {choice} was requested but this adapter's build_context takes no 'sandbox' "
+            "parameter, so the sandbox would be silently dropped and the agent would run UNISOLATED "
+            "while the flag reported success; refusing")
+    kwargs = {k: v for k, v in optional.items() if k in params and v is not None}
+    if "ci_attested_safe" in params:
+        kwargs["ci_attested_safe"] = optional["ci_attested_safe"]
+    # Choosing a REAL sandbox is a demand for isolation, not a preference: if the adapter cannot verify
+    # it confines, it must refuse rather than proceed. This is what finally turns require_sandbox on.
+    if runner is not None and "require_sandbox" in params:
+        kwargs["require_sandbox"] = True
+    return kwargs, params
+
+
+def _require_sandbox_choice(params: "frozenset[str]", ctx, args: argparse.Namespace) -> None:  # noqa: ANN001
+    """Demand an EXPLICIT ``--sandbox`` from any adapter that can run an agent, or that can write.
+
+    Keyed on the WIRING (does ``build_context`` accept a sandbox?) rather than only on declared write
+    capability, because the threat the sandbox exists for is a READ-side one: a hostile repository can
+    prompt-inject the agent into exfiltration or RCE regardless of whether the adapter may later push.
+    The shipped propose-only adapter declares NO capabilities and still launches a real `claude`
+    subprocess as the operator's UID - keying off ``WRITE_CAPABILITIES`` alone left exactly that
+    unguarded, and would leave every future capability unguarded by default too.
+
+    An adapter with no ``sandbox`` parameter runs no agent of ours, so demanding the flag there is noise."""
+    from loop.orchestrate import LoopContext, WRITE_CAPABILITIES
+    if getattr(args, "sandbox", None) is not None:
+        return
+    writes = isinstance(ctx, LoopContext) and bool(ctx.capabilities & WRITE_CAPABILITIES)
+    if "sandbox" not in params and not writes:
+        return
+    raise LoopStateError(
+        "this adapter needs an explicit --sandbox choice (bubblewrap|none): the agent is untrusted and "
+        "the confinement it gets must be a decision, not a default. Use --sandbox bubblewrap for OS "
+        "isolation (verified before the agent runs, refused if it cannot confine), or --sandbox none to "
+        "accept cwd/env/HOME confinement only - which is defence in depth, NOT a boundary.")
 
 
 def _build_context(module, args: argparse.Namespace):  # noqa: ANN001,ANN202 - a LoopContext
@@ -371,28 +421,14 @@ def _build_context(module, args: argparse.Namespace):  # noqa: ANN001,ANN202 - a
     adapter that publishes (pushing hands the candidate to CI, which EXECUTES it before any human review)
     declares a ``ci_attested_safe`` parameter and is refused unless the operator passes the flag. An
     adapter without the parameter is unaffected."""
-    import inspect
-    kwargs = {}
-    optional = {
-        "ci_attested_safe": bool(getattr(args, "ci_attested_safe", False)),
-        "profile": getattr(args, "target_profile", None),
-        "assurance_root": getattr(args, "assurance_root", None),
-        "sandbox": _sandbox_from(getattr(args, "sandbox", None)),
-    }
-    try:
-        params = inspect.signature(module.build_context).parameters
-        kwargs = {k: v for k, v in optional.items() if k in params and v is not None}
-        if "ci_attested_safe" in params:
-            kwargs["ci_attested_safe"] = optional["ci_attested_safe"]
-    except (TypeError, ValueError):
-        pass  # un-introspectable callable: pass nothing, so the adapter keeps its fail-closed defaults
-    return module.build_context(Path(args.repo_root), args.base, **kwargs)
+    kwargs, params = _sandbox_kwargs(module.build_context, args)
+    return module.build_context(Path(args.repo_root), args.base, **kwargs), params
 
 
 def _context(args: argparse.Namespace):  # noqa: ANN202 - a LoopContext
-    ctx = _build_context(_load_adapters(args.adapters), args)
+    ctx, params = _build_context(_load_adapters(args.adapters), args)
     ctx = _enforce_capabilities(_wire_ledger(ctx, _default_ledger(args)), _allowed_capabilities(args))
-    _require_sandbox_for_write(ctx, getattr(args, "sandbox", None))
+    _require_sandbox_choice(params, ctx, args)
     return ctx
 
 
@@ -402,7 +438,15 @@ def _cmd_gc(args: argparse.Namespace) -> int:
     A publish that dies between PUSHED and PR_OPENED leaves a real remote branch no PR references. The
     write-ahead journal records that gap so it is recoverable rather than lost; this is what acts on it."""
     from loop_adapters.single_agent_write import collect_orphan_branches
-    rows = collect_orphan_branches(args.repo_root, apply=bool(args.apply))
+    # DELETING a remote ref is a write effect. `run` refuses to CREATE a branch without an explicit
+    # --allow-capabilities write; gc destroying them with no opt-in at all left the write boundary open
+    # on its destructive side. A dry run reads only, so it stays ungated.
+    if args.apply and "write" not in _allowed_capabilities(args):
+        raise LoopStateError(
+            "gc --apply DELETES branches from the remote, which is a write effect: it needs "
+            "--allow-capabilities write, the same explicit opt-in that creating them needs")
+    rows = collect_orphan_branches(args.repo_root, apply=bool(args.apply),
+                                   min_age_s=float(args.min_age_seconds))
     deleted = sum(1 for r in rows if r.get("action") == "deleted")
     pending = sum(1 for r in rows if r.get("action") == "would-delete")
     print(json.dumps({"examined": len(rows), "deleted": deleted, "would_delete": pending,
@@ -473,13 +517,22 @@ def _cmd_campaign(args: argparse.Namespace) -> int:
         # PER-GOAL ISOLATION: the adapter exposes a factory, so each goal gets its OWN LoopContext (the
         # seam a runtime fills with a per-goal branch / worktree / PR / state). Required for a
         # write-capable multi-goal campaign, where a shared working tree would let goals clobber each other.
+        # The factory gets the SAME sandbox seam as build_context: a write-capable multi-goal campaign is
+        # precisely where an unisolated agent does the most damage, and passing only positionals left it
+        # with no way to receive one while --sandbox still reported success.
+        fkwargs, fparams = _sandbox_kwargs(factory, args)
+        fkwargs = {k: v for k, v in fkwargs.items() if k in ("sandbox", "require_sandbox")}
+
         def context_for(goal):  # noqa: ANN001,ANN202 - a LoopContext
-            gctx = factory(goal, Path(args.repo_root), args.base, store_dir)
-            return _enforce_capabilities(_wire_ledger(gctx, ledger), allowed)  # per-goal capability gate
+            gctx = factory(goal, Path(args.repo_root), args.base, store_dir, **fkwargs)
+            gctx = _enforce_capabilities(_wire_ledger(gctx, ledger), allowed)  # per-goal capability gate
+            _require_sandbox_choice(fparams, gctx, args)  # ... and the per-goal sandbox gate
+            return gctx
         outcomes = run_campaign(goals, context_for=context_for, store_dir=store_dir, max_steps=args.max_steps)
     else:
-        ctx = _enforce_capabilities(_wire_ledger(_build_context(module, args),
-                                                 ledger), allowed)
+        ctx, params = _build_context(module, args)
+        ctx = _enforce_capabilities(_wire_ledger(ctx, ledger), allowed)
+        _require_sandbox_choice(params, ctx, args)
         outcomes = run_campaign(goals, ctx, store_dir=store_dir, max_steps=args.max_steps)
     _emit({"outcomes": [{"goal_id": o.goal_id, "final_phase": o.final_phase, "finalized": o.finalized,
                          "status": o.status} for o in outcomes]})
@@ -526,6 +579,14 @@ def main(argv: list[str] | None = None) -> int:
 
     p_gc = sub.add_parser("gc", help="find candidate branches pushed but never PR'd (dry run by default)")
     p_gc.add_argument("--repo-root", default=".")
+    p_gc.add_argument("--allow-capabilities", nargs="*", default=[], metavar="CAP",
+                      help="effect capabilities permitted; --apply needs 'write' (deleting a remote "
+                           "branch is a write effect, gated exactly like creating one).")
+    p_gc.add_argument("--min-age-seconds", type=float, default=1800,
+                      help="ignore journal records younger than this. {state: PUSHED, no pr_url} is not "
+                           "only the crash state - it is the NORMAL in-flight state of a publish between "
+                           "the push and `gh pr create`, so without an age floor a concurrent sweep "
+                           "deletes the branch out from under a running publish. Default 1800s.")
     p_gc.add_argument("--apply", action="store_true",
                       help="actually DELETE the orphans. Default is a dry run: deleting a remote ref is "
                            "destructive and outward-facing, so it is never the default. Each delete is "
