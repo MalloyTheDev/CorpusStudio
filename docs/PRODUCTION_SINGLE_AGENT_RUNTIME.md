@@ -112,8 +112,12 @@ worktree only** — but **does not merge**. A human merges the PR.
   disposable worktree**; the developer's main tree is never touched.
 - **The unit of change is the agent's OWN sealed diff.** The agent proposes a unified diff (sealed as the
   7.0 `agent_proposal` record); the executor applies *that exact diff* deterministically with `git apply`
-  into a **separate, pristine** branch worktree, verifies the applied `changed_paths` match the sealed
-  proposal, then commits/pushes/opens the PR. A drifted apply fails closed.
+  into a **separate, pristine** branch worktree, then **classifies what git actually realized** against the
+  writable allowlist (status / mode / path / basename / bounds / secrets / invisible characters) before
+  committing and publishing. *(The original `changed_paths`-match check was replaced in 7.1.2: comparing
+  the applied paths to the proposal's own self-reported list only proved the diff agreed with itself. The
+  allowlist classification is strictly stronger — it is computed from git plumbing and does not trust the
+  proposal at all.)*
 - **Agent confinement (7.1.1):** the untrusted agent runs with **cwd inside a disposable, detached
   worktree** at `base` (never the developer's tree, never the apply worktree), a **sanitized (secret-free)
   environment** (no `*TOKEN*`/`*SECRET*`/cloud/registry/VCS auth reaches it), a **version-pinned read-only
@@ -227,7 +231,7 @@ flip, an edit outside the surface, a secret smuggled into an *allowed* in-place 
 change. Plus: the compiled glob matcher is proven path-aware where `fnmatch` fails open; tests assert edits
 appear **only** under the isolated worktree path (the
 main tree's `git status` is clean); the agent runs confined (cwd = a disposable worktree, sanitized env,
-bounded output); a diff that won't apply / a drifted apply fails closed; a **human-gated candidate
+bounded output); a diff that won't apply fails closed; a **human-gated candidate
 obligation**, a **worker-closure candidate**, a **sensitive path** (incl. gate-config), and a **secret in
 the diff** each publish **nothing** (no push, no PR) and the candidate outcome is recorded; a **clear
 candidate** publishes by refspec from a detached worktree; candidate assurance is proven to *analyze* the
@@ -265,7 +269,11 @@ escalates; a self-modify / assurance / worker / sealed PR **never** merges regar
    the shared `HUMAN_GATED_OBLIGATIONS`.)
 2. The agent **cannot self-approve**: no self-granting a `HUMAN_APPROVAL`, no self-fabricated evidence
    (pre-critic snapshot + `step()` authorization restore).
-3. Any **write-capable** context must carry `verify_paths` (or be refused at construction); boundary
+3. Any **write-capable MULTI-AGENT** context must carry `verify_paths` (or be refused at construction) —
+   `__post_init__` enforces exactly that, and `verify_paths` only bounds a *delegated* wave. The shipped
+   single-agent write path (7.1) is `multi_agent=False` and does not carry one; its boundary is the
+   git-authoritative allowlist classification instead. (Corrected: this invariant previously read as
+   applying to every write-capable context, which the shipped adapter does not satisfy.) Boundary
    enforcement is against the **independent** worktree diff.
 4. **Capability declaration + operator opt-in**: a write-capable adapter cannot be loaded without
    `--allow-capabilities`.
