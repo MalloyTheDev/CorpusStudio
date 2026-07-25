@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -278,3 +279,51 @@ def test_the_subprocess_client_fails_closed_on_oversized_output(
     client = sa.ClaudeSubprocessClient(max_output_bytes=8)  # cap below the output size
     with pytest.raises(sa.AgentError, match="oversized"):
         client.propose({"goal": "g", "_cwd": str(tmp_path)})
+
+
+# --------------------------------------------------------- confined HOME (independent-review residual)
+
+
+def test_the_confined_home_hides_credential_paths_but_keeps_the_transport_working(tmp_path: Path) -> None:
+    """The agent's sanitized env preserved HOME, so `~/.config/gh/hosts.yml` (a token with WRITE access to
+    this repo), `~/.ssh`, and ~/.claude's sessions/history/other-projects transcripts were all reachable by
+    plain `~` expansion. The confined HOME repoints HOME + every XDG base at a throwaway dir containing
+    ONLY what the transport needs to authenticate itself."""
+    with sa._confined_home(tmp_path) as home:
+        env = sa._sanitized_env(home)
+        assert env["HOME"] == str(home)
+        for var in ("XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME"):
+            assert env[var].startswith(str(home)), var
+        # the credential-shaped paths do not exist under the confined home...
+        for rel in (".config/gh/hosts.yml", ".ssh", ".aws/credentials", ".netrc",
+                    ".claude/history.jsonl", ".claude/sessions", ".claude/projects"):
+            assert not (home / rel).exists(), rel
+        # ...while the deliberate passthroughs are linked when they exist on the real home
+        for rel in sa._AGENT_HOME_PASSTHROUGH:
+            if (Path.home() / rel).exists():
+                assert (home / rel).exists(), rel
+    assert not home.exists(), "the confined home must be disposed"
+
+
+def test_sanitized_env_without_a_home_is_unchanged(tmp_path: Path) -> None:
+    # the confinement is opt-in per call: no home -> the caller's HOME survives (used by non-agent callers)
+    assert "XDG_STATE_HOME" not in {k: v for k, v in sa._sanitized_env().items() if k == "XDG_STATE_HOME"} \
+        or sa._sanitized_env().get("HOME") == os.environ.get("HOME")
+
+
+def test_the_propose_executor_hands_the_agent_a_confined_home(tmp_path: Path) -> None:
+    seen: dict = {}
+
+    class _Probe:
+        def propose(self, request: dict) -> dict:
+            seen.update(request)
+            seen["home_existed"] = bool(request.get("_home")) and Path(request["_home"]).is_dir()
+            return {"unified_diff": _DIFF, "rationale": "r"}
+
+    root = _repo(tmp_path)
+    ctx = sa.build_context(root, "main", agent_client=_Probe(), proposals_dir=tmp_path / "p",
+                           worktrees_dir=tmp_path / "wt", run_cs_assure=_cs_assure_green())
+    run_loop(LoopState(goal="g", goal_id="g1", current_phase=Phase.RECEIVE_GOAL), ctx)
+    assert seen.get("home_existed") is True, "the agent was not given a confined HOME"
+    assert Path(seen["_home"]).resolve() != Path.home().resolve()
+    assert not Path(seen["_home"]).exists(), "the confined home must be disposed after the propose"

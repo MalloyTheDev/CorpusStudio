@@ -80,6 +80,7 @@ from loop_adapters.single_agent import (
     ClaudeSubprocessClient,
     _changed_paths_of,
     _default_proposals_dir,
+    _confined_home,
     _detached_worktree,
     _resolve_base_oid,
     _sanitized_env,
@@ -749,9 +750,11 @@ def _make_write_executor(agent_client: AgentClient, repo_root: Path, base: str, 
         # 1) PROPOSE - run the UNTRUSTED agent CONFINED: cwd inside a disposable, detached worktree at base
         #    (never the developer's tree AND never the apply worktree) with a secret-free env. Whatever it
         #    writes into that throwaway checkout is discarded on exit; only the diff it RETURNS is used.
-        with _detached_worktree(repo_root, base_oid, worktrees_dir) as propose_wt:
+        with _detached_worktree(repo_root, base_oid, worktrees_dir) as propose_wt, \
+                _confined_home(worktrees_dir) as propose_home:
             request = {"goal": state.goal, "goal_id": state.goal_id, "base_oid": base_oid,
                        "repo_root": str(repo_root), "_cwd": str(propose_wt),
+                       "_home": str(propose_home),
                        "directive": {"phase": directive.phase, "action": directive.action,
                                      "allowed_paths": list(directive.allowed_paths)}}
             diff, rationale = _validate_proposal(agent_client.propose(request))  # RAISES -> fail-closed
