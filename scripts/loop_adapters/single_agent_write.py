@@ -783,16 +783,27 @@ def _record_candidate_assurance(state: LoopState, record: dict[str, Any], branch
     }
 
 
-_PR_DISCLOSURE = (
-    "> **Machine-authored, NOT yet human-reviewed.** Opened autonomously by the CorpusStudio "
-    "single-agent write runtime (7.1). Only STATIC candidate assurance has run; the dynamic gate runs in "
-    "CI on this PR, and a human reviews and merges. Read the diff on that basis.\n\n")
+def _target_has_ci(repo_root: Path) -> bool:
+    """Does this repository have CI that will run on the pushed branch?"""
+    wf = repo_root / ".github" / "workflows"
+    return wf.is_dir() and any(wf.glob("*.yml")) or (wf.is_dir() and any(wf.glob("*.yaml")))
 
 
-def _pr_body(rationale: str) -> str:
-    """The PR body, led by the machine-authored disclosure. The commit message alone was not enough: the
-    PR is what a reviewer reads first, and an autonomously-opened PR must SAY so where it is seen."""
-    return _PR_DISCLOSURE + (rationale or "_No rationale supplied by the agent._")
+def _pr_body(rationale: str, has_ci: bool) -> str:
+    """The PR body, led by a disclosure that is TRUE FOR THIS TARGET.
+
+    The first version hardcoded "the dynamic gate runs in CI on this PR" - and the very first real run
+    published to a repository with NO CI AT ALL, so the disclosure asserted a check that would never
+    happen. A disclosure a reviewer relies on must not overclaim; where nothing will run, it says so, and
+    the reviewer knows the diff is all the assurance there is."""
+    dynamic = ("the dynamic gate (lint/type/tests) runs in CI on this PR"
+               if has_ci else
+               "**this repository has no CI, so NOTHING will run these changes** - static assurance and "
+               "your reading of the diff are the only checks")
+    return ("> **Machine-authored, NOT yet human-reviewed.** Opened autonomously by the CorpusStudio "
+            "single-agent write runtime (7.1). Only STATIC candidate assurance has run; "
+            f"{dynamic}, and a human reviews and merges. Read the diff on that basis.\n\n"
+            + (rationale or "_No rationale supplied by the agent._"))
 
 
 def _verify_commit_identity(wt: Path, commit: str, tree_oid: str, base_oid: str) -> None:
@@ -1067,7 +1078,7 @@ def _make_write_executor(agent_client: AgentClient, repo_root: Path, base: str, 
                 # STRUCTURAL signal that survives a body edit - unlike the text disclosure alone.
                 code, pr_out, err = gh_runner("pr", "create", "--draft", "--head", branch, "--base", base,
                                               "--title", (state.goal or "agent change")[:120],
-                                              "--body", _pr_body(rationale))
+                                              "--body", _pr_body(rationale, _target_has_ci(repo_root)))
                 if code != 0:
                     raise WriteAdapterError(f"gh pr create failed (exit {code}): {err.strip()[:200]}")
             _journal_write(journal, "PR_OPENED", pr_url=pr_out.strip())

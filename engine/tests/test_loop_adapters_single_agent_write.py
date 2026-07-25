@@ -869,12 +869,28 @@ def test_an_unreadable_blob_fails_closed_rather_than_scanning_empty_content(tmp_
         saw._read_blob(root, oid, _TARGET)
 
 
-def test_the_pr_body_declares_it_is_machine_authored() -> None:
-    body = saw._pr_body("Tidy a docstring.")
-    assert "NOT yet human-reviewed" in body and "Machine-authored" in body
-    assert "Tidy a docstring." in body
+def test_the_pr_body_declares_it_is_machine_authored_and_does_not_overclaim(tmp_path: Path) -> None:
+    """The first real run published to a repo with NO CI while the body asserted "the dynamic gate runs in
+    CI on this PR" - a check that would never happen. A disclosure a reviewer RELIES ON must not
+    overclaim: where nothing will run, it must say so."""
+    with_ci = saw._pr_body("Tidy a docstring.", True)
+    assert "Machine-authored" in with_ci and "NOT yet human-reviewed" in with_ci
+    assert "Tidy a docstring." in with_ci and "runs in CI" in with_ci
+
+    without_ci = saw._pr_body("Tidy a docstring.", False)
+    assert "no CI" in without_ci and "NOTHING will run these changes" in without_ci
+    assert "runs in CI on this PR" not in without_ci      # the false claim is GONE
     # an agent that supplies no rationale still gets the disclosure
-    assert "NOT yet human-reviewed" in saw._pr_body("")
+    assert "NOT yet human-reviewed" in saw._pr_body("", False)
+
+
+def test_target_ci_detection(tmp_path: Path) -> None:
+    assert saw._target_has_ci(tmp_path) is False                      # no .github at all
+    wf = tmp_path / ".github" / "workflows"
+    wf.mkdir(parents=True)
+    assert saw._target_has_ci(tmp_path) is False                      # empty dir
+    (wf / "ci.yml").write_text("on: [push]\n")
+    assert saw._target_has_ci(tmp_path) is True
 
 
 def test_the_proposal_is_referenced_even_when_pr_create_fails(tmp_path: Path) -> None:
