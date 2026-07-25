@@ -8,6 +8,7 @@ apply) fails closed. A local bare remote makes ``git push`` work offline; ``gh``
 
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -24,7 +25,10 @@ import loop_adapters.single_agent_write as saw  # noqa: E402
 from loop.controller import LoopState, Phase  # noqa: E402
 from loop.orchestrate import run_loop  # noqa: E402
 
-_DIFF = "--- a/README.md\n+++ b/README.md\n@@ -1 +1 @@\n-old\n+new\n"
+# The writable surface (7.1.2) is MODIFY-ONLY under engine/corpus_studio/**/*.py, so the "legit" change
+# every happy-path test drives is an in-place edit of a product module.
+_TARGET = "engine/corpus_studio/mod.py"
+_DIFF = f"--- a/{_TARGET}\n+++ b/{_TARGET}\n@@ -1 +1 @@\n-old = 1\n+new = 2\n"
 
 
 class _StubAgent:
@@ -41,18 +45,36 @@ class _StubAgent:
         return self.response
 
 
-def _cs_assure_green():
-    import json
+def _green_verify():
+    # for the loop's OWN dev-tree OBSERVE/VERIFY (trusted, always green in these tests)
     steps = [{"name": n, "passed": True, "exit_code": 0, "timed_out": False} for n in ("ruff", "mypy", "pytest")]
+    return {"record_type": "workspace_verification", "schema_version": 2, "record_digest": "sha256:v",
+            "payload": {"gate_passed": True, "gate_steps": steps, "workspace_stable": True,
+                        "fired_obligations": [], "change_set_fingerprint": "cs:x"}}
+
+
+def _assure_runner(*, obligations=(), worker_reachable=()):
+    """A fake cs_assure. `impact` + `worker-reachability` drive the STATIC CANDIDATE assurance in the
+    executor (a fired obligation, or a changed path inside the worker import closure, blocks/routes the
+    publish); `verify`/`doclint`/`changeset` drive the loop's own dev-tree OBSERVE/VERIFY. Neither
+    candidate subcommand executes candidate code - assurance is deliberately static."""
     rec = {
-        "verify": {"record_type": "workspace_verification", "schema_version": 2, "record_digest": "sha256:v",
-                   "payload": {"gate_passed": True, "gate_steps": steps, "workspace_stable": True,
-                               "fired_obligations": [], "change_set_fingerprint": "cs:x"}},
+        "impact": {"record_digest": "sha256:imp",
+                   "payload": {"fired_obligations": [{"id": o, "severity": "blocking"} for o in obligations],
+                               "base_policy_available": True, "change_set_fingerprint": "cs:x"},
+                   "provenance": {"policy_digest": "sha256:p"}},
+        "worker-reachability": {"payload": {"undeclared_reachable": list(worker_reachable),
+                                            "worker_roots": [], "added_reachable": [],
+                                            "distribution_impacting_paths": []}},
+        "verify": _green_verify(),
         "changeset": {"payload": {"changed_paths": []}},
-        "impact": {"payload": {"fired_obligations": [], "base_policy_available": True, "change_set_fingerprint": "cs:x"}},
         "doclint": {"finding_count": 0},
     }
     return lambda _r, *a: (0, json.dumps(rec.get(a[0] if a else "", {})), "")
+
+
+def _cs_assure_green():
+    return _assure_runner()
 
 
 def _g(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
@@ -67,6 +89,13 @@ def _repo_with_remote(tmp_path: Path) -> tuple[Path, Path]:
     _g(root, "config", "user.email", "a@b.c")
     _g(root, "config", "user.name", "t")
     (root / "README.md").write_text("old\n")
+    target = root / _TARGET
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("old = 1\n")
+    (root / ".github").mkdir(exist_ok=True)
+    (root / ".github" / "dependabot.yml").write_text("version: 2\n")
+    (root / "secrets").mkdir(exist_ok=True)
+    (root / "secrets" / "deploy.pem").write_text("-----BEGIN RSA PRIVATE KEY-----\nAKIAIOSFODNN7EXAMPLE\n")
     _g(root, "add", "-A")
     _g(root, "commit", "-q", "-m", "base")
     _g(root, "remote", "add", "origin", str(remote))
@@ -83,10 +112,11 @@ def _fake_gh(calls: list):
     return run
 
 
-def _build(tmp_path: Path, root: Path, agent: _StubAgent, calls: list):
+def _build(tmp_path: Path, root: Path, agent: _StubAgent, calls: list, assure=None):
     return saw.build_context(root, "main", agent_client=agent, proposals_dir=tmp_path / "prop",
                              worktrees_dir=tmp_path / "wt", gh_runner=_fake_gh(calls),
-                             run_cs_assure=_cs_assure_green())
+                             run_cs_assure=assure or _cs_assure_green(),
+                             ci_attested_safe=True)  # the operator's explicit CI attestation
 
 
 # --------------------------------------------------------------------------- the write path + isolation
@@ -109,15 +139,16 @@ def test_write_run_applies_in_a_worktree_pushes_a_branch_opens_a_pr_and_leaves_m
     assert state.current_phase is Phase.ESCALATED
     assert ("pr", "create") in [c[:2] for c in calls] and ("pr", "merge") not in [c[:2] for c in calls]
     ref = state.review_state["agent_proposals"][0]
-    assert ref["branch"] == "cs-agent/g1" and ref["pr"] == "https://example/pull/1"
-    assert ref["changed_paths"] == ["README.md"]
+    assert ref["branch"].startswith("cs-agent/g1-") and ref["pr"] == "https://example/pull/1"
+    assert ref["changed_paths"] == [_TARGET]
 
     # the write landed on a PUSHED branch in the remote, carrying the applied change...
-    assert "cs-agent/g1" in _g(remote, "branch", "--list", "cs-agent/g1").stdout
-    assert _g(remote, "show", "cs-agent/g1:README.md").stdout == "new\n"
+    assert "cs-agent/g1" in _g(remote, "branch", "--list", "cs-agent/g1-*").stdout
+    br = [b.strip("* ") for b in _g(remote, "branch", "--list").stdout.splitlines() if "cs-agent" in b][0]
+    assert _g(remote, "show", f"{br}:{_TARGET}").stdout == "new = 2\n"
     # ...but the developer's MAIN working tree is pristine, and no worktree is left behind
     assert _g(root, "status", "--porcelain").stdout == ""
-    assert (root / "README.md").read_text() == "old\n"
+    assert (root / _TARGET).read_text() == "old = 1\n"
     assert "cs-agent" not in _g(root, "worktree", "list").stdout
 
 
@@ -143,7 +174,7 @@ def test_a_diff_that_does_not_apply_fails_closed_and_writes_nothing(tmp_path: Pa
     run_loop(state, _build(tmp_path, root, bad, []))
     # git apply rejects the bogus hunk -> WriteAdapterError -> escalate; nothing pushed, main pristine, no leftover wt
     assert state.current_phase is Phase.ESCALATED
-    assert _g(remote, "branch", "--list", "cs-agent/g1").stdout == ""
+    assert _g(remote, "branch", "--list", "cs-agent/g1-*").stdout == ""
     assert _g(root, "status", "--porcelain").stdout == "" and "cs-agent" not in _g(root, "worktree", "list").stdout
 
 
@@ -153,11 +184,199 @@ def test_a_pr_create_failure_fails_closed(tmp_path: Path) -> None:
     def gh_refuses(*argv: str) -> tuple[int, str, str]:
         return (1, "", "gh: not authenticated") if argv[:2] == ("pr", "create") else (0, "", "")
     ctx = saw.build_context(root, "main", agent_client=_StubAgent(), proposals_dir=tmp_path / "p",
-                            worktrees_dir=tmp_path / "w", gh_runner=gh_refuses, run_cs_assure=_cs_assure_green())
+                            worktrees_dir=tmp_path / "w", gh_runner=gh_refuses,
+                            run_cs_assure=_cs_assure_green(), ci_attested_safe=True)
     state = LoopState(goal="g", goal_id="g1", current_phase=Phase.RECEIVE_GOAL)
     run_loop(state, ctx)
     assert state.current_phase is Phase.ESCALATED  # a failed PR-create escalates; the worktree is still disposed
     assert "cs-agent" not in _g(root, "worktree", "list").stdout
+
+
+# ------------------------------------------------------------------ candidate assurance gates the publish (7.1.2)
+
+
+def _denied_diff(path: str) -> str:
+    return f"--- /dev/null\n+++ b/{path}\n@@ -0,0 +1 @@\n+content\n"
+
+
+def test_a_human_gated_candidate_escalates_and_publishes_nothing(tmp_path: Path) -> None:
+    root, remote = _repo_with_remote(tmp_path)
+    calls: list = []
+    # the candidate's static impact fires a self-modify obligation -> AUTHORIZATION_REQUIRED (a human).
+    assure = _assure_runner(obligations=("loop-controller-self-modify",))
+    ctx = _build(tmp_path, root, _StubAgent(), calls, assure=assure)
+    state = LoopState(goal="g", goal_id="g1", current_phase=Phase.RECEIVE_GOAL)
+    run_loop(state, ctx, max_steps=25)
+    assert state.current_phase is Phase.ESCALATED
+    assert ("pr", "create") not in [c[:2] for c in calls]
+    assert _g(remote, "branch", "--list", "cs-agent/g1-*").stdout == ""
+    ca = state.review_state["candidate_assurance"]
+    assert ca["published"] is False and ca["observation"] == "AUTHORIZATION_REQUIRED"
+
+
+def test_a_worker_touching_candidate_escalates_and_publishes_nothing(tmp_path: Path) -> None:
+    root, remote = _repo_with_remote(tmp_path)
+    calls: list = []
+    # the candidate's static impact fires worker-closure -> WORKER_LINEAGE_IMPACT (human-gated workflow).
+    ctx = _build(tmp_path, root, _StubAgent(), calls, assure=_assure_runner(obligations=("worker-closure",)))
+    state = LoopState(goal="g", goal_id="g1", current_phase=Phase.RECEIVE_GOAL)
+    run_loop(state, ctx, max_steps=25)
+    assert ("pr", "create") not in [c[:2] for c in calls]
+    assert _g(remote, "branch", "--list", "cs-agent/g1-*").stdout == ""
+    ca = state.review_state["candidate_assurance"]
+    assert ca["published"] is False and ca["observation"] == "WORKER_LINEAGE_IMPACT"
+
+
+def test_a_clear_candidate_publishes_and_records_the_assurance(tmp_path: Path) -> None:
+    root, remote = _repo_with_remote(tmp_path)
+    calls: list = []
+    state = LoopState(goal="tidy", goal_id="g1", current_phase=Phase.RECEIVE_GOAL)
+    run_loop(state, _build(tmp_path, root, _StubAgent(), calls))
+    # a clear candidate publishes (branch pushed by refspec from a DETACHED apply worktree) + records it
+    br = [b.strip("* ") for b in _g(remote, "branch", "--list").stdout.splitlines() if "cs-agent" in b][0]
+    assert _g(remote, "show", f"{br}:{_TARGET}").stdout == "new = 2\n"
+    ca = state.review_state["candidate_assurance"]
+    assert ca["published"] is True and ca["observation"] == "SUCCESS"
+    # the candidate impact digest is an AUDIT field only - deliberately NOT in assurance_records, which
+    # feeds the completeness check (see test_the_candidates_own_analysis_is_not_completeness_evidence)
+    assert ca["impact_record_digest"] == "sha256:imp"
+
+
+def test_candidate_assurance_targets_the_candidate_worktree_not_the_dev_tree(tmp_path: Path) -> None:
+    # the whole point of 7.1.2: `impact` must ANALYZE the CANDIDATE worktree, never the dev tree. The
+    # trusted-tool wrapper passes the candidate via --start-dir, so assert on that argument.
+    seen: list = []
+    base = _assure_runner()
+
+    def recording(root, *a):
+        if a and a[0] == "impact":
+            seen.append((str(root), list(a)))
+        return base(root, *a)
+    root, _remote = _repo_with_remote(tmp_path)
+    ctx = _build(tmp_path, root, _StubAgent(), [], assure=recording)
+    run_loop(LoopState(goal="g", goal_id="g1", current_phase=Phase.RECEIVE_GOAL), ctx)
+    candidate_runs = [(r, a) for r, a in seen if "--start-dir" in a]
+    assert candidate_runs, "candidate impact was never run against a candidate worktree"
+    for run_root, argv in candidate_runs:
+        target = Path(argv[argv.index("--start-dir") + 1]).resolve()
+        assert (tmp_path / "wt").resolve() in target.parents   # analyzes the isolated worktree...
+        assert target != root.resolve()                        # ...never the dev tree
+        assert Path(run_root).resolve() == root.resolve()      # ...but EXECUTES the trusted dev-tree tool
+
+
+def test_the_candidates_own_cs_assure_is_never_executed(tmp_path: Path) -> None:
+    # HIGH (adversarial review): running the CANDIDATE's scripts/cs_assure.py puts <candidate>/scripts on
+    # sys.path[0], so a candidate-added `scripts/argparse.py` would be imported+executed as the operator.
+    # The wrapper must always run the TRUSTED dev-tree tool and merely POINT it at the candidate.
+    root, _remote = _repo_with_remote(tmp_path)
+    calls: list = []
+    wrapped = saw._trusted_cs_assure(root, lambda r, *a: calls.append((str(r), list(a))) or (0, "{}", ""))
+    candidate = tmp_path / "wt" / "apply-xyz"
+    wrapped(candidate, "impact", "--base", "main")
+    run_root, argv = calls[-1]
+    assert Path(run_root) == root                                    # the TRUSTED tool is what executes
+    assert argv[argv.index("--start-dir") + 1] == str(candidate)     # the candidate is only the SUBJECT
+    # a dev-tree call is passed through untouched (no redundant --start-dir)
+    wrapped(root, "verify", "--base", "main")
+    assert calls[-1] == (str(root), ["verify", "--base", "main"])
+
+
+ATTACKS: dict[str, str] = {
+    # every one of these was a VERIFIED hole in the denylist design, or a known execution trick
+    "case-variant of a protected path":
+        "--- /dev/null\n+++ b/Scripts/argparse.py\n@@ -0,0 +1 @@\n+import os\n",
+    "rename-from hides a denied path":
+        "diff --git a/.github/dependabot.yml b/engine/corpus_studio/notes.py\n"
+        "similarity index 100%\nrename from .github/dependabot.yml\nrename to engine/corpus_studio/notes.py\n",
+    "conftest injection (a create)":
+        "--- /dev/null\n+++ b/engine/corpus_studio/conftest.py\n@@ -0,0 +1 @@\n+collect_ignore_glob=['*']\n",
+    "symlink into the operator filesystem":
+        "diff --git a/engine/corpus_studio/l.py b/engine/corpus_studio/l.py\nnew file mode 120000\n"
+        "--- /dev/null\n+++ b/engine/corpus_studio/l.py\n@@ -0,0 +1 @@\n+/etc/passwd\n",
+    "exec-bit flip":
+        "diff --git a/%(t)s b/%(t)s\nold mode 100644\nnew mode 100755\n" % {"t": _TARGET},
+    "an edit outside the writable surface":
+        "--- a/README.md\n+++ b/README.md\n@@ -1 +1 @@\n-old\n+new\n",
+    "a secret smuggled into an ALLOWED in-place edit":
+        "--- a/%(t)s\n+++ b/%(t)s\n@@ -1 +1,2 @@\n old = 1\n+K = 'AKIAIOSFODNN7EXAMPLE'\n" % {"t": _TARGET},
+    "an oversized change":
+        "--- a/%(t)s\n+++ b/%(t)s\n@@ -1 +1,71 @@\n old = 1\n" % {"t": _TARGET}
+        + "".join("+l%d\n" % i for i in range(70)),
+}
+
+
+@pytest.mark.parametrize("name", sorted(ATTACKS))
+def test_the_attack_matrix_publishes_nothing(name: str, tmp_path: Path) -> None:
+    """Each known attack must publish NOTHING: no PR, no remote branch, and the dev tree left pristine."""
+    root, remote = _repo_with_remote(tmp_path)
+    calls: list = []
+    agent = _StubAgent({"unified_diff": ATTACKS[name], "rationale": "r"})
+    state = LoopState(goal="g", goal_id="g1", current_phase=Phase.RECEIVE_GOAL)
+    run_loop(state, _build(tmp_path, root, agent, calls), max_steps=25)
+    assert ("pr", "create") not in [c[:2] for c in calls], name
+    assert _g(remote, "branch", "--list", "cs-agent/g1-*").stdout == "", name
+    assert _g(root, "status", "--porcelain").stdout == "", name
+    assert "apply-" not in _g(root, "worktree", "list").stdout, name
+
+
+def test_agent_prose_is_scanned_and_bounded() -> None:
+    # HIGH (4th adversarial pass): the rationale reaches the commit message AND the PR body verbatim, so
+    # a secret moved out of the diff and into the prose bypassed every content check. Prose is scanned.
+    assert saw._scan_text("Fix a typo.", "the rationale") == []
+    assert saw._scan_text("see AKIAIOSFODNN7EXAMPLE", "the rationale")
+    assert saw._scan_text("-----BEGIN RSA PRIVATE KEY-----", "the rationale")
+    assert saw._scan_text("x" * 9000, "the rationale")            # bounded
+    assert saw._scan_text("ok \u202e evil", "the rationale")       # bidi override
+
+
+def test_a_secret_in_the_rationale_blocks_the_publish(tmp_path: Path) -> None:
+    root, remote = _repo_with_remote(tmp_path)
+    calls: list = []
+    agent = _StubAgent({"unified_diff": _DIFF,                      # a perfectly legal diff...
+                        "rationale": "Tidy.\n\n-----BEGIN RSA PRIVATE KEY-----\n"})  # ...secret in the prose
+    state = LoopState(goal="g", goal_id="g1", current_phase=Phase.RECEIVE_GOAL)
+    run_loop(state, _build(tmp_path, root, agent, calls), max_steps=25)
+    assert ("pr", "create") not in [c[:2] for c in calls]
+    assert _g(remote, "branch", "--list", "cs-agent/g1-*").stdout == ""
+
+
+def test_publishing_requires_an_explicit_operator_ci_attestation(tmp_path: Path) -> None:
+    """Pushing EXECUTES the candidate in CI before review, and this adapter cannot verify someone else's
+    CI by parsing it (the previous text-scan failed open five measured ways, and read the dev tree rather
+    than the workflows at base). So the operator attests, and the DEFAULT is refuse."""
+    root, remote = _repo_with_remote(tmp_path)
+    calls: list = []
+    ctx = saw.build_context(root, "main", agent_client=_StubAgent(), proposals_dir=tmp_path / "p",
+                            worktrees_dir=tmp_path / "wt", gh_runner=_fake_gh(calls),
+                            run_cs_assure=_cs_assure_green())      # <- no attestation
+    state = LoopState(goal="g", goal_id="g1", current_phase=Phase.RECEIVE_GOAL)
+    run_loop(state, ctx, max_steps=25)
+    assert ("pr", "create") not in [c[:2] for c in calls]           # nothing published by default
+    assert _g(remote, "branch", "--list", "cs-agent/g1-*").stdout == ""
+    assert saw._publish_precondition_unmet(False) is not None
+    assert saw._publish_precondition_unmet(True) is None
+
+
+def test_the_writable_surface_is_matched_case_folded_and_path_aware() -> None:
+    # fnmatch is UNUSABLE here: fnmatch('engine/tests/test_x/conftest.py','engine/tests/test_*.py') is True
+    # (it would admit an auto-executed conftest) and it REJECTS engine/corpus_studio/cli.py. Our compiled
+    # matcher gets both right: '*' never crosses '/', '**/' spans directories.
+    assert saw._path_is_writable("engine/corpus_studio/cli.py")
+    assert saw._path_is_writable("engine/corpus_studio/deep/nested/mod.py")
+    for outside in ("README.md", "scripts/loop/x.py", "engine/tests/test_a.py",
+                    "engine/corpus_studio/notes.md", "engine/corpus_studio/sub/x.txt"):
+        assert not saw._path_is_writable(outside), outside
+    # case variants can only SHRINK the surface, never widen it (repo carries core.ignorecase=true)
+    assert not saw._path_is_writable("Scripts/argparse.py")
+    assert saw._path_is_writable("ENGINE/CORPUS_STUDIO/MOD.PY")  # folds INTO the allowed surface, still gated
+
+
+def test_compile_pathglob_never_crosses_a_slash() -> None:
+    rx = saw._compile_pathglob("engine/tests/test_*.py")
+    assert rx.match("engine/tests/test_a.py")
+    assert not rx.match("engine/tests/test_x/conftest.py")   # the fnmatch fail-open case
+    deep = saw._compile_pathglob("a/**/*.py")
+    assert deep.match("a/b.py") and deep.match("a/b/c/d.py") and not deep.match("a/b/c.txt")
 
 
 # --------------------------------------------------------------------------- the gh boundary (no merge)
@@ -177,15 +396,32 @@ class _FakeProc:
         self.returncode, self.stdout, self.stderr = returncode, stdout, stderr
 
 
-def test_default_worktrees_dir_resolves_the_git_path_and_falls_back(tmp_path, monkeypatch) -> None:
-    # the worktrees-dir resolver is now the SHARED helper in single_agent (write reuses it); it internally
-    # calls single_agent.subprocess, so patch THAT module. inside a repo: under the git dir (outside the tree)...
-    monkeypatch.setattr(sa.subprocess, "run",
-                        lambda *a, **k: _FakeProc(0, "/abs/git/corpusstudio-loop/worktrees\n"))
-    assert saw.default_worktrees_dir(tmp_path) == Path("/abs/git/corpusstudio-loop/worktrees")
-    # ...and outside a repo it falls back to a worktree-local path (never inside the working tree implicitly).
-    monkeypatch.setattr(sa.subprocess, "run", lambda *a, **k: _FakeProc(128, "", "not a git repo"))
-    assert saw.default_worktrees_dir(tmp_path) == tmp_path / ".corpusstudio-loop-worktrees"
+def test_the_confined_worktree_is_outside_the_repository_and_its_git_dir(tmp_path) -> None:
+    # HIGH (5th adversarial pass): this dir used to be <git-dir>/corpusstudio-loop/worktrees, so the
+    # untrusted agent's cwd sat THREE levels under the repo's own .git. Appending to .git/config
+    # (e.g. core.fsmonitor=/tmp/pwn.sh) gave persistent code execution as the operator with the full
+    # un-sanitized environment - measured. The confined checkout must live outside the repo entirely.
+    d = saw.default_worktrees_dir(tmp_path)
+    repo = tmp_path.resolve()
+    assert repo not in d.parents and d != repo          # not inside the working tree...
+    assert (repo / ".git") not in d.parents              # ...and emphatically not inside .git
+    # a naive walk up from the agent's cwd must not reach the repo or its git dir
+    escaped = (d / "propose-x" / ".." / ".." / "..").resolve()
+    assert repo not in escaped.parents and escaped != repo and escaped != repo / ".git"
+    # distinct repos get distinct roots (no cross-repo collision)
+    assert saw.default_worktrees_dir(tmp_path) != saw.default_worktrees_dir(tmp_path / "other")
+
+
+def test_adapter_git_pins_hooks_and_fsmonitor_off(tmp_path, monkeypatch) -> None:
+    # core.hooksPath=/dev/null does NOT suppress core.fsmonitor (measured), and BOTH run with the
+    # operator's full environment - so both must be disabled on every invocation, in BOTH adapters.
+    seen: list = []
+    monkeypatch.setattr(sa.subprocess, "run", lambda a, **k: seen.append(a) or _FakeProc(0, ""))
+    sa._git(tmp_path, "status")
+    assert "core.hooksPath=/dev/null" in seen[-1] and "core.fsmonitor=" in seen[-1]
+    monkeypatch.setattr(saw.subprocess, "run", lambda a, **k: seen.append(a) or _FakeProc(0, ""))
+    saw._git(tmp_path, "status")
+    assert "core.hooksPath=/dev/null" in seen[-1] and "core.fsmonitor=" in seen[-1]
 
 
 def test_git_helper_fails_closed_on_a_nonzero_exit(tmp_path) -> None:
@@ -196,7 +432,290 @@ def test_git_helper_fails_closed_on_a_nonzero_exit(tmp_path) -> None:
 
 def test_branch_suffix_is_sanitized_to_a_safe_ref() -> None:
     # a messy goal id can never yield an invalid git ref (spaces / punctuation / '..' / case / length).
-    assert saw._sanitize_branch_suffix("Fix bug #5 (README)!") == "fix-bug-5-readme"
-    assert saw._sanitize_branch_suffix("a..b") == "a-b" and ".." not in saw._sanitize_branch_suffix("a..b")
-    assert saw._sanitize_branch_suffix("") == "goal" and saw._sanitize_branch_suffix("...--__") == "goal"
-    assert len(saw._sanitize_branch_suffix("x" * 100)) <= 40
+    assert saw._sanitize_branch_suffix("Fix bug #5 (README)!").startswith("fix-bug-5-readme-")
+    assert ".." not in saw._sanitize_branch_suffix("a..b")
+    assert saw._sanitize_branch_suffix("").startswith("goal-")
+    assert saw._sanitize_branch_suffix("...--__").startswith("goal-")
+    assert len(saw._sanitize_branch_suffix("x" * 100)) <= 50   # 40-char slug + "-" + 8-hex digest
+
+
+def test_the_worker_import_closure_blocks_the_publish(tmp_path: Path) -> None:
+    # HIGH (4th pass): the worker-closure OBLIGATION only flags the 7 DECLARED worker files, but the
+    # worker's REAL import closure is far wider (43 undeclared-reachable modules on this repo) and those
+    # sit INSIDE the writable surface - so editing one changes worker bytes with the lineage gate silent.
+    root, remote = _repo_with_remote(tmp_path)
+    calls: list = []
+    assure = _assure_runner(worker_reachable=[_TARGET])   # the candidate's file IS worker-reachable
+    state = LoopState(goal="g", goal_id="g1", current_phase=Phase.RECEIVE_GOAL)
+    run_loop(state, _build(tmp_path, root, _StubAgent(), calls, assure=assure), max_steps=25)
+    assert ("pr", "create") not in [c[:2] for c in calls]
+    assert _g(remote, "branch", "--list", "cs-agent/g1-*").stdout == ""
+    assert state.review_state["candidate_assurance"]["observation"] == "WORKER_LINEAGE_IMPACT"
+
+
+def test_an_unusable_worker_reachability_record_fails_closed(tmp_path: Path) -> None:
+    # an uncomputable closure must never read as "touches no worker code"
+    with pytest.raises(saw.WriteAdapterError):
+        saw._worker_reachable_paths(tmp_path, "main", lambda _r, *a: (2, "", "refused"))
+    with pytest.raises(saw.WriteAdapterError):
+        saw._worker_reachable_paths(tmp_path, "main", lambda _r, *a: (0, "not json", ""))
+
+
+def test_the_candidates_own_analysis_is_not_completeness_evidence(tmp_path: Path) -> None:
+    # The candidate's OWN static analysis must NOT enter state.assurance_records: that index feeds the
+    # semantic completeness check, and seeding it lets an untrusted executor supply the evidence a later
+    # DETERMINISTIC criterion is proven by (the cross-step self-certification vector).
+    root, _remote = _repo_with_remote(tmp_path)
+    state = LoopState(goal="tidy", goal_id="g1", current_phase=Phase.RECEIVE_GOAL)
+    run_loop(state, _build(tmp_path, root, _StubAgent(), []))
+    assert state.review_state["candidate_assurance"]["impact_record_digest"] == "sha256:imp"  # audited...
+    assert "sha256:imp" not in state.assurance_records                                        # ...not evidence
+
+
+def test_an_allowlist_refusal_is_an_expected_operational_error() -> None:
+    # A denied path is this adapter's PRIMARY SAFETY MECHANISM and normal operation - it must escalate
+    # labelled as an operational refusal, not as "UNEXPECTED ... (a likely controller bug)" with a traceback.
+    from loop.orchestrate import _EXPECTED_DISPATCH_ERRORS
+    assert issubclass(saw.WriteAdapterError, _EXPECTED_DISPATCH_ERRORS)
+    assert issubclass(saw.AgentError, _EXPECTED_DISPATCH_ERRORS)
+
+
+def test_a_gh_failure_after_the_push_still_records_the_live_branch(tmp_path: Path) -> None:
+    # The push already put an agent-authored branch on the remote (CI may be running on it). A human
+    # triaging the escalation must SEE that, not an empty review_state.
+    root, remote = _repo_with_remote(tmp_path)
+
+    def gh_fails(*argv: str) -> tuple[int, str, str]:
+        return (1, "", "boom") if argv[:2] == ("pr", "create") else (0, "", "")
+    ctx = saw.build_context(root, "main", agent_client=_StubAgent(), proposals_dir=tmp_path / "p",
+                            worktrees_dir=tmp_path / "wt", gh_runner=gh_fails,
+                            run_cs_assure=_cs_assure_green(), ci_attested_safe=True)
+    state = LoopState(goal="g", goal_id="g1", current_phase=Phase.RECEIVE_GOAL)
+    run_loop(state, ctx, max_steps=25)
+    assert state.current_phase is Phase.ESCALATED
+    assert _g(remote, "branch", "--list", "cs-agent/g1-*").stdout.strip()   # the branch IS live...
+    ca = state.review_state["candidate_assurance"]                                  # ...and it is recorded
+    assert ca["published"] is True and "PR not yet opened" in ca["reason"]
+
+
+def test_a_pre_existing_credential_shaped_line_does_not_brick_a_file(tmp_path: Path) -> None:
+    """HIGH (6th pass): the loose credential heuristic ran over the WHOLE blob, so cli.py - which already
+    contains `api_key: Optional[str] = typer.Option(` at main - could NEVER be edited, and could never fix
+    the line blocking it. High-confidence token formats still scan the whole blob (that is what catches a
+    `copy from`); the loose heuristic now only sees ADDED lines."""
+    root, _remote = _repo_with_remote(tmp_path)
+    target = root / _TARGET
+    target.write_text("api_key: Optional[str] = option(\nold = 1\n")   # pre-existing, credential-SHAPED
+    _g(root, "add", "-A")
+    _g(root, "commit", "-q", "-m", "pre-existing")
+    base = _g(root, "rev-parse", "HEAD").stdout.strip()
+    diff = (f"--- a/{_TARGET}\n+++ b/{_TARGET}\n@@ -1,2 +1,3 @@\n"
+            " api_key: Optional[str] = option(\n+# a docstring fix\n old = 1\n")
+    with saw._apply_worktree(root, base, tmp_path / "wt") as wt:
+        saw._git(wt, "apply", "--index", "-", stdin=diff)
+        assert saw._classify_candidate_changes(wt, base) == []      # the innocent edit is PUBLISHABLE
+    # ...but a real token the candidate ADDS is still refused
+    bad = (f"--- a/{_TARGET}\n+++ b/{_TARGET}\n@@ -1,2 +1,3 @@\n"
+           " api_key: Optional[str] = option(\n+K = \"gho_" + "a" * 36 + "\"\n old = 1\n")
+    with saw._apply_worktree(root, base, tmp_path / "wt") as wt:
+        saw._git(wt, "apply", "--index", "-", stdin=bad)
+        assert saw._classify_candidate_changes(wt, base)
+
+
+def test_ordinary_prose_and_code_are_not_flagged_as_secrets() -> None:
+    # false positives kill the rung: every one of these is innocent and must pass.
+    for ok in ("refactor the task-oriented-configuration helper",
+               "fix the disk-space-management-check docstring",
+               "api_key: Optional[str] = typer.Option(",
+               'password = os.environ["PW"]'):
+        assert saw._scan_text(ok, "the rationale") == [], ok
+    # ...while real credential shapes still fail closed
+    for bad in ("K = \"gho_" + "a" * 36 + "\"", "oauth_token: gho_" + "a" * 36,
+                'password = "hunter2hunter2"', "-----BEGIN RSA PRIVATE KEY-----"):
+        assert saw._scan_text(bad, "the rationale"), bad
+
+
+def test_the_cache_dir_must_be_absolute(tmp_path, monkeypatch) -> None:
+    # MEDIUM (6th pass): a RELATIVE XDG_CACHE_HOME made `git -C <repo> worktree add <relpath>` resolve
+    # against the REPO ROOT, putting the confined agent back inside the tree with the operator's .git a
+    # fixed walk away - the pass-5 RCE restored silently. Anything non-absolute is discarded.
+    monkeypatch.setenv("XDG_CACHE_HOME", ".cache")
+    monkeypatch.setenv("HOME", str(tmp_path))
+    d = sa.default_worktrees_dir(tmp_path)
+    assert d.is_absolute() and tmp_path.resolve() in d.parents or d.is_absolute()
+    monkeypatch.setenv("XDG_CACHE_HOME", "")
+    assert sa.default_worktrees_dir(tmp_path).is_absolute()
+
+
+# ------------------------------------------------------- per-rule isolation (mutation-resistant, 7th pass)
+# A 7th adversarial pass MUTATION-TESTED the suite: disabling the ALLOWLIST gate (`if False:`) left all 36
+# tests green, because the only out-of-surface attack case (README.md) is also caught by the basename rule.
+# Eleven other guards likewise survived deletion. End-to-end "nothing was published" assertions cannot see
+# WHICH rule fired, so each guard now has a case that trips ONLY it.
+
+
+_CLASSIFY_SEQ = [0]
+
+
+def _classify_one(tmp_path: Path, path: str, body: str = "x = 1\n",
+                  base_body: str = "x = 0\n") -> list[str]:
+    """Apply a minimal in-place MODIFY of `path` in a real worktree and return the classifier's reasons."""
+    _CLASSIFY_SEQ[0] += 1
+    tmp_path = tmp_path / f"c{_CLASSIFY_SEQ[0]}"
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    root, _remote = _repo_with_remote(tmp_path)
+    f = root / path
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_text(base_body)
+    _g(root, "add", "-A")
+    _g(root, "commit", "-q", "-m", "seed")
+    base = _g(root, "rev-parse", "HEAD").stdout.strip()
+    n_old, n_new = len(base_body.splitlines()), len(body.splitlines())
+    diff = (f"--- a/{path}\n+++ b/{path}\n@@ -1,{n_old} +1,{n_new} @@\n"
+            + "".join(f"-{ln}\n" for ln in base_body.splitlines())
+            + "".join(f"+{ln}\n" for ln in body.splitlines()))
+    with saw._apply_worktree(root, base, tmp_path / "wt") as wt:
+        saw._git(wt, "apply", "--index", "-", stdin=diff)
+        return saw._classify_candidate_changes(wt, base)
+
+
+def test_rule_allowlist_is_the_only_thing_blocking_an_out_of_surface_path(tmp_path: Path) -> None:
+    # `engine/other/mod.py` has a SAFE basename, status M and mode 100644 - every other rule passes - so
+    # only the allowlist can refuse it. Disabling the allowlist makes this test fail (the surviving mutant).
+    reasons = _classify_one(tmp_path, "engine/other/mod.py")
+    assert reasons == ["engine/other/mod.py (outside the writable surface)"]
+    assert _classify_one(tmp_path, _TARGET) == []          # the in-surface control publishes
+
+
+def test_rule_basename_is_the_only_thing_blocking_a_bad_module_name(tmp_path: Path) -> None:
+    # inside the allowlist, so only _SAFE_BASENAME can refuse it
+    reasons = _classify_one(tmp_path, "engine/corpus_studio/Evil.py")
+    assert reasons and "unsafe module basename" in reasons[0]
+
+
+def test_rule_line_bound_is_the_only_thing_blocking_a_long_line(tmp_path: Path) -> None:
+    reasons = _classify_one(tmp_path, _TARGET, body="y = '" + "a" * 500 + "'\n")
+    assert reasons and "-byte line" in reasons[0]
+
+
+def test_rule_invisible_characters_are_the_only_thing_blocking(tmp_path: Path) -> None:
+    reasons = _classify_one(tmp_path, _TARGET, body="x = 1  # ​\n")
+    assert reasons and "invisible/format character" in reasons[0]
+
+
+def test_rule_added_line_secret_scan_is_the_only_thing_blocking(tmp_path: Path) -> None:
+    reasons = _classify_one(tmp_path, _TARGET, body='password = "hunter2hunter2hunter2"\n')
+    assert reasons and "apparent hardcoded credential" in reasons[0]
+
+
+def test_rule_added_line_scan_sees_content_that_looks_like_a_diff_header(tmp_path: Path) -> None:
+    # MEASURED bypass (7th pass): a content line beginning with "++" renders as "+++..." in the diff and
+    # was skipped as if it were the `+++ b/<path>` file header, publishing a real credential.
+    reasons = _classify_one(tmp_path, _TARGET,
+                            body='"""doc\n++password = "hunter2hunter2hunter2"\n"""\n')
+    assert reasons and "apparent hardcoded credential" in reasons[0]
+
+
+def test_rule_high_confidence_blob_scan_is_the_only_thing_blocking(tmp_path: Path) -> None:
+    reasons = _classify_one(tmp_path, _TARGET, body='K = "gho_' + "a" * 36 + '"\n')
+    assert reasons and "GitHub token" in reasons[0]
+
+
+def test_branch_names_are_unique_per_goal_even_when_slugs_collide() -> None:
+    # MEASURED (7th pass): two goal ids agreeing in the first 40 slug chars mapped to ONE branch, so the
+    # second goal could never publish (non-fast-forward) - and a retry after a transient gh failure stuck.
+    a = saw._sanitize_branch_suffix("g-engine-corpus-studio-platform-environment_manager.py")
+    b = saw._sanitize_branch_suffix("g-engine-corpus-studio-platform-environments.py")
+    assert a != b
+    assert saw._sanitize_branch_suffix("x") == saw._sanitize_branch_suffix("x")   # deterministic
+
+
+def test_the_commit_message_does_not_claim_a_human_review_that_has_not_happened(tmp_path: Path) -> None:
+    # MEASURED (7th pass): the commit asserted "[single-agent proposal, human-reviewed]" while publishing
+    # autonomously - a false provenance claim baked into the artefact a human later merges.
+    root, remote = _repo_with_remote(tmp_path)
+    run_loop(LoopState(goal="tidy", goal_id="g1", current_phase=Phase.RECEIVE_GOAL),
+             _build(tmp_path, root, _StubAgent(), []))
+    branch = [b.strip("* ") for b in _g(remote, "branch", "--list").stdout.splitlines() if "cs-agent" in b][0]
+    msg = _g(remote, "log", "-1", "--format=%B", branch).stdout
+    assert "human-reviewed]" not in msg
+    assert "NOT yet human-reviewed" in msg
+
+
+def _seed(tmp_path: Path, files: dict) -> tuple[Path, str]:
+    """A fresh repo containing `files`; returns (root, base_oid)."""
+    _CLASSIFY_SEQ[0] += 1
+    d = tmp_path / f"s{_CLASSIFY_SEQ[0]}"
+    d.mkdir(parents=True, exist_ok=True)
+    root, _remote = _repo_with_remote(d)
+    for rel, content in files.items():
+        f = root / rel
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_bytes(content if isinstance(content, bytes) else content.encode())
+    _g(root, "add", "-A")
+    _g(root, "commit", "-q", "-m", "seed")
+    return root, _g(root, "rev-parse", "HEAD").stdout.strip()
+
+
+def _classify_staged(tmp_path: Path, root: Path, base: str, mutate) -> list[str]:
+    """Stage a change directly in a candidate worktree and classify it. The classifier reads the INDEX
+    (via git plumbing), not a diff, so staging is the faithful way to isolate ONE rule - hand-written
+    hunks are brittle and test the patch format rather than the guard."""
+    with saw._apply_worktree(root, base, tmp_path / "wtx") as wt:
+        mutate(wt)
+        saw._git(wt, "add", "-A")
+        return saw._classify_candidate_changes(wt, base)
+
+
+def _write(wt: Path, rel: str, content) -> None:
+    f = wt / rel
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_bytes(content if isinstance(content, bytes) else content.encode())
+
+
+def test_rule_status_must_be_modify_is_the_only_thing_blocking_a_create(tmp_path: Path) -> None:
+    # a CREATE inside the allowlist with a safe basename: allowlist/basename/mode/content all pass, so
+    # only the status!=M rule can refuse it. Creates are how conftest injection + stdlib shadowing land.
+    root, base = _seed(tmp_path, {_TARGET: "x = 0\n"})
+    reasons = _classify_staged(tmp_path, root, base,
+                               lambda wt: _write(wt, "engine/corpus_studio/newmod.py", "x = 1\n"))
+    assert reasons and "only in-place modification is allowed" in reasons[0], reasons
+
+
+def test_rule_patch_byte_bound_is_the_only_thing_blocking(tmp_path: Path) -> None:
+    # 30 lines of ~340 B: under the 400 B/line bound and the 60-line bound, but over the 8 KiB patch bound.
+    root, base = _seed(tmp_path, {_TARGET: "x = 0\n"})
+    body = "".join(f"v{i} = '{'a' * 330}'\n" for i in range(30))
+    reasons = _classify_staged(tmp_path, root, base, lambda wt: _write(wt, _TARGET, body))
+    assert reasons and any("bytes (>" in r for r in reasons), reasons
+
+
+def test_rule_max_changed_paths_is_the_only_thing_blocking(tmp_path: Path) -> None:
+    # three tiny in-surface modifies: every per-file rule passes, so only the path-count bound refuses.
+    files = {f"engine/corpus_studio/m{i}.py": "x = 0\n" for i in range(3)}
+    root, base = _seed(tmp_path, files)
+
+    def mutate(wt: Path) -> None:
+        for rel in files:
+            _write(wt, rel, "x = 1\n")
+    reasons = _classify_staged(tmp_path, root, base, mutate)
+    assert reasons and any("paths (>" in r for r in reasons), reasons
+
+
+def test_rule_blob_size_cap_is_the_only_thing_blocking(tmp_path: Path) -> None:
+    # the RESULTING blob exceeds the 1 MiB read cap while every line stays short; the read-side cap is the
+    # only rule that can see it (the per-line and per-patch bounds are computed elsewhere).
+    root, base = _seed(tmp_path, {_TARGET: "x = 0\n"})
+    big = "".join(f"v{i} = {i}\n" for i in range(140_000))          # ~2 MB, all short lines
+    # this guard RAISES from _read_blob rather than appending a reason - both fail closed, and the raise
+    # escalates the loop (WriteAdapterError is an EXPECTED operational refusal).
+    with pytest.raises(saw.WriteAdapterError, match="oversized blob"):
+        _classify_staged(tmp_path, root, base, lambda wt: _write(wt, _TARGET, big))
+
+
+def test_rule_binary_refusal_is_the_only_thing_blocking(tmp_path: Path) -> None:
+    # bytes that are not valid UTF-8: _read_blob returns None and only that branch refuses.
+    root, base = _seed(tmp_path, {_TARGET: "x = 0\n"})
+    reasons = _classify_staged(tmp_path, root, base,
+                               lambda wt: _write(wt, _TARGET, b"x = 1\n\xff\xfe\x00binary\n"))
+    assert reasons and any("binary or non-UTF-8" in r for r in reasons), reasons

@@ -95,15 +95,29 @@ may *do*:
   [`docs/PRODUCTION_SINGLE_AGENT_RUNTIME.md`](PRODUCTION_SINGLE_AGENT_RUNTIME.md).
 - **`single_agent_write.py` (Phase 7.1: write-capable single agent, GATED).** The agent still PROPOSES a
   sealed diff (7.0 behaviour, run under the same 7.1.1 confinement); 7.1 then APPLIES that exact diff in a
-  **separate, pristine, disposable `git worktree`** (never the developer's tree, never the confined propose
-  checkout), verifies the applied change matches the sealed proposal, commits it on a fresh branch, pushes,
-  and opens a PR. It declares **`capabilities={"write"}`** (so `cs_loop run` REFUSES it without
-  `--allow-capabilities write`) and **never merges**: `write_gh` allows `pr create` + reads but refuses
-  `pr merge` (and every other mutation), and `dangerous=True` escalates the merge gate - a human reviews +
-  merges the PR. Any failure (a diff that won't apply, a drifted apply, a failed PR-create) fails closed
-  and both worktrees are disposed; the main tree is left pristine. **Not yet production-safe:** candidate
-  assurance, exact candidate identity, crash recovery, draft PRs, and sensitive-path denial are deferred
-  hardening (7.1.2 - 7.1.5) that must land before 7.1 runs against a real repository.
+  **separate, pristine, disposable DETACHED `git worktree`** (never the developer's tree, never the
+  confined propose checkout), CLASSIFIES **what git actually realized** (`diff-index --no-renames -z`, so a
+  `rename from` source appears as its own `D`) against a case-folded **ALLOWLIST** -
+  `engine/corpus_studio/**/*.py`, **modify-only**, ordinary-file modes only - scans the realized **blob
+  content** for secrets (the only layer that catches a `copy from`, which carries no `+` lines), commits
+  with git **hooks pinned off**, and **ASSURES THE
+  CANDIDATE STATICALLY** - `cs_assure impact` (self-modify / sealed-research / worker-closure / policy)
+  ANALYZES the **candidate worktree, not the dev tree** (7.1.2) while EXECUTING the **trusted dev-tree
+  tool** (via `--start-dir`, never the candidate's own `scripts/cs_assure.py`, which would import+execute a
+  candidate-added shadow stdlib module), with a **sanitized env**. It pushes
+  the branch (by refspec) + opens a PR **only when the candidate classifies clear**; a human-gated / worker
+  / policy obligation publishes **nothing** and returns the classified observation so the loop escalates.
+  The **dynamic** gate (ruff/mypy/**pytest**) is deliberately NOT run locally - pytest would EXECUTE the
+  untrusted candidate's code with the operator's env (arbitrary code execution + secret exposure); it is
+  delegated to **CI's isolated sandbox** on the opened PR, where a human merges on green. It declares
+  **`capabilities={"write"}`** (so `cs_loop run` REFUSES it without `--allow-capabilities write`) and
+  **never merges**: `write_gh` allows `pr create` + reads but refuses `pr merge` (and every other
+  mutation), and `dangerous=True` escalates the merge gate - a human reviews + merges the PR. Any failure
+  (a diff that won't apply, a drifted apply, a denied path, a secret, a blocked candidate, a failed
+  PR-create) fails closed and both worktrees are disposed; the main tree is left pristine. **Not yet
+  production-safe:** a persistent-worktree correction loop + independent reviewer (7.1.2b), exact candidate
+  identity (7.1.3), crash recovery + draft PRs (7.1.4), and a live canary + local dynamic sandbox (7.1.5)
+  must land before 7.1 runs against a real repository.
 - The **autonomous merge** path (Phase 7.2) - evidence-bound `merge_gate` + the obligation-resolution
   producer - remains future, review-gated, and needs its own explicit authorization; its seams
   (`expected_head`, `required_checks`, the head-scope impact) already exist. All adapter code is under the

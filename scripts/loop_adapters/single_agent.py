@@ -28,6 +28,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shutil
 import subprocess  # noqa: S404 - fixed-argv git / claude only; never a shell string.
 import uuid
 from contextlib import contextmanager
@@ -37,7 +38,7 @@ from typing import Any, Iterator, Protocol
 from loop.completeness import Criterion, CriterionKind
 from loop.controller import LoopState, Observation, Phase
 from loop.driver import Directive
-from loop.orchestrate import LoopContext
+from loop.orchestrate import LoopContext, LoopOrchestrateError
 from loop_adapters.dry_run import read_only_gh  # the same default-deny read-only gh the dry run uses
 
 _AGENT_TIMEOUT_S = 300  # a bounded, killable agent call - never an unbounded hang
@@ -66,11 +67,18 @@ def _sanitized_env() -> dict[str, str]:
 
 
 def _git(cwd: Path, *args: str, stdin: str | None = None) -> subprocess.CompletedProcess[str]:
-    """Run ``git -C <cwd> <args>`` (fixed argv, no shell, bounded). Raises :class:`AgentError` on a non-zero
-    exit / un-runnable git - shared by the read (propose) and write adapters."""
+    """Run ``git -C <cwd> <args>`` (fixed argv, no shell, bounded) with HOOKS AND FSMONITOR PINNED OFF.
+    Raises :class:`AgentError` on a non-zero exit / un-runnable git - shared by the read (propose) and
+    write adapters.
+
+    ``core.hooksPath=/dev/null`` stops repository hooks; ``core.fsmonitor=`` is ALSO required because
+    fsmonitor is a SEPARATE config-driven hook that ``hooksPath`` does not suppress (measured: a
+    ``core.fsmonitor`` script still executed under ``git -c core.hooksPath=/dev/null status``). Both run
+    with the operator's full environment, so both are disabled on every invocation."""
     try:
-        proc = subprocess.run(  # noqa: S603 - fixed argv, no shell.
-            ["git", "-C", str(cwd), *args], input=stdin, capture_output=True, text=True, timeout=_GIT_TIMEOUT_S)
+        proc = subprocess.run(  # noqa: S603 - fixed argv, no shell, hooks + fsmonitor disabled.
+            ["git", "-C", str(cwd), "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=",
+             *args], input=stdin, capture_output=True, text=True, timeout=_GIT_TIMEOUT_S)
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise AgentError(f"git {' '.join(args[:2])} could not run: {exc}") from exc
     if proc.returncode != 0:
@@ -94,21 +102,44 @@ def _detached_worktree(repo_root: Path, base_oid: str, worktrees_dir: Path) -> I
         try:
             _git(repo_root, "worktree", "remove", "--force", str(wt))
         except AgentError:
-            pass  # best-effort disposal; a leftover worktree is GC-able, never data loss
+            # The agent can defeat `worktree remove` by corrupting the `.git` gitfile inside its own cwd
+            # (measured), which would otherwise leave its bytes on disk AND a stale registration in the
+            # operator's repo forever. Fall back to deleting the tree ourselves and pruning the
+            # registration, so disposal is not opt-out for the untrusted party.
+            shutil.rmtree(wt, ignore_errors=True)
+            try:
+                _git(repo_root, "worktree", "prune")
+            except AgentError:
+                pass  # genuinely best-effort now; nothing of the agent's survives on disk
 
 
 def default_worktrees_dir(repo_root: Path) -> Path:
-    """``<git-dir>/corpusstudio-loop/worktrees`` (OUTSIDE the working tree), or a fallback when not in a repo."""
-    try:
-        proc = subprocess.run(  # noqa: S603 - fixed argv, no shell.
-            ["git", "-C", str(repo_root), "rev-parse", "--git-path", "corpusstudio-loop/worktrees"],
-            capture_output=True, text=True, timeout=_GIT_TIMEOUT_S)
-    except (OSError, subprocess.TimeoutExpired):
-        return repo_root / ".corpusstudio-loop-worktrees"
-    if proc.returncode != 0:
-        return repo_root / ".corpusstudio-loop-worktrees"
-    rel = proc.stdout.strip()
-    return Path(rel) if Path(rel).is_absolute() else repo_root / rel
+    """A disposable-worktree root OUTSIDE the repository entirely: ``<cache>/corpusstudio-loop/worktrees/
+    <repo-name>-<hash of the absolute repo path>``.
+
+    NOT under ``<git-dir>`` (which is where this used to live) and not under the working tree. The agent's
+    confined cwd is a directory inside here, so a naive ``../../..`` from it must NOT land in the
+    repository's ``.git``: an agent that can append to ``.git/config`` gets PERSISTENT ARBITRARY CODE
+    EXECUTION as the operator with the full un-sanitized environment - measured, via ``core.fsmonitor``,
+    which ``core.hooksPath=/dev/null`` does not suppress - and could also plant ``.git/hooks/*``.
+
+    HONEST LIMIT: a cwd is NOT a sandbox. Nothing here stops a determined process from walking to an
+    absolute path; the load-bearing restrictions on the agent are the read-only TOOL POLICY (no
+    Write/Edit/Bash) and the sanitized environment, and real isolation (container / namespace) is the
+    7.1.5 sandbox work. What this function guarantees is only that the operator's own git directory is not
+    sitting three levels above the untrusted process's working directory."""
+    root = repo_root.resolve()
+    key = hashlib.sha256(str(root).encode("utf-8")).hexdigest()[:12]
+    # The XDG spec says a RELATIVE value here is invalid and must be ignored - and it matters:
+    # `XDG_CACHE_HOME=.cache` made `git -C <repo> worktree add <relpath>` resolve against the REPO ROOT,
+    # putting the confined agent back inside the working tree with the operator's .git a fixed walk away
+    # (measured: the pass-5 RCE restored in full, silently). Anything non-absolute is discarded.
+    candidates = (os.environ.get("XDG_CACHE_HOME") or "", str(Path.home() / ".cache"))
+    base = next((Path(c) for c in candidates if c and Path(c).is_absolute()), None)
+    if base is None:  # no absolute cache dir available at all -> fail closed rather than guess
+        raise AgentError("cannot resolve an ABSOLUTE cache directory for the confined worktree "
+                         "(XDG_CACHE_HOME and HOME are both unusable); refusing to place it relatively")
+    return base / "corpusstudio-loop" / "worktrees" / f"{root.name}-{key}"
 
 
 class AgentClient(Protocol):
@@ -121,8 +152,11 @@ class AgentClient(Protocol):
         ...
 
 
-class AgentError(RuntimeError):
-    """The agent transport failed or returned output the adapter refuses to trust (fail-closed)."""
+class AgentError(LoopOrchestrateError):
+    """The agent transport failed or returned output the adapter refuses to trust (fail-closed).
+
+    Subclasses :class:`LoopOrchestrateError` so a routine transport/validation refusal escalates as an
+    EXPECTED operational failure rather than being labelled a likely controller bug with a traceback."""
 
 
 def _validate_proposal(raw: Any) -> tuple[str, str]:
