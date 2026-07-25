@@ -57,6 +57,7 @@ building blocks (the agent client, proposal sealing, diff parsing) and the loop'
 
 from __future__ import annotations
 
+import bisect
 import hashlib
 import json
 import os
@@ -196,6 +197,32 @@ _MAX_RATIONALE_BYTES = 4096     # agent prose reaches the commit message + PR bo
 _FORBIDDEN_CATEGORIES = frozenset({"Cc", "Cf", "Co", "Cs", "Zl", "Zp"})
 _ALLOWED_CONTROLS = frozenset({"\t", "\n"})
 
+# Category is NECESSARY but not SUFFICIENT: some invisible characters live in PRINTABLE categories and are
+# valid Python identifier characters - measured, U+FE0F VARIATION SELECTOR-16 (Mn) and U+3164 HANGUL FILLER
+# (Lo) both passed the category check, and `('a'+chr(0xFE0F)+'b').isidentifier()` is True, so two names that
+# render identically are distinct to the interpreter. The clean exploit is a string literal: a reviewer
+# reads `if mode == "strict": enforce()` while the literal carries a VS16, so the branch is silently dead.
+# These are exactly Unicode's DEFAULT_IGNORABLE_CODE_POINT property - the authoritative set of "renders as
+# nothing" - which CPython does not expose, so the ranges are mirrored here (Unicode 15.1) and must be
+# refreshed with the Unicode version. This is an enumeration of a SPEC-DEFINED set, not guesswork.
+_DEFAULT_IGNORABLE_RANGES: tuple[tuple[int, int], ...] = (
+    (0x00AD, 0x00AD), (0x034F, 0x034F), (0x061C, 0x061C), (0x115F, 0x1160), (0x17B4, 0x17B5),
+    (0x180B, 0x180F), (0x200B, 0x200F), (0x202A, 0x202E), (0x2060, 0x206F), (0x3164, 0x3164),
+    (0xFE00, 0xFE0F), (0xFEFF, 0xFEFF), (0xFFA0, 0xFFA0), (0xFFF0, 0xFFF8),
+    (0x1BCA0, 0x1BCA3), (0x1D173, 0x1D17A), (0xE0000, 0xE0FFF),
+)
+
+
+# Flattened, sorted boundaries for an O(log n) membership test. The linear `any()` over 17 ranges per
+# CHARACTER cost ~0.85 s on a 1 MiB blob, and this runs on every candidate file.
+_DI_BOUNDS: tuple[int, ...] = tuple(
+    b for lo, hi in sorted(_DEFAULT_IGNORABLE_RANGES) for b in (lo, hi + 1))
+
+
+def _is_default_ignorable(ch: str) -> bool:
+    """Is ``ch`` a Unicode DEFAULT_IGNORABLE_CODE_POINT (renders as nothing)?"""
+    return bisect.bisect_right(_DI_BOUNDS, ord(ch)) % 2 == 1
+
 
 def _forbidden_char(text: str) -> str | None:
     """The first invisible / format / separator character in ``text`` (as ``U+XXXX``), else None. These make
@@ -203,7 +230,7 @@ def _forbidden_char(text: str) -> str | None:
     for ch in text:
         if ch in _ALLOWED_CONTROLS:
             continue
-        if unicodedata.category(ch) in _FORBIDDEN_CATEGORIES:
+        if unicodedata.category(ch) in _FORBIDDEN_CATEGORIES or _is_default_ignorable(ch):
             return f"U+{ord(ch):04X}"
     return None
 
@@ -462,21 +489,38 @@ def _classify_candidate_changes(wt: Path, base_oid: str) -> list[str]:
             if pat.search(content):
                 reasons.append(f"{rec.path} contains {label}")
                 break
-    # The LOOSE heuristic runs ONLY over the lines the candidate ADDS (git's own -U0 diff output, not our
-    # parsing of agent text), so pre-existing content can never make a file unpublishable.
-    prev_was_old_file_header = False
-    for line in _git(wt, "diff", "--cached", "-U0", "--no-renames", base_oid).stdout.splitlines():
-        # The FILE HEADER is exactly "+++ <path>" and only ever directly follows "--- <path>". A bare
-        # startswith("+++") also swallowed CONTENT beginning with "++" (git renders it as "+++..."), so
-        # `++password = "..."` inside a docstring was never scanned and published verbatim (measured).
-        is_file_header = prev_was_old_file_header and line.startswith("+++ ")
-        prev_was_old_file_header = line.startswith("--- ")
-        if is_file_header or not line.startswith("+"):
+    # The LOOSE heuristic runs ONLY over lines the candidate ADDS, computed by comparing the REALIZED
+    # BLOBS - never by parsing diff text. Two prefix-sniffing versions of this were defeated: a content
+    # line starting "++" renders as "+++..." (read as a file header), and anchoring on a preceding "--- "
+    # failed too because a REMOVED content line starting "-- " renders as "--- " (both measured, both
+    # published a real credential). Comparing objects has no such surface.
+    for rec in records:
+        # ADDED files are scanned too, not just modified ones. A create is refused outright by the
+        # modify-only rule above, so this is defense in depth today - but the heuristic must not silently
+        # stop covering new content if that rule is ever relaxed (Sourcery, #707).
+        if rec.status not in ("M", "A") or rec.dst_mode != _MODE_REGULAR:
             continue
-        for pat, label in _ADDED_LINE_SECRET_PATTERNS:
-            if pat.search(line[1:]):
-                reasons.append(f"the candidate adds {label}")
-                break
+        new_text = _read_blob(wt, rec.dst_oid, rec.path)
+        if new_text is None:
+            continue  # binary/non-UTF-8 was already refused above
+        old_lines: set[str] = set()
+        if rec.status == "M":   # an ADDED file has no base version - every line is new
+            old_proc = subprocess.run(  # noqa: S603 - fixed argv, no shell; unreadable -> treat as empty
+                ["git", "-C", str(wt), "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=",
+                 "cat-file", "blob", f"{base_oid}:{rec.path}"],
+                capture_output=True, timeout=_GIT_TIMEOUT_S)
+            if old_proc.returncode == 0:
+                try:
+                    old_lines = set(old_proc.stdout.decode("utf-8").split("\n"))
+                except UnicodeDecodeError:
+                    old_lines = set()
+        for line in new_text.split("\n"):
+            if line in old_lines:
+                continue                      # unchanged content can never make a file unpublishable
+            for pat, label in _ADDED_LINE_SECRET_PATTERNS:
+                if pat.search(line):
+                    reasons.append(f"the candidate adds {label}")
+                    break
 
     numstat = _git(wt, "diff", "--cached", "--numstat", "--no-renames", base_oid).stdout
     touched = 0
