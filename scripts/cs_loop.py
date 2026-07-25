@@ -432,28 +432,6 @@ def _context(args: argparse.Namespace):  # noqa: ANN202 - a LoopContext
     return ctx
 
 
-def _cmd_gc(args: argparse.Namespace) -> int:
-    """Collect candidate branches that were pushed but whose PR was never opened.
-
-    A publish that dies between PUSHED and PR_OPENED leaves a real remote branch no PR references. The
-    write-ahead journal records that gap so it is recoverable rather than lost; this is what acts on it."""
-    from loop_adapters.single_agent_write import collect_orphan_branches
-    # DELETING a remote ref is a write effect. `run` refuses to CREATE a branch without an explicit
-    # --allow-capabilities write; gc destroying them with no opt-in at all left the write boundary open
-    # on its destructive side. A dry run reads only, so it stays ungated.
-    if args.apply and "write" not in _allowed_capabilities(args):
-        raise LoopStateError(
-            "gc --apply DELETES branches from the remote, which is a write effect: it needs "
-            "--allow-capabilities write, the same explicit opt-in that creating them needs")
-    rows = collect_orphan_branches(args.repo_root, apply=bool(args.apply),
-                                   min_age_s=float(args.min_age_seconds))
-    deleted = sum(1 for r in rows if r.get("action") == "deleted")
-    pending = sum(1 for r in rows if r.get("action") == "would-delete")
-    print(json.dumps({"examined": len(rows), "deleted": deleted, "would_delete": pending,
-                      "dry_run": not args.apply, "branches": rows}, indent=2, sort_keys=True))
-    return 0
-
-
 def _cmd_run(args: argparse.Namespace) -> int:
     from dataclasses import replace
 
@@ -576,23 +554,6 @@ def main(argv: list[str] | None = None) -> int:
     p_auth.add_argument("--grant", default="", help="a completeness criterion id this authorization satisfies (optional)")
     p_auth.add_argument("--note", default="")
     p_auth.set_defaults(func=_cmd_authorize)
-
-    p_gc = sub.add_parser("gc", help="find candidate branches pushed but never PR'd (dry run by default)")
-    p_gc.add_argument("--repo-root", default=".")
-    p_gc.add_argument("--allow-capabilities", nargs="*", default=[], metavar="CAP",
-                      help="effect capabilities permitted; --apply needs 'write' (deleting a remote "
-                           "branch is a write effect, gated exactly like creating one).")
-    p_gc.add_argument("--min-age-seconds", type=float, default=1800,
-                      help="ignore journal records younger than this. {state: PUSHED, no pr_url} is not "
-                           "only the crash state - it is the NORMAL in-flight state of a publish between "
-                           "the push and `gh pr create`, so without an age floor a concurrent sweep "
-                           "deletes the branch out from under a running publish. Default 1800s.")
-    p_gc.add_argument("--apply", action="store_true",
-                      help="actually DELETE the orphans. Default is a dry run: deleting a remote ref is "
-                           "destructive and outward-facing, so it is never the default. Each delete is "
-                           "force-with-lease'd against the exact oid we pushed, so a branch that moved is "
-                           "refused rather than discarded.")
-    p_gc.set_defaults(func=_cmd_gc)
 
     for name, help_text, cmd in (
         ("run", "drive the integrated loop to terminal/HOLD/step-cap via an adapter module", _cmd_run),

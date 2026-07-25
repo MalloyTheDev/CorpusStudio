@@ -47,12 +47,9 @@ Safety (why this is the least-capable *write* rung):
   * NO autonomous merge: the ``gh`` runner allows ``pr create`` + reads but REFUSES ``pr merge`` (and every
     other mutation), and ``dangerous=True`` escalates the merge gate; a human reviews + merges the PR.
 
-The later 7.1 rungs have LANDED: a persistent candidate worktree with a loop-native
-observe->diagnose->correct loop + an independent REAL reviewer (7.1.2b), exact candidate identity
-(7.1.3), a crash-resumable write-ahead journal + DRAFT PRs + :func:`collect_orphan_branches` (7.1.4),
-and the VERIFIED sandbox seam (7.1.5). The journal's orphan case is not hypothetical - a run whose
-remote is not a GitHub host pushes the candidate and then fails at ``gh pr create``, leaving exactly
-one branch no PR references; the collector is what reclaims it, and only ever on request.
+Deferred to later 7.1 rungs (documented in the design doc): a persistent candidate worktree with a
+loop-native observe->diagnose->correct loop + an independent REAL reviewer (7.1.2b), exact candidate
+identity (7.1.3), and a crash-resumable write-ahead journal + orphan-branch gc + DRAFT PRs (7.1.4).
 
 stdlib-only; every git/gh effect is a fixed-argv subprocess (no shell) and fails closed. Reuses the 7.0
 building blocks (the agent client, proposal sealing, diff parsing) and the loop's ``observe`` classifier.
@@ -64,7 +61,6 @@ import bisect
 import hashlib
 import json
 import os
-import time
 import re
 import subprocess  # noqa: S404 - fixed-argv git / gh / cs_assure only; never a shell string.
 import sys
@@ -886,183 +882,6 @@ def _existing_pr_url(gh_runner: Callable[..., "tuple[int, str, str]"], branch: s
     return ""
 
 
-_AGENT_COMMIT_EMAIL = "agent@corpusstudio.local"
-_GC_MIN_AGE_S = 1800  # 30 minutes
-
-
-def _github_repo_from_url(url: str) -> str:
-    """``owner/repo`` for a GitHub push URL, or "" for anything else.
-
-    ``gh`` resolves its target repository from the FETCH remotes and its own heuristics, NOT from the URL
-    we push to. Measured: with ``origin=myfork/proj`` + ``upstream=canonical/proj``, ``gh pr list`` queries
-    *canonical*; with a ``remote.origin.pushurl`` set, gh queries the FETCH url. So in an ordinary fork
-    workflow gh answers about a different repository than the one we are about to delete from - every
-    branch reads "no open PR" and gets deleted, including branches with live open PRs. Pinning gh to the
-    push URL's repo is what makes the answer be about the ref we are deleting."""
-    m = re.match(r"^(?:git@github\.com:|(?:ssh|git|https?)://(?:[^@/]+@)?github\.com/)"
-                 r"([^/]+)/(.+?)(?:\.git)?/?$", url.strip())
-    return f"{m.group(1)}/{m.group(2)}" if m else ""
-
-
-def _open_pr_for(gh_runner: Callable[..., "tuple[int, str, str]"], branch: str,
-                 repo: str) -> "tuple[str, bool]":
-    """``(url, answered)``. ``answered`` is False when gh COULD NOT ANSWER.
-
-    :func:`_existing_pr_url` returns "" on any non-zero exit, which was right for its original caller
-    (publish: a duplicate would then be refused by gh itself) and INVERTS when reused as the guard on a
-    DELETION - `gh` missing, unauthenticated, rate-limited, offline or under-scoped all read as "no open
-    PR exists, delete it". Here the two cases must stay distinguishable so the caller can fail closed.
-
-    ``--state all`` deliberately, not ``open``: a human who CLOSES a candidate PR intending to revisit it
-    would otherwise have the branch collected out from under them on the next sweep."""
-    code, out, _err = gh_runner("pr", "list", "--head", branch, "--state", "all",
-                                "--json", "url", "--limit", "1", "-R", repo)
-    if code != 0:
-        return "", False
-    try:
-        rows = json.loads(out)
-    except (ValueError, RecursionError):
-        return "", False
-    if isinstance(rows, list) and rows and isinstance(rows[0], dict):
-        url = rows[0].get("url")
-        return (url if isinstance(url, str) else ""), True
-    return "", True
-
-
-def _is_our_candidate(repo_root: Path, rec: dict[str, Any], oid: str) -> str:
-    """"" if ``oid`` really is the agent candidate this record describes, else why not.
-
-    A journal record is a FILE - restored from a backup, hand-edited, or written by anything that can
-    reach ``<git-dir>/corpusstudio-loop/``. Trusting its ``branch`` field as a delete target was enough to
-    destroy an unrelated branch in a measured reproduction. So the record must AGREE with the object
-    graph: the oid it claims is the one it recorded as the candidate, and the commit really is a
-    single-parent child of the recorded base authored by the pinned agent identity. Anything we cannot
-    read, we refuse - an unverifiable branch is kept, never collected."""
-    if oid != str(rec.get("candidate_commit", "")):
-        return "remote oid is not the recorded candidate commit"
-    try:
-        meta = _git(repo_root, "cat-file", "-p", f"{oid}^{{commit}}").stdout
-    except (WriteAdapterError, AgentError) as exc:
-        return f"cannot read the candidate commit to confirm it is ours: {exc}"
-    parents = [ln.split()[1] for ln in meta.splitlines() if ln.startswith("parent ")]
-    if parents != [str(rec.get("base_oid", ""))]:
-        return "candidate is not a single-parent child of the recorded base"
-    if not any(ln.startswith("author ") and f"<{_AGENT_COMMIT_EMAIL}>" in ln for ln in meta.splitlines()):
-        return f"candidate is not authored by {_AGENT_COMMIT_EMAIL}"
-    return ""
-
-
-def collect_orphan_branches(repo_root: Path | str, *, apply: bool = False,
-                            gh_runner: Callable[..., "tuple[int, str, str]"] | None = None,
-                            proposals_dir: Path | None = None, branch_prefix: str = "cs-agent/",
-                            min_age_s: float = _GC_MIN_AGE_S,
-                            repo: str | None = None) -> list[dict[str, str]]:
-    """Find - and only with ``apply=True``, delete - candidate branches pushed but never PR'd.
-
-    A publish that dies between ``PUSHED`` and ``PR_OPENED`` leaves a real branch on the remote that no PR
-    references and nobody is watching. Reproduced end-to-end: a CLI run against a target whose remote is
-    not a GitHub host pushes the candidate, then fails at ``gh pr create``.
-
-    Deleting a remote ref is DESTRUCTIVE and OUTWARD-FACING, and an independent review destroyed an
-    unrelated branch through the first version of this function. So EVERY one of these must hold, and each
-    is a refusal, never a warning:
-
-    1. the branch is under ``branch_prefix`` - the loop only ever creates branches there, so nothing else
-       is even a candidate for collection no matter what a journal file says;
-    2. the object really is our candidate: recorded oid, single-parent child of the recorded base,
-       authored by the pinned agent identity (:func:`_is_our_candidate`);
-    3. the record is at least ``min_age_s`` old. ``{state: PUSHED, no pr_url}`` is not only the crash
-       state - it is the NORMAL in-flight state of a publish between the push and ``gh pr create``. Without
-       an age floor a concurrent sweep deletes the branch out from under a running publish;
-    4. gh ANSWERED and reported no PR - pinned with ``-R`` to the push URL's own repository. gh not being
-       able to answer is not evidence of absence (:func:`_open_pr_for`);
-    5. the remote still points at exactly the oid we pushed.
-
-    The delete is then ``--force-with-lease``d against that oid, so a branch that moves DURING the sweep is
-    refused rather than destroyed. ``apply=False`` is a pure DRY RUN - it writes nothing at all, including
-    no journal healing."""
-    root = Path(repo_root).resolve()
-    jdir = (proposals_dir or _default_proposals_dir(root)) / "journal"
-    gh = gh_runner if gh_runner is not None else write_gh(root)
-    try:
-        url = _git(root, "remote", "get-url", "--push", "origin").stdout.strip()
-    except (WriteAdapterError, AgentError) as exc:
-        raise WriteAdapterError(f"cannot resolve the push URL for origin; refusing to collect: {exc}") from exc
-    # `repo` is an injection seam for tests, exactly like `gh_runner`: against a local bare remote there
-    # is no GitHub repo to derive. The CLI NEVER passes it, so operators always get URL-derived pinning.
-    repo = repo if repo is not None else _github_repo_from_url(url)
-    out: list[dict[str, str]] = []
-    for jpath in sorted(jdir.glob("*.json")) if jdir.is_dir() else []:
-        rec = _journal_read(jpath)
-        branch, pushed = str(rec.get("branch", "")), str(rec.get("remote_oid", ""))
-        if rec.get("state") != "PUSHED" or not branch or not pushed or rec.get("pr_url"):
-            continue
-        row = {"branch": branch, "oid": pushed, "journal": str(jpath), "action": "kept"}
-
-        def keep(why: str) -> None:
-            row.update(reason=why)
-            out.append(row)
-
-        if not branch.startswith(branch_prefix) or ".." in branch or branch.startswith("-"):
-            keep(f"branch is not under {branch_prefix!r}; the loop never created it, so it is not ours")
-            continue
-        try:
-            age = time.time() - jpath.stat().st_mtime
-        except OSError as exc:
-            keep(f"cannot determine the record age: {exc}")
-            continue
-        if age < min_age_s:
-            keep(f"record is {int(age)}s old (< {int(min_age_s)}s): a publish may still be in flight")
-            continue
-        if not repo:
-            keep(f"push URL {url!r} is not a GitHub repo, so no PR check can be trusted")
-            continue
-        pr, answered = _open_pr_for(gh, branch, repo)
-        if not answered:
-            keep("gh could not answer whether a PR exists; absence of an answer is not absence of a PR")
-            continue
-        if pr:
-            if apply:  # a DRY RUN writes nothing, so healing waits for a real sweep
-                _journal_write(jpath, "PR_OPENED", pr_url=pr)
-            keep(f"a PR exists ({pr}); not an orphan" + (" - journal healed" if apply else ""))
-            continue
-        try:
-            actual = _remote_ref_oid(root, branch)
-        except WriteAdapterError as exc:
-            keep(f"could not verify the remote ref, refusing to delete blind: {exc}")
-            continue
-        if not actual:
-            row.update(action="gone", reason="already absent from the remote")
-            out.append(row)
-            continue
-        if actual != pushed:
-            keep(f"remote moved to {actual[:12]}, not ours; left alone")
-            continue
-        mismatch = _is_our_candidate(root, rec, actual)
-        if mismatch:
-            keep(mismatch)
-            continue
-        if not apply:
-            row.update(action="would-delete", reason="orphan: pushed, no PR, unmoved, ours (dry run)")
-            out.append(row)
-            continue
-        try:
-            _git(root, "push", f"--force-with-lease=refs/heads/{branch}:{pushed}", url,
-                 f":refs/heads/{branch}")
-        except (WriteAdapterError, AgentError) as exc:
-            # A refused delete is a SUCCESS of the lease, not a failure of the collector: the ref moved
-            # under us. Report it and keep going - one stuck branch must not abort the whole sweep.
-            # Both error types are caught because this module's `_git` raises WriteAdapterError while the
-            # shared helper raises AgentError, and catching only one let a lease rejection - the exact case
-            # this exists to handle - escape and kill the sweep.
-            keep(f"delete refused, branch kept: {exc}")
-        else:
-            row.update(action="deleted", reason="orphan removed")
-            _journal_write(jpath, "PUSHED", collected="deleted")
-            out.append(row)
-    return out
-
-
 def _remote_ref_oid(repo_root: Path, branch: str) -> str:
     """The oid the REMOTE actually has for ``refs/heads/<branch>``, or "" if absent. Fail-closed.
 
@@ -1343,5 +1162,4 @@ def build_context(repo_root: Path | str, base: str = "main", *, agent_client: Ag
 
 # Re-export so `AgentError` (the confined-propose transport error) and the shared worktree-dir resolver are
 # reachable via this module too - the executor may surface either error, and callers/tests use the resolver.
-__all__ = ["AgentError", "WriteAdapterError", "build_context", "collect_orphan_branches",
-           "default_worktrees_dir", "write_gh"]
+__all__ = ["AgentError", "WriteAdapterError", "build_context", "default_worktrees_dir", "write_gh"]
