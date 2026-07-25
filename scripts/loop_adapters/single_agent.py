@@ -187,6 +187,91 @@ def default_worktrees_dir(repo_root: Path) -> Path:
     return base / "corpusstudio-loop" / "worktrees" / f"{root.name}-{key}"
 
 
+# ============================================================ agent sandboxing (phase 7.1.5)
+# The confinement shipped through 7.1.4 is cwd + a sanitized env + a redirected HOME + a read-only tool
+# policy. Every one of those is DEFENCE IN DEPTH, not a boundary: the subprocess runs as the operator's
+# UID and can read any ABSOLUTE path it guesses. Encoded exfiltration (base64/hex/split) was measured
+# defeating every content scan, so the only real answer is OS-level isolation.
+#
+# This is the SEAM plus - crucially - a PROBE. Presence of a sandbox binary proves nothing: on the host
+# this was written for, `bwrap` is installed and CANNOT WORK (`apparmor_restrict_unprivileged_userns=1`
+# blocks unprivileged user namespaces). A sandbox that silently fails open is worse than none, because it
+# converts an known gap into a false assurance. So the sandbox is VERIFIED by trying to read a canary
+# secret from inside it, and an unverified sandbox REFUSES rather than degrades.
+_SANDBOX_PROBE_TIMEOUT_S = 20
+
+
+class SandboxRunner(Protocol):
+    """Wraps an agent argv so it executes under OS-level isolation.
+
+    ``wrap`` returns the argv to actually run. ``cwd`` is the disposable worktree the agent may write;
+    ``home`` is its throwaway HOME. An implementation MUST deny read access to the operator's real home
+    and SHOULD deny network access."""
+
+    def wrap(self, argv: "tuple[str, ...]", *, cwd: Path, home: Path) -> "tuple[str, ...]":
+        ...
+
+
+class BubblewrapSandbox:
+    """A :class:`SandboxRunner` backed by ``bwrap``: the candidate worktree and a throwaway HOME are bound
+    read-write, the system runtime read-only, and nothing else of the operator's filesystem is visible.
+
+    Not usable everywhere - it needs unprivileged user namespaces, which several distributions restrict by
+    default. :func:`verify_sandbox` is what decides whether it actually works HERE."""
+
+    def __init__(self, bwrap: str = "bwrap") -> None:
+        self.bwrap = bwrap
+
+    def wrap(self, argv: tuple[str, ...], *, cwd: Path, home: Path) -> tuple[str, ...]:
+        return (
+            self.bwrap, "--die-with-parent", "--unshare-all",
+            # system runtime, read-only
+            "--ro-bind", "/usr", "/usr", "--ro-bind", "/bin", "/bin", "--ro-bind", "/lib", "/lib",
+            "--ro-bind-try", "/lib64", "/lib64", "--ro-bind-try", "/etc/ssl", "/etc/ssl",
+            "--ro-bind-try", "/etc/resolv.conf", "/etc/resolv.conf",
+            "--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp",
+            # the ONLY writable surfaces: the disposable worktree and the throwaway home
+            "--bind", str(cwd), str(cwd), "--bind", str(home), str(home),
+            "--setenv", "HOME", str(home), "--chdir", str(cwd),
+            *argv,
+        )
+
+
+class SandboxUnavailable(RuntimeError):
+    """No sandbox could be verified to actually confine the agent on this host (fail-closed)."""
+
+
+def verify_sandbox(sandbox: SandboxRunner, worktrees_dir: Path) -> None:
+    """PROVE the sandbox confines, or raise :class:`SandboxUnavailable`.
+
+    Presence is not proof. The probe plants a canary "secret" OUTSIDE the sandboxed surfaces and asserts
+    the sandboxed process CANNOT read it. A sandbox that runs but does not isolate would otherwise be
+    indistinguishable from one that works - and would be actively harmful, since the operator would grant
+    unattended use on the strength of it."""
+    worktrees_dir.mkdir(parents=True, exist_ok=True)
+    probe = worktrees_dir / f"sandbox-probe-{os.getpid()}-{uuid.uuid4().hex[:8]}"
+    (probe / "wt").mkdir(parents=True, exist_ok=True)
+    (probe / "home").mkdir(parents=True, exist_ok=True)
+    canary = probe / "CANARY-SECRET"
+    canary.write_text("gho_" + "c" * 36, encoding="utf-8")
+    try:
+        argv = sandbox.wrap(("/bin/sh", "-c", f"cat {canary} 2>/dev/null || echo __DENIED__"),
+                            cwd=probe / "wt", home=probe / "home")
+        try:
+            proc = subprocess.run(  # noqa: S603 - fixed argv, no shell at this level.
+                list(argv), capture_output=True, text=True, timeout=_SANDBOX_PROBE_TIMEOUT_S)
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise SandboxUnavailable(f"sandbox could not run: {type(exc).__name__}: {exc}") from exc
+        if proc.returncode != 0:
+            raise SandboxUnavailable(
+                f"sandbox exited {proc.returncode}: {proc.stderr.strip()[:200] or '(no stderr)'}")
+        if "__DENIED__" not in proc.stdout:
+            raise SandboxUnavailable(
+                "sandbox READ a canary secret outside its bound surfaces - it runs but does not isolate")
+    finally:
+        shutil.rmtree(probe, ignore_errors=True)
+
+
 class AgentClient(Protocol):
     """The one seam through which the loop reaches the (untrusted) agent. ``propose`` returns a proposed
     edit for the current goal; it RAISES on any transport / output failure (the caller fails closed)."""
@@ -246,10 +331,14 @@ class ClaudeSubprocessClient:
     :class:`AgentError`. Live behaviour is env-dependent (the CLI must exist + honour the argv)."""
 
     def __init__(self, *, argv: tuple[str, ...] = _READONLY_TOOL_ARGV, timeout: float = _AGENT_TIMEOUT_S,
-                 max_output_bytes: int = _MAX_AGENT_OUTPUT_BYTES) -> None:
+                 max_output_bytes: int = _MAX_AGENT_OUTPUT_BYTES,
+                 sandbox: "SandboxRunner | None" = None) -> None:
         self.argv = argv
         self.timeout = timeout
         self.max_output_bytes = max_output_bytes
+        # When set, the agent argv is wrapped for OS-level isolation. The caller is responsible for having
+        # VERIFIED it (verify_sandbox) - this class does not silently degrade to unsandboxed.
+        self.sandbox = sandbox
 
     def propose(self, request: dict[str, Any]) -> dict[str, Any]:  # noqa: C901 - linear validation
 
@@ -259,9 +348,13 @@ class ClaudeSubprocessClient:
         cwd = request.get("_cwd")  # the isolated worktree; the agent runs THERE, not the developer's tree
         if not isinstance(cwd, str) or not cwd or not Path(cwd).is_dir():
             raise AgentError("refusing to run the agent unconfined: request['_cwd'] must be an existing worktree")
+        home = request.get("_home")
+        argv: tuple[str, ...] = tuple(self.argv)
+        if self.sandbox is not None:
+            argv = self.sandbox.wrap(argv, cwd=Path(cwd), home=Path(home) if home else Path(cwd))
         try:
             proc = subprocess.run(  # noqa: S603 - fixed argv, no shell, bounded timeout, confined cwd+env.
-                list(self.argv), input=json.dumps(request), text=True, capture_output=True,
+                list(argv), input=json.dumps(request), text=True, capture_output=True,
                 timeout=self.timeout, cwd=cwd,
                 env=_sanitized_env(Path(request["_home"]) if request.get("_home") else None))
         except (OSError, subprocess.TimeoutExpired) as exc:

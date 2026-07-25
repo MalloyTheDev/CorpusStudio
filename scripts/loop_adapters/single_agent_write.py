@@ -88,7 +88,9 @@ from loop_adapters.single_agent import (
     _signoff_critic,
     _validate_proposal,
     _write_proposal_record,
+    SandboxUnavailable,
     default_worktrees_dir,
+    verify_sandbox,
 )
 
 
@@ -1046,7 +1048,8 @@ def _make_write_executor(agent_client: AgentClient, repo_root: Path, base: str, 
 def build_context(repo_root: Path | str, base: str = "main", *, agent_client: AgentClient | None = None,
                   proposals_dir: Path | str | None = None, worktrees_dir: Path | str | None = None,
                   gh_runner: Any = None, branch_prefix: str = "cs-agent/", run_cs_assure: Any = None,
-                  pr_ref: str | None = None, ci_attested_safe: bool = False) -> LoopContext:
+                  pr_ref: str | None = None, ci_attested_safe: bool = False,
+                  sandbox: Any = None, require_sandbox: bool = False) -> LoopContext:
     """A WRITE-CAPABLE, single-agent :class:`LoopContext` (Phase 7.1). ``capabilities={CAP_WRITE}`` - the
     capability gate REFUSES to run it without ``--allow-capabilities write``. It applies the agent's sealed
     diff in an isolated worktree, commits, pushes a branch, and opens a PR; it NEVER merges (``write_gh``
@@ -1059,7 +1062,16 @@ def build_context(repo_root: Path | str, base: str = "main", *, agent_client: Ag
     it, and this adapter cannot verify someone else's CI by parsing it (every attempt failed open), so the
     person who can actually change the workflows asserts it."""
     root = Path(repo_root)
-    client = agent_client if agent_client is not None else ClaudeSubprocessClient()
+    wdir_probe = Path(worktrees_dir) if worktrees_dir is not None else default_worktrees_dir(root)
+    if require_sandbox and sandbox is None:
+        raise SandboxUnavailable(
+            "require_sandbox=True but no sandbox was supplied; refusing to run the agent unisolated")
+    if sandbox is not None:
+        # PROVE it confines before trusting it. Presence is not proof: on the host this was written for,
+        # `bwrap` is installed and cannot work (apparmor_restrict_unprivileged_userns=1). A sandbox that
+        # silently fails open is worse than none - it converts a known gap into a false assurance.
+        verify_sandbox(sandbox, wdir_probe)
+    client = agent_client if agent_client is not None else ClaudeSubprocessClient(sandbox=sandbox)
     pdir = Path(proposals_dir) if proposals_dir is not None else _default_proposals_dir(root)
     wdir = Path(worktrees_dir) if worktrees_dir is not None else default_worktrees_dir(root)
     gh = gh_runner or write_gh(root)
