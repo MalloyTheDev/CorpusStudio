@@ -28,6 +28,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess  # noqa: S404 - fixed-argv git / claude only; never a shell string.
 import uuid
@@ -54,11 +55,22 @@ _SECRET_ENV_PREFIXES = ("GITHUB_", "GH_", "AWS_", "GOOGLE_", "GCP_", "AZURE_", "
                         "HF_", "HUGGINGFACE_", "NPM_", "PYPI_", "TWINE_", "DOCKER_", "SSH_", "GPG_")
 
 
-# The ONLY things linked into the agent's confined HOME: what the transport needs to authenticate ITSELF.
+# The ONLY things placed in the agent's confined HOME: what the transport needs to authenticate ITSELF.
 # Everything else in the real home stays unreachable by `~` expansion - notably ~/.config/gh/hosts.yml (a
-# token with write access to this repo), ~/.ssh, ~/.aws, ~/.netrc, and ~/.claude's 284 MB of sessions,
+# token with WRITE access to this repo), ~/.ssh, ~/.aws, ~/.netrc, and ~/.claude's 284 MB of sessions,
 # history and OTHER PROJECTS' transcripts.
-_AGENT_HOME_PASSTHROUGH: tuple[str, ...] = (".claude.json", ".claude/settings.json")
+#
+# `.claude/.credentials.json` IS THE AGENT'S OAUTH TOKEN, and it is here deliberately: an agent that
+# cannot authenticate cannot run at all (measured - without it the CLI returns "Not logged in"). So the
+# honest statement of this boundary is: THE UNTRUSTED AGENT CAN READ ITS OWN CREDENTIAL. That is
+# unavoidable for any design where the agent authenticates as the operator; what the confinement buys is
+# that this is the ONLY credential it can reach - not the GitHub token, not SSH keys, not cloud creds,
+# not other projects' transcripts. Anyone tightening this further needs a separate agent identity with
+# its own scoped credential, which is a 7.2+ concern.
+_AGENT_HOME_PASSTHROUGH: tuple[str, ...] = (
+    ".claude.json", ".claude/settings.json", ".claude/.credentials.json",
+)
+_MAX_PASSTHROUGH_BYTES = 4 * 1024 * 1024  # a credential file is small; never copy a session store
 
 
 def _sanitized_env(home: Path | None = None) -> dict[str, str]:
@@ -93,18 +105,26 @@ def _confined_home(parent: Path) -> Iterator[Path]:
     """A throwaway HOME for the untrusted agent, containing ONLY symlinks to what the transport needs to
     authenticate itself (:data:`_AGENT_HOME_PASSTHROUGH`). Removed on exit.
 
-    Symlinked rather than copied: ~/.claude alone is ~284 MB, and copying credentials is worse than
-    linking the two the transport actually reads. A missing passthrough is skipped, not fatal - an
-    operator whose transport authenticates differently still gets the confinement."""
+    COPIED, not symlinked. Symlinks pointed at the operator's real home, which is NOT bound inside the
+    OS sandbox's mount namespace - measured: the agent started and reported "Not logged in", because the
+    link dangled. Copying the two small files (a few KB) works both sandboxed and not, and has a second
+    benefit: the agent gets its OWN copy, so anything it writes back cannot touch the operator's real
+    config. (Only these files - ~/.claude as a whole is ~284 MB of sessions and other projects.)
+    A passthrough that is missing, oversized or unreadable is SKIPPED, not fatal: an operator whose
+    transport authenticates differently still gets the confinement."""
     home = parent / f"home-{os.getpid()}-{uuid.uuid4().hex[:8]}"
     try:
         for rel in _AGENT_HOME_PASSTHROUGH:
             src = Path.home() / rel
-            if not src.exists():
-                continue
-            dst = home / rel
-            dst.parent.mkdir(parents=True, exist_ok=True)
-            dst.symlink_to(src)
+            try:
+                if not src.is_file() or src.stat().st_size > _MAX_PASSTHROUGH_BYTES:
+                    continue
+                dst = home / rel
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(src, dst)
+                dst.chmod(0o600)   # a credential copy keeps restrictive permissions
+            except OSError:
+                continue  # unreadable passthrough: the transport may still authenticate another way
         (home / ".config").mkdir(parents=True, exist_ok=True)
         yield home
     finally:
@@ -223,16 +243,39 @@ class BubblewrapSandbox:
         self.bwrap = bwrap
 
     def wrap(self, argv: tuple[str, ...], *, cwd: Path, home: Path) -> tuple[str, ...]:
+        # The agent binary is very often NOT under /usr - here it is a self-contained ELF under an XDG
+        # data dir, reached via a ~/.local/bin symlink. Binding only the system runtime made the sandbox
+        # fail with "execvp claude: No such file or directory" (measured). Resolve argv[0] and bind the
+        # REAL path read-only, then invoke it by that path so the symlink is not needed inside.
+        exe = shutil.which(argv[0]) if argv else None
+        resolved = str(Path(exe).resolve()) if exe else (argv[0] if argv else "")
+        agent_binds: tuple[str, ...] = ()
+        if resolved and Path(resolved).exists():
+            agent_binds = ("--ro-bind", resolved, resolved)
+            argv = (resolved, *argv[1:])
         return (
-            self.bwrap, "--die-with-parent", "--unshare-all",
+            # `--unshare-all --share-net`: every namespace isolated EXCEPT the network.
+            #
+            # HONEST TRADE-OFF, and it bounds what this sandbox can promise: the agent is an API client -
+            # it CANNOT function without reaching the network (measured: with --unshare-all it exits 1
+            # immediately). So network egress is NOT a control here, and a sandboxed agent could still
+            # POST data out. What the sandbox actually buys is FILESYSTEM isolation: the operator's home,
+            # credentials, keys and other repositories are simply not present in the mount namespace.
+            # The exfiltration bound therefore comes from what the agent can READ (confined HOME, no
+            # credential env, read-only tool policy), not from what it can SEND.
+            self.bwrap, "--die-with-parent", "--unshare-all", "--share-net",
             # system runtime, read-only
             "--ro-bind", "/usr", "/usr", "--ro-bind", "/bin", "/bin", "--ro-bind", "/lib", "/lib",
             "--ro-bind-try", "/lib64", "/lib64", "--ro-bind-try", "/etc/ssl", "/etc/ssl",
             "--ro-bind-try", "/etc/resolv.conf", "/etc/resolv.conf",
+            "--ro-bind-try", "/etc/hosts", "/etc/hosts",
+            "--ro-bind-try", "/etc/nsswitch.conf", "/etc/nsswitch.conf",
+            "--ro-bind-try", "/etc/ca-certificates.conf", "/etc/ca-certificates.conf",
             "--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp",
             # the ONLY writable surfaces: the disposable worktree and the throwaway home
             "--bind", str(cwd), str(cwd), "--bind", str(home), str(home),
             "--setenv", "HOME", str(home), "--chdir", str(cwd),
+            *agent_binds,
             *argv,
         )
 
@@ -288,6 +331,82 @@ class AgentError(LoopOrchestrateError):
 
     Subclasses :class:`LoopOrchestrateError` so a routine transport/validation refusal escalates as an
     EXPECTED operational failure rather than being labelled a likely controller bug with a traceback."""
+
+
+# ---------------------------------------------------------------- the real transport contract (measured)
+# `claude -p --output-format json` does NOT return the agent's answer directly: it returns Claude Code's
+# OWN envelope, with the model's text nested in `result` as a STRING. Measured:
+#   {"type":"result","subtype":"success","is_error":false,"result":"pong","session_id":"...", ...}
+# The adapter previously did json.loads(stdout) and looked for `unified_diff` at the TOP level, so against
+# a real agent it failed 100% of the time. Nothing caught it because every test injected a stub - the
+# seam looked implemented because its tests only ever exercised the fake.
+_ENVELOPE_RESULT_KEY = "result"
+_FENCE = re.compile(r"\A\s*```(?:json)?\s*\n(?P<body>.*?)\n\s*```\s*\Z", re.DOTALL)
+
+# What the agent is actually ASKED for. The transport used to pipe the raw request dict with NO
+# instruction at all, so the model was never told what shape to reply in - the second half of why the
+# propose path could not work against a real agent.
+_PROMPT = """You are proposing a SINGLE, SMALL code change. You are running in a disposable, throwaway
+git worktree: nothing you write to disk is kept. ONLY the JSON you print is used.
+
+GOAL: {goal}
+
+CONSTRAINTS (a proposal violating any of these is refused by the runtime, so do not attempt it):
+  * MODIFY EXISTING FILES ONLY - never create, delete, rename or move a file.
+  * Only these paths may be changed: {writable}
+  * At most {max_paths} file(s), {max_lines} changed lines, {max_bytes} bytes of patch.
+  * No secrets, tokens or credentials. No invisible/formatting Unicode characters.
+  * Keep it minimal and self-contained; prefer the smallest correct change.
+
+Read the code first (Read/Grep/Glob are available; you cannot edit, run shell, or reach the network).
+
+Reply with ONE JSON object and NOTHING else:
+{{"unified_diff": "<a unified diff that applies with `git apply` at the repository root>",
+  "rationale": "<one or two sentences on what you changed and why>"}}
+
+The diff must use `--- a/<path>` and `+++ b/<path>` headers with correct @@ hunks."""
+
+
+def render_prompt(request: dict[str, Any]) -> str:
+    """The instruction actually sent to the agent. Carries the goal AND the bounds the runtime will
+    enforce - telling the model the rules up front turns most refusals into changes it simply does not
+    attempt, which is cheaper and clearer than refusing after the fact."""
+    limits = request.get("_limits") or {}
+    writable = ", ".join(limits.get("writable_globs") or ["(none declared - nothing is writable)"])
+    return _PROMPT.format(
+        goal=request.get("goal") or "(no goal supplied)",
+        writable=writable,
+        max_paths=limits.get("max_changed_paths", "?"),
+        max_lines=limits.get("max_changed_lines", "?"),
+        max_bytes=limits.get("max_changed_bytes", "?"),
+    )
+
+
+def _unwrap_envelope(stdout: str) -> Any:
+    """The agent's own JSON payload, pulled out of Claude Code's result envelope. Fail-closed at every
+    step: a non-success subtype, `is_error`, a missing/non-string `result`, or a `result` that is not one
+    JSON object all raise rather than being coerced into something usable."""
+    try:
+        envelope = json.loads(stdout)
+    except (ValueError, RecursionError) as exc:
+        raise AgentError(f"claude produced no usable JSON envelope: {exc}") from exc
+    if not isinstance(envelope, dict):
+        raise AgentError(f"claude envelope is not an object (got {type(envelope).__name__})")
+    if envelope.get("is_error") is True or envelope.get("subtype") not in (None, "success"):
+        raise AgentError(
+            f"claude reported failure: subtype={envelope.get('subtype')!r} "
+            f"api_error_status={envelope.get('api_error_status')!r}")
+    body = envelope.get(_ENVELOPE_RESULT_KEY)
+    if not isinstance(body, str):
+        raise AgentError(f"claude envelope has no string {_ENVELOPE_RESULT_KEY!r} "
+                         f"(got {type(body).__name__}); the transport contract has changed")
+    fenced = _FENCE.match(body)
+    if fenced:                      # a single ```json fence is unambiguous and extremely common
+        body = fenced.group("body")
+    try:
+        return json.loads(body)
+    except (ValueError, RecursionError) as exc:
+        raise AgentError(f"the agent's reply is not one JSON object: {exc}") from exc
 
 
 def _validate_proposal(raw: Any) -> tuple[str, str]:
@@ -354,7 +473,7 @@ class ClaudeSubprocessClient:
             argv = self.sandbox.wrap(argv, cwd=Path(cwd), home=Path(home) if home else Path(cwd))
         try:
             proc = subprocess.run(  # noqa: S603 - fixed argv, no shell, bounded timeout, confined cwd+env.
-                list(argv), input=json.dumps(request), text=True, capture_output=True,
+                list(argv), input=render_prompt(request), text=True, capture_output=True,
                 timeout=self.timeout, cwd=cwd,
                 env=_sanitized_env(Path(request["_home"]) if request.get("_home") else None))
         except (OSError, subprocess.TimeoutExpired) as exc:
@@ -363,11 +482,7 @@ class ClaudeSubprocessClient:
             raise AgentError(f"claude output exceeded {self.max_output_bytes} bytes; refusing oversized output")
         if proc.returncode != 0:
             raise AgentError(f"claude exited {proc.returncode}: {proc.stderr.strip()[:200]}")
-        try:
-            data = json.loads(proc.stdout)
-        except (ValueError, RecursionError) as exc:
-            raise AgentError(f"claude produced no usable JSON: {exc}") from exc
-        diff, rationale = _validate_proposal(data)
+        diff, rationale = _validate_proposal(_unwrap_envelope(proc.stdout))
         return {"unified_diff": diff, "rationale": rationale}
 
 

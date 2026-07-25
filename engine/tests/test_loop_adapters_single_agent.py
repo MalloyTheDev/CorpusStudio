@@ -204,7 +204,9 @@ class _FakeProc:
 
 def test_claude_subprocess_client_parses_and_validates_a_good_response(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    good = json.dumps({"unified_diff": "d", "rationale": "r", "extra": "ignored"})
+    # the REAL envelope: the agent's payload is nested in `result` as a string (see _REAL_ENVELOPE)
+    good = json.dumps({"type": "result", "subtype": "success", "is_error": False,
+                       "result": json.dumps({"unified_diff": "d", "rationale": "r", "extra": "ignored"})})
     monkeypatch.setattr(sa.subprocess, "run", lambda *a, **k: _FakeProc(0, good))
     got = sa.ClaudeSubprocessClient().propose({"goal": "g", "_cwd": str(tmp_path)})
     assert got == {"unified_diff": "d", "rationale": "r"}
@@ -264,7 +266,8 @@ def test_the_subprocess_client_runs_with_a_sanitized_env_and_the_confined_cwd(
 
     def fake_run(*a: object, **k: object) -> _FakeProc:
         captured.update(k)
-        return _FakeProc(0, json.dumps({"unified_diff": "d", "rationale": "r"}))
+        return _FakeProc(0, json.dumps({"type": "result", "subtype": "success", "is_error": False,
+                                        "result": json.dumps({"unified_diff": "d", "rationale": "r"})}))
 
     monkeypatch.setattr(sa.subprocess, "run", fake_run)
     sa.ClaudeSubprocessClient().propose({"goal": "g", "_cwd": str(tmp_path)})
@@ -376,7 +379,8 @@ def test_the_transport_wraps_the_agent_when_a_sandbox_is_supplied(tmp_path: Path
 
     def fake_run(a, **k):  # noqa: ANN001,ANN202
         seen["argv"] = list(a)
-        return _FakeProc(0, json.dumps({"unified_diff": "d", "rationale": "r"}))
+        return _FakeProc(0, json.dumps({"type": "result", "subtype": "success", "is_error": False,
+                                        "result": json.dumps({"unified_diff": "d", "rationale": "r"})}))
     monkeypatch.setattr(sa.subprocess, "run", fake_run)
     client = sa.ClaudeSubprocessClient(sandbox=_Recording())
     client.propose({"goal": "g", "_cwd": str(tmp_path), "_home": str(tmp_path / "h")})
@@ -391,8 +395,18 @@ def test_bubblewrap_argv_binds_only_the_worktree_and_home(tmp_path: Path) -> Non
     argv = sa.BubblewrapSandbox().wrap(("claude", "-p"), cwd=tmp_path / "wt", home=tmp_path / "home")
     assert argv[0] == "bwrap" and "--unshare-all" in argv       # no network, no shared namespaces
     binds = [argv[i + 1] for i, a in enumerate(argv) if a == "--bind"]
-    assert binds == [str(tmp_path / "wt"), str(tmp_path / "home")]   # the ONLY writable surfaces
-    assert list(argv[-2:]) == ["claude", "-p"]
+    assert binds == [str(tmp_path / "wt"), str(tmp_path / "home")]   # the ONLY WRITABLE surfaces
+    assert argv[-1] == "-p"
+    # the agent binary is bound READ-ONLY and invoked by its resolved path: it is very often not under
+    # /usr (measured here: a self-contained ELF under an XDG data dir via a ~/.local/bin symlink), and
+    # binding only the system runtime made the sandbox fail with "execvp claude: No such file".
+    import shutil as _sh
+    if _sh.which("claude"):
+        resolved = str(Path(_sh.which("claude")).resolve())
+        ro = [argv[i + 1] for i, a in enumerate(argv) if a == "--ro-bind"]
+        assert resolved in ro and argv[-2] == resolved
+    else:                                    # no agent installed: nothing extra to bind, argv unchanged
+        assert argv[-2] == "claude"
 
 
 def test_verify_sandbox_fails_closed_when_the_sandbox_exits_nonzero(tmp_path: Path) -> None:
@@ -403,3 +417,93 @@ def test_verify_sandbox_fails_closed_when_the_sandbox_exits_nonzero(tmp_path: Pa
             return ("/bin/sh", "-c", "echo 'bwrap: setting up uid map: Permission denied' >&2; exit 1")
     with pytest.raises(sa.SandboxUnavailable, match="exited 1"):
         sa.verify_sandbox(_Erroring(), tmp_path)
+
+
+# ---------------------------------------------- the REAL transport contract (recorded, not invented)
+
+# Captured from an actual `claude -p --output-format json` run. The adapter used to do
+# json.loads(stdout) and look for `unified_diff` at the TOP level, so against a real agent it failed
+# 100% of the time - and no test caught it because every test injected a stub.
+_REAL_ENVELOPE = {
+    "type": "result", "subtype": "success", "is_error": False, "api_error_status": None,
+    "duration_ms": 1459, "num_turns": 1, "result": "pong", "stop_reason": "end_turn",
+    "session_id": "6c80b5c5-31c6-47aa-8b92-4c01eff15ece", "total_cost_usd": 0.1923,
+}
+
+
+def _envelope(result_text: str, **over) -> str:
+    return json.dumps({**_REAL_ENVELOPE, "result": result_text, **over})
+
+
+def test_the_transport_unwraps_the_real_claude_envelope(tmp_path: Path, monkeypatch) -> None:
+    payload = json.dumps({"unified_diff": "--- a/x\n+++ b/x\n", "rationale": "r"})
+    monkeypatch.setattr(sa.subprocess, "run", lambda *a, **k: _FakeProc(0, _envelope(payload)))
+    got = sa.ClaudeSubprocessClient().propose({"goal": "g", "_cwd": str(tmp_path)})
+    assert got == {"unified_diff": "--- a/x\n+++ b/x\n", "rationale": "r"}
+
+
+def test_the_transport_accepts_a_single_markdown_fence(tmp_path: Path, monkeypatch) -> None:
+    # models very often fence JSON; a single fence is unambiguous, anything else is refused
+    fenced = '```json\n{"unified_diff": "d", "rationale": "r"}\n```'
+    monkeypatch.setattr(sa.subprocess, "run", lambda *a, **k: _FakeProc(0, _envelope(fenced)))
+    assert sa.ClaudeSubprocessClient().propose({"goal": "g", "_cwd": str(tmp_path)})["rationale"] == "r"
+
+
+@pytest.mark.parametrize("stdout,why", [
+    (_envelope("pong"), "prose instead of JSON"),
+    (_envelope('{"rationale": "r"}'), "no unified_diff"),
+    (json.dumps({**_REAL_ENVELOPE, "is_error": True}), "the CLI reported an error"),
+    (json.dumps({**_REAL_ENVELOPE, "subtype": "error_max_turns"}), "a non-success subtype"),
+    (json.dumps({**_REAL_ENVELOPE, "result": None}), "result is not a string"),
+    ("not json at all", "unparseable envelope"),
+    ('["not", "an", "object"]', "envelope is not an object"),
+])
+def test_the_transport_fails_closed_on_a_bad_envelope(stdout: str, why: str, tmp_path: Path,
+                                                      monkeypatch) -> None:
+    monkeypatch.setattr(sa.subprocess, "run", lambda *a, **k: _FakeProc(0, stdout))
+    with pytest.raises(sa.AgentError):
+        sa.ClaudeSubprocessClient().propose({"goal": "g", "_cwd": str(tmp_path)})
+
+
+def test_the_agent_is_actually_told_what_to_return_and_the_bounds() -> None:
+    """The transport used to pipe the raw request dict with NO instruction, so the model was never told
+    what shape to reply in - the other half of why the propose path could not work for real."""
+    prompt = sa.render_prompt({"goal": "tidy a docstring",
+                               "_limits": {"writable_globs": ["src/**/*.py"], "max_changed_paths": 2,
+                                           "max_changed_lines": 60, "max_changed_bytes": 8192}})
+    assert "tidy a docstring" in prompt
+    assert "unified_diff" in prompt and "rationale" in prompt
+    assert "src/**/*.py" in prompt                      # the surface it may touch
+    assert "MODIFY EXISTING FILES ONLY" in prompt       # the rule that refuses the most candidates
+    # a request with no limits still renders, and says plainly that nothing is writable
+    assert "nothing is writable" in sa.render_prompt({"goal": "g"})
+
+
+def test_the_confined_home_carries_the_credential_the_transport_needs(tmp_path: Path) -> None:
+    """MEASURED: without `.claude/.credentials.json` the CLI returns "Not logged in" and the propose path
+    cannot run at all. That file IS the agent's OAuth token and it is here deliberately - the honest
+    boundary is that the untrusted agent can read ITS OWN credential, and only that one."""
+    assert ".claude/.credentials.json" in sa._AGENT_HOME_PASSTHROUGH
+    with sa._confined_home(tmp_path) as home:
+        for rel in sa._AGENT_HOME_PASSTHROUGH:
+            src = Path.home() / rel
+            if not src.is_file():
+                continue
+            dst = home / rel
+            assert dst.is_file() and not dst.is_symlink(), (
+                f"{rel} must be COPIED, not symlinked: a symlink points outside the sandbox mount "
+                "namespace and dangles (measured as 'Not logged in')")
+            assert dst.stat().st_mode & 0o777 == 0o600      # a credential copy stays restrictive
+        # and the operator's OTHER credentials are still absent
+        for rel in (".config/gh/hosts.yml", ".ssh", ".aws/credentials", ".claude/history.jsonl"):
+            assert not (home / rel).exists(), rel
+
+
+def test_the_sandbox_shares_the_network_but_not_the_filesystem() -> None:
+    """HONEST TRADE-OFF, pinned so it cannot be silently changed: the agent is an API client and CANNOT
+    work without the network (measured: --unshare-all made it exit 1 immediately). Network egress is
+    therefore NOT a control here - the isolation this sandbox provides is of the FILESYSTEM."""
+    argv = sa.BubblewrapSandbox().wrap(("claude",), cwd=Path("/tmp/wt"), home=Path("/tmp/home"))
+    assert "--unshare-all" in argv and "--share-net" in argv
+    # the operator's home is never bound
+    assert not any(str(Path.home()) in a for a in argv if a not in ("--ro-bind", "--bind"))

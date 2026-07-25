@@ -927,6 +927,12 @@ def _make_write_executor(agent_client: AgentClient, repo_root: Path, base: str, 
             request = {"goal": state.goal, "goal_id": state.goal_id, "base_oid": base_oid,
                        "repo_root": str(repo_root), "_cwd": str(propose_wt),
                        "_home": str(propose_home),
+                       # the bounds the runtime will enforce, so the agent is TOLD the rules rather than
+                       # discovering them via a refusal it already paid for
+                       "_limits": {"writable_globs": list(profile.writable_globs),
+                                   "max_changed_paths": profile.max_changed_paths,
+                                   "max_changed_lines": profile.max_changed_lines,
+                                   "max_changed_bytes": profile.max_changed_bytes},
                        "directive": {"phase": directive.phase, "action": directive.action,
                                      "allowed_paths": list(directive.allowed_paths)}}
             diff, rationale = _validate_proposal(agent_client.propose(request))  # RAISES -> fail-closed
