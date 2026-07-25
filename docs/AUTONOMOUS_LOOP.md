@@ -140,6 +140,16 @@ may *do*:
   is PROVEN to confine before the agent runs (a planted canary outside the bound surfaces must be
   unreadable) and is REFUSED if it cannot, so it never silently degrades; `none` accepts cwd +
   sanitized-env + confined-HOME confinement, which is defence in depth and **not** a boundary.
+- **Orphan-branch gc.** A publish that dies between `PUSHED` and `PR_OPENED` leaves a real remote branch
+  no PR references — reproduced end-to-end, not hypothetical: a target whose remote is not a GitHub host
+  pushes the candidate, then fails at `gh pr create`. `cs_loop gc` reads the write-ahead journal and
+  reclaims those branches. Because deleting a remote ref is destructive and outward-facing it is a **dry
+  run by default** (`--apply` to act), and it deletes only when *all three* hold: the journal says `PUSHED`
+  and never `PR_OPENED`; **no open PR exists** (re-checked live — the reverse gap is real, the PR may exist
+  and the journal write have been lost, in which case the record is *healed* instead); and the remote still
+  points at exactly the oid we pushed. The delete is itself `--force-with-lease`d against that oid, so a
+  branch that moves *during* the sweep is refused rather than destroyed, and a refusal reports one kept
+  branch instead of aborting the sweep.
 - **Exit-code taxonomy** (so automation reads the outcome without parsing stdout): `cs_loop run` →
   `0` FINALIZE, `3` HELD (paused on CI), `4` ESCALATED, `5` STOPPED; `campaign` → `6` when not every goal
   finalized; `2` is a fail-closed refusal throughout.

@@ -1162,3 +1162,113 @@ def test_the_journal_records_push_intent_even_when_the_push_fails(tmp_path: Path
     entry = saw._journal_read(journals[0])
     assert entry["state"] == "PUSH_INTENDED"          # intent was durable BEFORE the effect
     assert entry["branch"].startswith("cs-agent/g1-") and entry["candidate_commit"]
+
+
+# --------------------------------------------------------------------- orphan-branch gc (7.1.4, closing)
+
+
+def _orphan(tmp_path: Path, oid: str = "", *, state: str = "PUSHED", **extra: object) -> tuple[Path, Path, str]:
+    """A repo whose journal records a candidate PUSHED to the remote but never PR'd."""
+    root, remote = _repo_with_remote(tmp_path)
+    head = _g(root, "rev-parse", "HEAD").stdout.strip()
+    branch = "cs-agent/goal-abcd1234"
+    _g(root, "push", "-q", str(remote), f"HEAD:refs/heads/{branch}")
+    jdir = saw._default_proposals_dir(root) / "journal"
+    jdir.mkdir(parents=True, exist_ok=True)
+    jpath = jdir / "goal-abcd1234-000000000000.json"
+    jpath.write_text(json.dumps({"state": state, "branch": branch,
+                                 "remote_oid": oid or head, **extra}), encoding="utf-8")
+    return root, remote, branch
+
+
+def _remote_has(remote: Path, branch: str) -> bool:
+    out = subprocess.run(["git", "--git-dir", str(remote), "rev-parse", "--verify", "-q", branch],
+                         capture_output=True, text=True)
+    return out.returncode == 0
+
+
+def test_gc_dry_run_reports_the_orphan_without_deleting_it(tmp_path: Path) -> None:
+    # Deleting a remote ref is destructive and outward-facing: it is NEVER the default.
+    root, remote, branch = _orphan(tmp_path)
+    rows = saw.collect_orphan_branches(root, gh_runner=lambda *a: (0, "[]", ""))
+    assert [r["action"] for r in rows] == ["would-delete"]
+    assert _remote_has(remote, branch)  # untouched
+
+
+def test_gc_apply_deletes_the_orphan_and_is_idempotent(tmp_path: Path) -> None:
+    root, remote, branch = _orphan(tmp_path)
+    gh = lambda *a: (0, "[]", "")  # noqa: E731 - no open PR
+    assert [r["action"] for r in saw.collect_orphan_branches(root, apply=True, gh_runner=gh)] == ["deleted"]
+    assert not _remote_has(remote, branch)
+    # A second sweep must not error or re-report work: the branch is simply gone.
+    assert [r["action"] for r in saw.collect_orphan_branches(root, apply=True, gh_runner=gh)] == ["gone"]
+
+
+def test_gc_refuses_to_delete_a_branch_that_moved(tmp_path: Path) -> None:
+    # The failure that MATTERS. If the branch advanced, it is no longer the orphan we pushed - it may hold
+    # someone's work, so it is kept. Verified against a real ref, not a recorded belief.
+    root, remote, branch = _orphan(tmp_path, oid="0" * 40)
+    rows = saw.collect_orphan_branches(root, apply=True, gh_runner=lambda *a: (0, "[]", ""))
+    assert rows[0]["action"] == "kept" and "remote moved" in rows[0]["reason"]
+    assert _remote_has(remote, branch)
+
+
+def test_gc_keeps_a_branch_whose_pr_exists_and_heals_the_journal(tmp_path: Path) -> None:
+    # The REVERSE gap: the PR was created and the journal write was lost, so the branch is NOT an orphan.
+    # Deleting it would destroy an open PR's head - so the live check wins over the record, and the record
+    # is repaired rather than left to mislead the next sweep.
+    root, remote, branch = _orphan(tmp_path)
+    gh = lambda *a: (0, json.dumps([{"url": "https://x/pr/9"}]), "")  # noqa: E731
+    rows = saw.collect_orphan_branches(root, apply=True, gh_runner=gh)
+    assert rows[0]["action"] == "kept" and "open PR exists" in rows[0]["reason"]
+    assert _remote_has(remote, branch)
+    healed = json.loads((saw._default_proposals_dir(root) / "journal" /
+                         "goal-abcd1234-000000000000.json").read_text())
+    assert healed["state"] == "PR_OPENED" and healed["pr_url"] == "https://x/pr/9"
+
+
+def test_gc_ignores_records_that_are_not_orphans(tmp_path: Path) -> None:
+    # PUSH_INTENDED never reached the remote; PR_OPENED is a live PR. Neither is collectable.
+    for state, extra in (("PUSH_INTENDED", {}), ("PR_OPENED", {"pr_url": "https://x/pr/1"}),
+                         ("PUSHED", {"pr_url": "https://x/pr/2"})):
+        root, remote, branch = _orphan(tmp_path / f"c-{state}-{len(extra)}", state=state, **extra)
+        assert saw.collect_orphan_branches(root, apply=True, gh_runner=lambda *a: (0, "[]", "")) == []
+        assert _remote_has(remote, branch)
+
+
+def test_gc_lease_refuses_a_branch_that_moves_DURING_the_sweep(tmp_path: Path) -> None:
+    # TOCTOU. The moved-branch check above rejects before the push, so it never exercises the lease - and a
+    # mutation removing --force-with-lease survived because of that. This races it properly: the ref is
+    # advanced AFTER verification returns and BEFORE the delete, so only the lease can still save the work.
+    root, remote, branch = _orphan(tmp_path)
+    # A DISTINCT commit to race in. Moving the branch to `main` would be a no-op here (the fixture pushes
+    # HEAD, which IS main) - a "race" that changes nothing proves nothing.
+    (root / "raced.txt").write_text("someone else's work\n")
+    _g(root, "add", "-A")
+    _g(root, "commit", "-q", "-m", "concurrent")
+    other = _g(root, "rev-parse", "HEAD").stdout.strip()
+    _g(root, "push", "-q", str(remote), f"{other}:refs/heads/other")
+    real = saw._remote_ref_oid
+
+    def racing(repo_root: Path, br: str) -> str:
+        oid = real(repo_root, br)
+        subprocess.run(["git", "--git-dir", str(remote), "branch", "-f", br, other],
+                       check=True, capture_output=True)  # someone pushes while we decide
+        return oid
+
+    saw._remote_ref_oid = racing
+    try:
+        rows = saw.collect_orphan_branches(root, apply=True, gh_runner=lambda *a: (0, "[]", ""))
+    finally:
+        saw._remote_ref_oid = real
+    assert rows[0]["action"] == "kept" and "delete refused" in rows[0]["reason"]
+    assert _remote_has(remote, branch)  # the racing push SURVIVED - nothing was destroyed
+
+
+def test_gc_scope_is_pushed_only_regardless_of_the_pr_url_field(tmp_path: Path) -> None:
+    # The state check must stand on its own. A PR_OPENED record missing its pr_url is malformed, and gc's
+    # contract is "pushed but never PR'd" - so it is out of scope on the STATE alone, not because a second
+    # field happened to be populated (a mutation widening the state filter survived on exactly that).
+    root, remote, branch = _orphan(tmp_path, state="PR_OPENED")
+    assert saw.collect_orphan_branches(root, apply=True, gh_runner=lambda *a: (0, "[]", "")) == []
+    assert _remote_has(remote, branch)

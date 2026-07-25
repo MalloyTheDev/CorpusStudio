@@ -396,6 +396,20 @@ def _context(args: argparse.Namespace):  # noqa: ANN202 - a LoopContext
     return ctx
 
 
+def _cmd_gc(args: argparse.Namespace) -> int:
+    """Collect candidate branches that were pushed but whose PR was never opened.
+
+    A publish that dies between PUSHED and PR_OPENED leaves a real remote branch no PR references. The
+    write-ahead journal records that gap so it is recoverable rather than lost; this is what acts on it."""
+    from loop_adapters.single_agent_write import collect_orphan_branches
+    rows = collect_orphan_branches(args.repo_root, apply=bool(args.apply))
+    deleted = sum(1 for r in rows if r.get("action") == "deleted")
+    pending = sum(1 for r in rows if r.get("action") == "would-delete")
+    print(json.dumps({"examined": len(rows), "deleted": deleted, "would_delete": pending,
+                      "dry_run": not args.apply, "branches": rows}, indent=2, sort_keys=True))
+    return 0
+
+
 def _cmd_run(args: argparse.Namespace) -> int:
     from dataclasses import replace
 
@@ -509,6 +523,15 @@ def main(argv: list[str] | None = None) -> int:
     p_auth.add_argument("--grant", default="", help="a completeness criterion id this authorization satisfies (optional)")
     p_auth.add_argument("--note", default="")
     p_auth.set_defaults(func=_cmd_authorize)
+
+    p_gc = sub.add_parser("gc", help="find candidate branches pushed but never PR'd (dry run by default)")
+    p_gc.add_argument("--repo-root", default=".")
+    p_gc.add_argument("--apply", action="store_true",
+                      help="actually DELETE the orphans. Default is a dry run: deleting a remote ref is "
+                           "destructive and outward-facing, so it is never the default. Each delete is "
+                           "force-with-lease'd against the exact oid we pushed, so a branch that moved is "
+                           "refused rather than discarded.")
+    p_gc.set_defaults(func=_cmd_gc)
 
     for name, help_text, cmd in (
         ("run", "drive the integrated loop to terminal/HOLD/step-cap via an adapter module", _cmd_run),

@@ -47,9 +47,12 @@ Safety (why this is the least-capable *write* rung):
   * NO autonomous merge: the ``gh`` runner allows ``pr create`` + reads but REFUSES ``pr merge`` (and every
     other mutation), and ``dangerous=True`` escalates the merge gate; a human reviews + merges the PR.
 
-Deferred to later 7.1 rungs (documented in the design doc): a persistent candidate worktree with a
-loop-native observe->diagnose->correct loop + an independent REAL reviewer (7.1.2b), exact candidate
-identity (7.1.3), and a crash-resumable write-ahead journal + orphan-branch gc + DRAFT PRs (7.1.4).
+The later 7.1 rungs have LANDED: a persistent candidate worktree with a loop-native
+observe->diagnose->correct loop + an independent REAL reviewer (7.1.2b), exact candidate identity
+(7.1.3), a crash-resumable write-ahead journal + DRAFT PRs + :func:`collect_orphan_branches` (7.1.4),
+and the VERIFIED sandbox seam (7.1.5). The journal's orphan case is not hypothetical - a run whose
+remote is not a GitHub host pushes the candidate and then fails at ``gh pr create``, leaving exactly
+one branch no PR references; the collector is what reclaims it, and only ever on request.
 
 stdlib-only; every git/gh effect is a fixed-argv subprocess (no shell) and fails closed. Reuses the 7.0
 building blocks (the agent client, proposal sealing, diff parsing) and the loop's ``observe`` classifier.
@@ -882,6 +885,81 @@ def _existing_pr_url(gh_runner: Callable[..., "tuple[int, str, str]"], branch: s
     return ""
 
 
+def collect_orphan_branches(repo_root: Path | str, *, apply: bool = False,
+                            gh_runner: Callable[..., "tuple[int, str, str]"] | None = None,
+                            proposals_dir: Path | None = None) -> list[dict[str, str]]:
+    """Find - and only with ``apply=True``, delete - candidate branches pushed but never PR'd.
+
+    A publish that dies between ``PUSHED`` and ``PR_OPENED`` leaves a real branch on the remote that no PR
+    references and nobody is watching. The journal exists precisely so that gap is recorded rather than
+    lost, and this is the collector the module docstring has been promising. Reproduced end-to-end: a CLI
+    run against a target whose remote is not a GitHub host pushes the candidate, then fails at
+    ``gh pr create`` - leaving exactly one orphan.
+
+    Deleting a remote ref is DESTRUCTIVE and OUTWARD-FACING, so nothing is deleted unless all three hold:
+
+    1. the journal says ``PUSHED`` and never recorded ``PR_OPENED``;
+    2. **no open PR exists for the branch** - re-checked live, because the reverse gap is real too: the PR
+       may have been created and the journal write lost, in which case the branch is NOT an orphan;
+    3. the remote still points at *exactly* the oid we pushed - so a branch someone else advanced, or a
+       name that got reused, is left alone rather than silently discarded.
+
+    Deletion itself is `--force-with-lease`d against that same oid, so even a change racing between the
+    check and the push refuses instead of destroying work. Default is a DRY RUN: the caller must ask.
+    """
+    root = Path(repo_root).resolve()
+    jdir = (proposals_dir or _default_proposals_dir(root)) / "journal"
+    gh = gh_runner if gh_runner is not None else write_gh(root)
+    out: list[dict[str, str]] = []
+    for jpath in sorted(jdir.glob("*.json")) if jdir.is_dir() else []:
+        rec = _journal_read(jpath)
+        branch, pushed = str(rec.get("branch", "")), str(rec.get("remote_oid", ""))
+        if rec.get("state") != "PUSHED" or not branch or not pushed or rec.get("pr_url"):
+            continue
+        row = {"branch": branch, "oid": pushed, "journal": str(jpath), "action": "kept"}
+        pr = _existing_pr_url(gh, branch)
+        if pr:
+            # Not an orphan: the PR exists and only the journal write was lost. Heal the record instead.
+            _journal_write(jpath, "PR_OPENED", pr_url=pr)
+            row.update(action="kept", reason=f"an open PR exists ({pr}); journal healed")
+            out.append(row)
+            continue
+        try:
+            actual = _remote_ref_oid(root, branch)
+        except WriteAdapterError as exc:
+            row.update(reason=f"could not verify the remote ref, refusing to delete blind: {exc}")
+            out.append(row)
+            continue
+        if not actual:
+            row.update(action="gone", reason="already absent from the remote")
+            out.append(row)
+            continue
+        if actual != pushed:
+            row.update(reason=f"remote moved to {actual[:12]}, not ours; left alone")
+            out.append(row)
+            continue
+        if not apply:
+            row.update(action="would-delete", reason="orphan: pushed, no PR, unmoved (dry run)")
+            out.append(row)
+            continue
+        url = _git(root, "remote", "get-url", "--push", "origin").stdout.strip()
+        try:
+            _git(root, "push", f"--force-with-lease=refs/heads/{branch}:{pushed}", url,
+                 f":refs/heads/{branch}")
+        except (WriteAdapterError, AgentError) as exc:
+            # A refused delete is a SUCCESS of the lease, not a failure of the collector: the ref moved
+            # under us. Report it and keep going - one stuck branch must not abort the whole sweep.
+            # BOTH error types are caught deliberately: this module's own `_git` raises WriteAdapterError
+            # while the shared helper raises AgentError, and catching only one let a lease rejection - the
+            # exact case this exists to handle - escape and kill the sweep.
+            row.update(reason=f"delete refused, branch kept: {exc}")
+        else:
+            row.update(action="deleted", reason="orphan removed")
+            _journal_write(jpath, "PUSHED", collected="deleted")
+        out.append(row)
+    return out
+
+
 def _remote_ref_oid(repo_root: Path, branch: str) -> str:
     """The oid the REMOTE actually has for ``refs/heads/<branch>``, or "" if absent. Fail-closed.
 
@@ -1162,4 +1240,5 @@ def build_context(repo_root: Path | str, base: str = "main", *, agent_client: Ag
 
 # Re-export so `AgentError` (the confined-propose transport error) and the shared worktree-dir resolver are
 # reachable via this module too - the executor may surface either error, and callers/tests use the resolver.
-__all__ = ["AgentError", "WriteAdapterError", "build_context", "default_worktrees_dir", "write_gh"]
+__all__ = ["AgentError", "WriteAdapterError", "build_context", "collect_orphan_branches",
+           "default_worktrees_dir", "write_gh"]
