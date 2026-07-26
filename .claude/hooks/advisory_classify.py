@@ -34,12 +34,6 @@ _SENSITIVE: tuple[tuple[str, str], ...] = (
     ("engine/tests/test_assurance_", "ASSURANCE SELF-MODIFY (BOOTSTRAP_SELF_MODIFIED) -> a change here alters the assurance system's own proofs; needs independent review."),
     ("engine/tests/test_plugin_hooks", "ASSURANCE SELF-MODIFY (BOOTSTRAP_SELF_MODIFIED) -> a change here alters the plugin-hook proofs; needs independent review."),
     (".github/workflows/", "ASSURANCE SELF-MODIFY (BOOTSTRAP_SELF_MODIFIED) -> a CI workflow ENFORCES a gate; weakening it defangs the judge. Independent review, no auto-merge (see the rule for how it can even read 'green')."),
-    ("scripts/loop/", "LOOP CONTROLLER SELF-MODIFY -> the loop decides retry/stop/escalate/merge/finalize; the loop cannot verify a change to itself. Trusted-base tests + independent review; no autonomous merge."),
-    ("scripts/loop_adapters/", "LOOP CONTROLLER SELF-MODIFY -> a runtime adapter binds the loop's decisions to real git/gh/agent effects (where a write / autonomous-merge effect would live). Independent review; write-capable adapters need explicit authorization."),
-    ("scripts/cs_loop.py", "LOOP CONTROLLER SELF-MODIFY -> the loop CLI is candidate-controlled; trusted-base tests + independent review; no autonomous merge."),
-    ("engine/tests/test_loop_", "LOOP CONTROLLER SELF-MODIFY -> a change here alters the loop controller's own proofs; independent review."),
-    ("engine/tests/test_cs_loop", "LOOP CONTROLLER SELF-MODIFY -> a change here alters the loop CLI's proofs; independent review."),
-    ("docs/AUTONOMOUS_LOOP.md", "LOOP CONTROLLER SELF-MODIFY -> the loop's own contract doc; keep it honest (no overclaim) and reviewed."),
     ("corpus_studio/evaluation/", "evaluation path -> an unavailable metric is null-with-reason, never a fabricated 0."),
 )
 
