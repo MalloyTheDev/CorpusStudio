@@ -1,6 +1,0 @@
-{
-  "name": "corpusstudio",
-  "description": "CorpusStudio itself. The values 7.1.x measured: the one surface gated end-to-end by ruff+mypy+pytest with an 88% floor, modify-only, with the worker import closure enforced.",
-  "writable_globs": ["engine/corpus_studio/**/*.py"],
-  "require_worker_reachability": true
-}
