@@ -71,7 +71,7 @@ jobs:
           # Do NOT leave the job token in .git/config: this job checks out
           # and RUNS repository code, including from an unreviewed branch.
           persist-credentials: false
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
       - name: Install engine + pip-audit
