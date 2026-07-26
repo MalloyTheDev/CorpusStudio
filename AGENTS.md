@@ -56,6 +56,20 @@ Three surfaces:
   engine CLI; it never owns training behavior. Target architecture: a **Rust authoritative core** +
   isolated Python ML workers (#522).
 
+## The autonomous loop lives elsewhere
+
+The bounded **autonomous engineering loop** (controller, runtime adapters, `cs_loop`) was extracted to a
+separate repository, **`cs-loop`** (private). It is not part of CorpusStudio's product surface - it is
+target-agnostic dev tooling that operates on *other* repositories, including this one.
+
+That separation is a **trust boundary, not tidiness**: while the loop lived here, the only thing stopping
+it from modifying its own governing code was a policy rule plus human review. A loop operating on this
+checkout now cannot edit its own source, because its source is not in this checkout.
+
+What STAYS here is the **assurance plane** (`scripts/assurance/`, `cs_assure`) - this repo's own judge,
+used by its CI, hooks and skills. The loop *queries* an assurance plane; it never owns one. When the loop
+runs against this repository it points at this one via `--assurance-root`.
+
 ## Build & verify (the gate)
 From `engine/` with the venv:
 ```
