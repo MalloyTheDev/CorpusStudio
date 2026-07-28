@@ -849,3 +849,39 @@ def test_nvidia_smi_device_memory_converts_mib_and_handles_missing() -> None:
     assert mem.cuda_device_free_bytes == (8000 - 100) * 1024 * 1024
     assert T._nvidia_smi_device_memory("", "8000") is None
     assert T._nvidia_smi_device_memory("100", "n/a") is None
+
+
+def _bare_manifest() -> RunManifest:
+    return RunManifest(
+        run_id="run-t",
+        plan_ref=Ref(id="plan-t", hash=HashRef(value="a" * 64)),
+        created_at="2026-07-15T00:00:00+00:00",
+        updated_at="2026-07-15T00:00:03+00:00",
+        started_at="2026-07-15T00:00:00+00:00",
+        finished_at="2026-07-15T00:00:03+00:00",
+        state="succeeded",  # type: ignore[arg-type]
+    )
+
+
+def test_step_summary_populates_samples_per_second_from_observed_microbatches():
+    # #511: samples_per_second was a permanently-null placeholder; it now derives from the per-step
+    # observed_microbatches that already flows. 5 steps, 2 warmup -> 3 measured, each 4 microbatches in
+    # 0.5s -> 8.0 samples/sec.
+    events = [
+        _metric_event(seq=i, step=i, loss=1.0, step_time=0.5, observed_microbatches=4)
+        for i in range(1, 6)
+    ]
+    summary = T._step_summary(events, _bare_manifest(), warmup_steps=2)
+    assert summary.samples_per_second is not None
+    assert summary.samples_per_second.count == 3
+    assert summary.samples_per_second.mean == 8.0
+
+
+def test_step_summary_samples_per_second_is_null_when_the_observer_never_fired():
+    # UNAVAILABLE, never a fabricated zero: no observed_microbatches -> no rate.
+    events = [
+        _metric_event(seq=i, step=i, loss=1.0, step_time=0.5, observed_microbatches=None)
+        for i in range(1, 6)
+    ]
+    summary = T._step_summary(events, _bare_manifest(), warmup_steps=2)
+    assert summary.samples_per_second is None
