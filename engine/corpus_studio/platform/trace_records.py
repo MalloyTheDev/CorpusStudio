@@ -196,7 +196,14 @@ def _validation_evidence(trace: Any, checked_at: str) -> TraceValidationEvidence
     from corpus_studio.training.traces import trace_quality, validate_trace  # noqa: PLC0415
 
     structural = validate_trace(trace)
-    quality = trace_quality(trace)
+    # Seal-truthful: compute quality with the exact thresholds hashed into config_sha256 below, so the
+    # sealed evidence can never advertise a config it did not use (provenance drift, #507).
+    quality = trace_quality(
+        trace,
+        min_thinking_chars=int(TRACE_QUALITY_CONFIG["min_reasoning_chars"]),
+        min_ratio=float(TRACE_QUALITY_CONFIG["min_reasoning_answer_ratio"]),
+        leak_min_chars=int(TRACE_QUALITY_CONFIG["answer_leak_min_chars"]),
+    )
     findings: list[TraceValidationFinding] = []
     error_codes = {
         "missing answer": "missing_final_answer",
