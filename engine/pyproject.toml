@@ -76,6 +76,21 @@ corpus-studio = "corpus_studio.cli:main"
 [tool.ruff]
 line-length = 100
 
+# The enforced rule set is PINNED, not inherited from the tool's defaults.
+#
+# It was previously unset, so the lint gate meant "whatever this ruff version enables by default" -
+# and that is not a gate the repository controls. Measured: 0.15.21 (green here) defaults to
+# E4/E7/E9/F, while 0.16.0 turns on roughly twenty further families and reports 928 findings on an
+# unchanged tree. A routine dependency bump would therefore have silently redefined what CI enforces,
+# in either direction: widening it breaks the build, and a future narrowing would quietly stop
+# checking things while still reporting green.
+#
+# These four are exactly what was being enforced when this was written, so pinning them changes
+# nothing today. Adopting further families is a deliberate change with its own review, not a
+# side effect of upgrading.
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]
+
 [tool.mypy]
 python_version = "3.11"
 # Third-party stubs (pydantic/typer/orjson) aren't installed in CI; type-check our
