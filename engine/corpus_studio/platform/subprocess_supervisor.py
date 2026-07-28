@@ -453,16 +453,42 @@ def execute_run_subprocess(
     # with no newlines, which would deadlock a line-drained stderr pipe (buffer fills and the child
     # wedges on write). Inheriting sends telemetry straight to our stderr. Heartbeats never move either
     # deadline, and preflight has one absolute budget, so a wedged child remains bounded.
-    proc = subprocess.Popen(  # noqa: S603 - argv is our own worker command (or a test injection)
-        argv,
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        text=True,
-        encoding="utf-8",
-        bufsize=1,
-        creationflags=process_group_creation_flags(),
-        start_new_session=start_new_process_session(),
-    )
+    try:
+        proc = subprocess.Popen(  # noqa: S603 - argv is our own worker command (or a test injection)
+            argv,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            bufsize=1,
+            creationflags=process_group_creation_flags(),
+            start_new_session=start_new_process_session(),
+        )
+    except OSError as exc:
+        # A spawn failure (a bad worker argv, a missing interpreter, exhausted file descriptors) must
+        # become a classified ENVIRONMENT_FAILURE manifest, not an OSError that escapes the supervisor
+        # - and it must not leak the already-open run-events log.
+        if events_handle is not None:
+            try:
+                events_handle.close()
+            except Exception:  # noqa: BLE001 - best-effort close of a handle we are abandoning.
+                pass
+        manifest = _failed_manifest(
+            plan,
+            rid,
+            taxonomy=FailureTaxonomy.ENVIRONMENT_FAILURE,
+            message=f"worker process failed to spawn: {exc}",
+            target=runner_name,
+            started=started,
+            finished=clock(),
+            out_dir=out_dir_str,
+            stage=StageMarker.process_start,
+            remediation="verify the worker interpreter and argv and available file descriptors",
+        )
+        if record_dir is not None:
+            write_run_manifest(manifest, record_dir)
+        return SupervisedRun(manifest=manifest, events=[], artifacts=[])
     # In subprocess mode the WORKER child does the GPU/host work, so root an attached sampler's
     # process-tree probe at the child, not the control-plane parent.
     if telemetry is not None and hasattr(telemetry, "set_root_pid"):
@@ -730,10 +756,18 @@ def execute_run_subprocess(
 
 
 def _reader(proc: subprocess.Popen[str], lines: queue.Queue[tuple[str, str | None]]) -> None:
+    # Enqueue exactly one eof sentinel on EVERY exit path. If the reader dies without one (a stdout
+    # object that raises; a decode error under a strict codec), the main loop would wait out the full
+    # silence/preflight budget and mislabel a crashed worker as KERNEL_STALL/TIMEOUT. errors="replace"
+    # on the Popen keeps a decode from raising here; the finally is the fail-closed backstop.
     assert proc.stdout is not None
-    for line in proc.stdout:
-        lines.put(("line", line))
-    lines.put(("eof", None))
+    try:
+        for line in proc.stdout:
+            lines.put(("line", line))
+    except Exception:  # noqa: BLE001 - a reader death must unblock the main loop, never strand it.
+        pass
+    finally:
+        lines.put(("eof", None))
 
 
 def _write_dispatch(proc: subprocess.Popen[str], plan: RunPlan, rid: str, hb: int) -> None:
