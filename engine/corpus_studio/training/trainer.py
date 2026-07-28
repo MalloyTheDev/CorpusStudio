@@ -2187,6 +2187,24 @@ class TrainingExecutionTracker:
         )
 
 
+def unrenderable_row_refusal(
+    total_rows: int, rendered_count: int, *, dataset_format: str
+) -> str | None:
+    """Fail-closed message when rows rendered to nothing and would be silently dropped, or None when
+    every row rendered. Dropping unrenderable rows is a silent partial-truncation of the training
+    target: the run would train on ``rendered_count`` rows while provenance seals ``total_rows``.
+    #565 - surface/refuse the drop; never train on a silent subset."""
+    dropped = total_rows - rendered_count
+    if dropped <= 0:
+        return None
+    return (
+        f"REFUSED: {dropped} of {total_rows} row(s) produced no renderable text for dataset_format "
+        f"'{dataset_format}' and would be silently dropped; the run would train on {rendered_count} "
+        f"row(s) while provenance seals {total_rows}. Fix the rows or seal truncation_policy 'allow' "
+        f"to opt into a lossy subset."
+    )
+
+
 def format_example_text(row: dict, dataset_format: str, tokenizer: Any | None = None) -> str:
     """Format one dataset row into a single training-text string.
 
@@ -2517,6 +2535,16 @@ def _prepare_training_texts(
 
     rendered = [text for text in texts if text]
     rendered_count = len(rendered)
+    # A row that renders to "" is dropped downstream. Refusing here (unless a lossy policy was sealed)
+    # keeps the run from silently training on a subset while provenance seals total_rows - the same
+    # no-silent-truncation stance the token-coverage ledger takes below (#565).
+    drop_refusal = unrenderable_row_refusal(
+        total_rows, rendered_count, dataset_format=config.dataset_format
+    )
+    if drop_refusal is not None:
+        if not config.truncation_allowed:
+            raise TrainerError(drop_refusal.removeprefix("REFUSED: "))
+        print(drop_refusal, file=sys.stderr)
     truncation_interval = _interval(rendered_count)
     lengths: list[int] = []
     _stage(

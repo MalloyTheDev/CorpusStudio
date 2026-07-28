@@ -47,6 +47,7 @@ from corpus_studio.training.trainer import (
     enforce_trainable_precision,
     enforced_attention_training_kernel,
     format_example_text,
+    unrenderable_row_refusal,
     load_run_config_from_file,
     reassert_trainable_precision,
     resolve_attention_implementation,
@@ -424,6 +425,42 @@ def test_full_dataset_preflight_records_but_does_not_raise_when_lossy_opted_in(c
     )
     assert len(texts) == 1
     assert "REFUSED" in capsys.readouterr().err
+
+
+def test_unrenderable_row_refusal_reports_the_drop():
+    assert unrenderable_row_refusal(10, 10, dataset_format="chat") is None
+    message = unrenderable_row_refusal(10, 7, dataset_format="chat")
+    assert message is not None
+    assert "3 of 10" in message and "chat" in message
+
+
+def test_preflight_refuses_a_silent_unrenderable_row_drop_fail_closed():
+    # A row that renders to "" would be silently dropped; with a non-lossy policy the preflight must
+    # refuse rather than train on a subset while provenance seals the full row count (#565).
+    rows = [
+        {"instruction": "q1", "output": "a1"},
+        {"instruction": "", "output": ""},
+    ]
+    with pytest.raises(TrainerError, match="no renderable text"):
+        _prepare_training_texts(
+            rows,
+            _cfg(dataset_format="instruction", sequence_len=100000, truncation_allowed=False),
+            _word_count_tokenizer(),
+        )
+
+
+def test_preflight_records_an_unrenderable_row_drop_when_lossy_opted_in(capsys):
+    rows = [
+        {"instruction": "q1", "output": "a1"},
+        {"instruction": "", "output": ""},
+    ]
+    texts, _report = _prepare_training_texts(
+        rows,
+        _cfg(dataset_format="instruction", sequence_len=100000, truncation_allowed=True),
+        _word_count_tokenizer(),
+    )
+    assert len(texts) == 2  # the empty row is surfaced on stderr, not silently omitted from the count
+    assert "no renderable text" in capsys.readouterr().err
 
 
 def test_load_config_reads_optim_and_liger(tmp_path):
