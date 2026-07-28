@@ -500,3 +500,17 @@ def test_malformed_legacy_think_markup_is_rejected():
                 ]
             }
         )
+
+
+def test_validation_evidence_seals_the_config_it_actually_uses():
+    # #507: the sealed config_sha256 must describe the exact thresholds the validator ran with. The
+    # evidence wires TRACE_QUALITY_CONFIG into trace_quality; the trace_quality defaults must not drift
+    # from it either - either divergence makes a sealed record advertise a config it did not use.
+    import inspect
+
+    from corpus_studio.training.traces import trace_quality
+
+    sig = inspect.signature(trace_quality)
+    assert sig.parameters["min_thinking_chars"].default == TRACE_QUALITY_CONFIG["min_reasoning_chars"]
+    assert sig.parameters["min_ratio"].default == TRACE_QUALITY_CONFIG["min_reasoning_answer_ratio"]
+    assert sig.parameters["leak_min_chars"].default == TRACE_QUALITY_CONFIG["answer_leak_min_chars"]

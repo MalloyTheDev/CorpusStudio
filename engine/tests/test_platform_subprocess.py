@@ -1218,3 +1218,49 @@ def test_subprocess_writes_the_manifest_when_out_dir_given(tmp_path):
     written = tmp_path / "runs" / result.manifest.run_id / "RunManifest.json"
     assert written.exists()
     assert json.loads(written.read_text(encoding="utf-8"))["state"] == result.manifest.state
+
+
+def test_spawn_failure_is_classified_environment_failure(tmp_path):
+    # #510: a worker that cannot be spawned (a missing interpreter) must return a classified
+    # ENVIRONMENT_FAILURE manifest, not let the OSError escape the supervisor - and it must persist a
+    # durable manifest (proving the events log was not left leaked/unclosed on the failure path).
+    result = execute_run_subprocess(
+        _PLAN,
+        run_id="spawn-fail",
+        worker_argv=["/nonexistent/interpreter-xyz", "-c", "pass"],
+        out_dir=str(tmp_path),
+        silence_timeout_s=10,
+    )
+    assert result.manifest.state == "failed"
+    assert result.manifest.failure is not None
+    assert result.manifest.failure.taxonomy == FailureTaxonomy.ENVIRONMENT_FAILURE
+    written = tmp_path / "runs" / result.manifest.run_id / "RunManifest.json"
+    assert written.exists()
+
+
+def test_non_utf8_worker_stdout_does_not_strand_the_reader(tmp_path):
+    # #508: a worker that emits a raw non-UTF-8 byte on stdout then crashes must be classified promptly
+    # by its exit, NOT mislabeled KERNEL_STALL/TIMEOUT by a dead reader thread that stranded the main
+    # loop on the silence budget. Without errors="replace" + the reader finally, the reader dies on the
+    # decode and the loop waits out the full silence_timeout.
+    argv = [
+        sys.executable,
+        "-c",
+        "import os,sys; os.write(1, b'\\xff\\xfe not utf-8\\n'); sys.exit(7)",
+    ]
+    started = time.monotonic()
+    result = execute_run_subprocess(
+        _PLAN,
+        run_id="binary-stdout",
+        worker_argv=argv,
+        out_dir=str(tmp_path),
+        silence_timeout_s=30,
+    )
+    elapsed = time.monotonic() - started
+    assert result.manifest.state == "failed"
+    assert result.manifest.failure is not None
+    assert result.manifest.failure.taxonomy not in {
+        FailureTaxonomy.KERNEL_STALL,
+        FailureTaxonomy.TIMEOUT,
+    }
+    assert elapsed < 30

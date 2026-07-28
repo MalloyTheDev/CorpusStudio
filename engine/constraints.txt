@@ -11,10 +11,15 @@
 # in pyproject.toml; this file only pins the exact CI resolution.
 pydantic==2.13.4
 
-# Pin ruff so the lint gate is REPRODUCIBLE. The engine's ruff config sets only line-length (no explicit
-# `select`), so it rides ruff's DEFAULT ruleset - which expands across releases. `pyproject.toml` keeps the
-# loose `ruff>=0.5` dep; without an exact pin here CI installs whatever ruff is newest, and a release that
-# enables new default rules turns a green tree red with no code change (ruff 0.16.0 flagged ~950
-# pre-existing findings: RUF100 / UP045 / B008 / I001 / ...). Bump intentionally: raise this pin in its own
-# PR that also resolves whatever the new ruff flags (or freezes an explicit rule set).
-ruff==0.15.21
+# Pin ruff so the lint gate is REPRODUCIBLE. `pyproject.toml` keeps the loose `ruff>=0.5` dep, so without
+# an exact pin here CI installs whatever ruff is newest.
+#
+# This comment used to warn that the config set only line-length, so the gate rode ruff's DEFAULT ruleset -
+# which expands across releases - and prescribed either resolving whatever a new ruff flags OR freezing an
+# explicit rule set. The rule set is now FROZEN in `[tool.ruff.lint] select`, so this pin no longer carries
+# the gate's meaning on its own: a bump can still change ruff's BEHAVIOUR for the selected rules, but it can
+# no longer silently change WHICH rules are enforced. That is why 0.15.21 -> 0.16.0 landed with zero code
+# changes, where the same bump reported 928 findings against the unpinned set.
+#
+# Bump intentionally, in its own PR, and re-run the gate.
+ruff==0.16.0
