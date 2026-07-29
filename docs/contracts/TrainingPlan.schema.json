@@ -1,0 +1,557 @@
+{
+  "$defs": {
+    "AdapterMethod": {
+      "enum": [
+        "none",
+        "lora",
+        "qlora",
+        "dora",
+        "ia3",
+        "full_finetune",
+        "prompt_tuning",
+        "prefix_tuning"
+      ],
+      "title": "AdapterMethod",
+      "type": "string"
+    },
+    "CheckpointImpl": {
+      "enum": [
+        "full_state",
+        "adapter_only",
+        "sharded",
+        "distcp",
+        "safetensors"
+      ],
+      "title": "CheckpointImpl",
+      "type": "string"
+    },
+    "DeviceKind": {
+      "enum": [
+        "cuda",
+        "rocm",
+        "mps",
+        "xpu",
+        "cpu"
+      ],
+      "title": "DeviceKind",
+      "type": "string"
+    },
+    "ParallelismKind": {
+      "enum": [
+        "data",
+        "tensor",
+        "pipeline",
+        "expert",
+        "sequence",
+        "context"
+      ],
+      "title": "ParallelismKind",
+      "type": "string"
+    },
+    "PrecisionMode": {
+      "enum": [
+        "fp32",
+        "tf32",
+        "fp16",
+        "bf16",
+        "fp8",
+        "mixed_bf16",
+        "mixed_fp16"
+      ],
+      "title": "PrecisionMode",
+      "type": "string"
+    },
+    "QuantizationMode": {
+      "enum": [
+        "none",
+        "int8",
+        "int4",
+        "nf4",
+        "fp4",
+        "gptq",
+        "awq",
+        "hqq"
+      ],
+      "title": "QuantizationMode",
+      "type": "string"
+    },
+    "TrainingPlanComposition": {
+      "additionalProperties": false,
+      "description": "One entry selected per registry dimension (the architecture doc's registries). Pre-resolution\nintent, dense-default and MoE-compatible - it never assumes dense execution. These are capability\nSELECTIONS (refs into the thin registries), not sealed execution fields; the ``parameters`` block\ncarries the executable knobs and the compatibility pre-check validates the two are consistent.",
+      "properties": {
+        "checkpoint_strategy": {
+          "$ref": "#/$defs/CheckpointImpl",
+          "default": "adapter_only"
+        },
+        "evaluation_profile": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Evaluation Profile"
+        },
+        "framework": {
+          "default": "pytorch",
+          "title": "Framework",
+          "type": "string"
+        },
+        "hardware_target": {
+          "$ref": "#/$defs/DeviceKind",
+          "default": "cuda"
+        },
+        "model_topology": {
+          "default": "dense",
+          "enum": [
+            "dense",
+            "moe"
+          ],
+          "title": "Model Topology",
+          "type": "string"
+        },
+        "objective_id": {
+          "title": "Objective Id",
+          "type": "string"
+        },
+        "orchestrator": {
+          "default": "corpus_studio",
+          "title": "Orchestrator",
+          "type": "string"
+        },
+        "parallelism": {
+          "default": [
+            "data"
+          ],
+          "items": {
+            "$ref": "#/$defs/ParallelismKind"
+          },
+          "title": "Parallelism",
+          "type": "array"
+        },
+        "precision": {
+          "$ref": "#/$defs/PrecisionMode",
+          "default": "bf16"
+        },
+        "preset": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Preset"
+        },
+        "quantization": {
+          "$ref": "#/$defs/QuantizationMode",
+          "default": "nf4"
+        },
+        "update_method": {
+          "$ref": "#/$defs/AdapterMethod",
+          "default": "qlora"
+        }
+      },
+      "required": [
+        "objective_id"
+      ],
+      "title": "TrainingPlanComposition",
+      "type": "object"
+    },
+    "TrainingPlanParameters": {
+      "additionalProperties": false,
+      "description": "The free (numeric / identity) knobs of a training run - a serializable mirror of the planner's\n``PlannerConstraints`` user intent. The resolver lowers these verbatim into a RunPlan, so this is\nthe executable-knob source of truth; the registry SELECTIONS in ``TrainingPlanComposition`` are the\nhigher-level capability view. A drift test keeps this mirror field-for-field with\n``PlannerConstraints`` so the resolver can reproduce a direct build's ``plan_hash`` exactly.",
+      "properties": {
+        "adam_beta1": {
+          "default": 0.9,
+          "title": "Adam Beta1",
+          "type": "number"
+        },
+        "adam_beta2": {
+          "default": 0.999,
+          "title": "Adam Beta2",
+          "type": "number"
+        },
+        "adam_epsilon": {
+          "default": 1e-08,
+          "title": "Adam Epsilon",
+          "type": "number"
+        },
+        "adapter_method": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Adapter Method"
+        },
+        "allocator_gc_threshold": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Allocator Gc Threshold"
+        },
+        "allocator_max_split_size_mb": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Allocator Max Split Size Mb"
+        },
+        "allocator_policy": {
+          "default": "default",
+          "title": "Allocator Policy",
+          "type": "string"
+        },
+        "allow_cpu_toy": {
+          "default": false,
+          "title": "Allow Cpu Toy",
+          "type": "boolean"
+        },
+        "attention_backend": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Attention Backend"
+        },
+        "backend": {
+          "default": "corpus_studio",
+          "title": "Backend",
+          "type": "string"
+        },
+        "base_model": {
+          "title": "Base Model",
+          "type": "string"
+        },
+        "chat_template_sha256": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Chat Template Sha256"
+        },
+        "checkpoint_keep_last": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Checkpoint Keep Last"
+        },
+        "checkpoint_steps": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Checkpoint Steps"
+        },
+        "data_seed": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Data Seed"
+        },
+        "dataset_content_sha256": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Dataset Content Sha256"
+        },
+        "dataset_format": {
+          "default": "instruction",
+          "title": "Dataset Format",
+          "type": "string"
+        },
+        "dataset_path": {
+          "title": "Dataset Path",
+          "type": "string"
+        },
+        "export_format": {
+          "default": "adapter_peft",
+          "title": "Export Format",
+          "type": "string"
+        },
+        "gradient_accumulation_steps": {
+          "default": 8,
+          "title": "Gradient Accumulation Steps",
+          "type": "integer"
+        },
+        "learning_rate": {
+          "default": 0.0002,
+          "title": "Learning Rate",
+          "type": "number"
+        },
+        "lora_alpha": {
+          "default": 32,
+          "title": "Lora Alpha",
+          "type": "integer"
+        },
+        "lora_bias": {
+          "default": "none",
+          "title": "Lora Bias",
+          "type": "string"
+        },
+        "lora_dropout": {
+          "default": 0.05,
+          "title": "Lora Dropout",
+          "type": "number"
+        },
+        "lora_r": {
+          "default": 16,
+          "title": "Lora R",
+          "type": "integer"
+        },
+        "lora_target_modules": {
+          "default": [
+            "all-linear"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "title": "Lora Target Modules",
+          "type": "array"
+        },
+        "lr_scheduler": {
+          "default": "linear",
+          "title": "Lr Scheduler",
+          "type": "string"
+        },
+        "max_grad_norm": {
+          "default": 1.0,
+          "title": "Max Grad Norm",
+          "type": "number"
+        },
+        "max_steps": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Steps"
+        },
+        "micro_batch_size": {
+          "default": 1,
+          "title": "Micro Batch Size",
+          "type": "integer"
+        },
+        "model_content_sha256": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Model Content Sha256"
+        },
+        "model_revision": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Model Revision"
+        },
+        "num_train_epochs": {
+          "default": 1.0,
+          "title": "Num Train Epochs",
+          "type": "number"
+        },
+        "optim": {
+          "default": "adamw_torch",
+          "title": "Optim",
+          "type": "string"
+        },
+        "output_dir": {
+          "default": "output",
+          "title": "Output Dir",
+          "type": "string"
+        },
+        "seed": {
+          "default": 42,
+          "title": "Seed",
+          "type": "integer"
+        },
+        "sequence_len": {
+          "default": 4096,
+          "title": "Sequence Len",
+          "type": "integer"
+        },
+        "supervised_token_accumulation_target": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Supervised Token Accumulation Target"
+        },
+        "task_type": {
+          "default": "sft",
+          "title": "Task Type",
+          "type": "string"
+        },
+        "tokenizer_content_sha256": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tokenizer Content Sha256"
+        },
+        "tokenizer_revision": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tokenizer Revision"
+        },
+        "truncation_allowed": {
+          "default": false,
+          "title": "Truncation Allowed",
+          "type": "boolean"
+        },
+        "use_liger": {
+          "default": false,
+          "title": "Use Liger",
+          "type": "boolean"
+        },
+        "verification_requirement": {
+          "default": "require_verified",
+          "title": "Verification Requirement",
+          "type": "string"
+        },
+        "warmup_ratio": {
+          "default": 0.0,
+          "title": "Warmup Ratio",
+          "type": "number"
+        },
+        "weight_decay": {
+          "default": 0.0,
+          "title": "Weight Decay",
+          "type": "number"
+        }
+      },
+      "required": [
+        "base_model",
+        "dataset_path"
+      ],
+      "title": "TrainingPlanParameters",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "A pre-resolution, user-facing composition of the training registries + free parameters (Training\nSystems P0b, #482). It lowers into one-or-more RunPlans via the planner; it is NOT an execution\nauthority. Two invariants: (1) it carries NO ``plan_hash`` / ``configuration_hash``-sealed field -\nRunPlan and ResolvedExecutionConfiguration remain the sole sealing authority; (2) any cross-\ndimension compatibility check on it is an early UX pre-check, never the authoritative gate.",
+  "properties": {
+    "composition": {
+      "$ref": "#/$defs/TrainingPlanComposition"
+    },
+    "contract_version": {
+      "const": "1.0.0",
+      "default": "1.0.0",
+      "title": "Contract Version",
+      "type": "string"
+    },
+    "created_at": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Created At"
+    },
+    "parameters": {
+      "$ref": "#/$defs/TrainingPlanParameters"
+    },
+    "plan_intent_id": {
+      "pattern": "^[A-Za-z0-9._-]+$",
+      "title": "Plan Intent Id",
+      "type": "string"
+    }
+  },
+  "required": [
+    "plan_intent_id",
+    "composition",
+    "parameters"
+  ],
+  "title": "TrainingPlan",
+  "type": "object"
+}

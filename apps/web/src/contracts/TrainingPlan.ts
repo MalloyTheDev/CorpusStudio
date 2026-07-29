@@ -1,0 +1,155 @@
+/* GENERATED from docs/contracts/TrainingPlan.schema.json — do not edit. Run: npm run gen:contracts */
+
+export type CheckpointImpl = "full_state" | "adapter_only" | "sharded" | "distcp" | "safetensors";
+export type EvaluationProfile = string | null;
+export type Framework = string;
+export type DeviceKind = "cuda" | "rocm" | "mps" | "xpu" | "cpu";
+export type ModelTopology = "dense" | "moe";
+export type ObjectiveId = string;
+export type Orchestrator = string;
+export type ParallelismKind = "data" | "tensor" | "pipeline" | "expert" | "sequence" | "context";
+export type Parallelism = ParallelismKind[];
+export type PrecisionMode = "fp32" | "tf32" | "fp16" | "bf16" | "fp8" | "mixed_bf16" | "mixed_fp16";
+export type Preset = string | null;
+export type QuantizationMode = "none" | "int8" | "int4" | "nf4" | "fp4" | "gptq" | "awq" | "hqq";
+export type AdapterMethod =
+  "none" | "lora" | "qlora" | "dora" | "ia3" | "full_finetune" | "prompt_tuning" | "prefix_tuning";
+export type ContractVersion = "1.0.0";
+export type CreatedAt = string | null;
+export type AdamBeta1 = number;
+export type AdamBeta2 = number;
+export type AdamEpsilon = number;
+export type AdapterMethod1 = string | null;
+export type AllocatorGcThreshold = number | null;
+export type AllocatorMaxSplitSizeMb = number | null;
+export type AllocatorPolicy = string;
+export type AllowCpuToy = boolean;
+export type AttentionBackend = string | null;
+export type Backend = string;
+export type BaseModel = string;
+export type ChatTemplateSha256 = string | null;
+export type CheckpointKeepLast = number | null;
+export type CheckpointSteps = number | null;
+export type DataSeed = number | null;
+export type DatasetContentSha256 = string | null;
+export type DatasetFormat = string;
+export type DatasetPath = string;
+export type ExportFormat = string;
+export type GradientAccumulationSteps = number;
+export type LearningRate = number;
+export type LoraAlpha = number;
+export type LoraBias = string;
+export type LoraDropout = number;
+export type LoraR = number;
+export type LoraTargetModules = string[];
+export type LrScheduler = string;
+export type MaxGradNorm = number;
+export type MaxSteps = number | null;
+export type MicroBatchSize = number;
+export type ModelContentSha256 = string | null;
+export type ModelRevision = string | null;
+export type NumTrainEpochs = number;
+export type Optim = string;
+export type OutputDir = string;
+export type Seed = number;
+export type SequenceLen = number;
+export type SupervisedTokenAccumulationTarget = number | null;
+export type TaskType = string;
+export type TokenizerContentSha256 = string | null;
+export type TokenizerRevision = string | null;
+export type TruncationAllowed = boolean;
+export type UseLiger = boolean;
+export type VerificationRequirement = string;
+export type WarmupRatio = number;
+export type WeightDecay = number;
+export type PlanIntentId = string;
+
+/**
+ * A pre-resolution, user-facing composition of the training registries + free parameters (Training
+ * Systems P0b, #482). It lowers into one-or-more RunPlans via the planner; it is NOT an execution
+ * authority. Two invariants: (1) it carries NO ``plan_hash`` / ``configuration_hash``-sealed field -
+ * RunPlan and ResolvedExecutionConfiguration remain the sole sealing authority; (2) any cross-
+ * dimension compatibility check on it is an early UX pre-check, never the authoritative gate.
+ */
+export interface TrainingPlan {
+  composition: TrainingPlanComposition;
+  contract_version?: ContractVersion;
+  created_at?: CreatedAt;
+  parameters: TrainingPlanParameters;
+  plan_intent_id: PlanIntentId;
+}
+/**
+ * One entry selected per registry dimension (the architecture doc's registries). Pre-resolution
+ * intent, dense-default and MoE-compatible - it never assumes dense execution. These are capability
+ * SELECTIONS (refs into the thin registries), not sealed execution fields; the ``parameters`` block
+ * carries the executable knobs and the compatibility pre-check validates the two are consistent.
+ */
+export interface TrainingPlanComposition {
+  checkpoint_strategy?: CheckpointImpl;
+  evaluation_profile?: EvaluationProfile;
+  framework?: Framework;
+  hardware_target?: DeviceKind;
+  model_topology?: ModelTopology;
+  objective_id: ObjectiveId;
+  orchestrator?: Orchestrator;
+  parallelism?: Parallelism;
+  precision?: PrecisionMode;
+  preset?: Preset;
+  quantization?: QuantizationMode;
+  update_method?: AdapterMethod;
+}
+/**
+ * The free (numeric / identity) knobs of a training run - a serializable mirror of the planner's
+ * ``PlannerConstraints`` user intent. The resolver lowers these verbatim into a RunPlan, so this is
+ * the executable-knob source of truth; the registry SELECTIONS in ``TrainingPlanComposition`` are the
+ * higher-level capability view. A drift test keeps this mirror field-for-field with
+ * ``PlannerConstraints`` so the resolver can reproduce a direct build's ``plan_hash`` exactly.
+ */
+export interface TrainingPlanParameters {
+  adam_beta1?: AdamBeta1;
+  adam_beta2?: AdamBeta2;
+  adam_epsilon?: AdamEpsilon;
+  adapter_method?: AdapterMethod1;
+  allocator_gc_threshold?: AllocatorGcThreshold;
+  allocator_max_split_size_mb?: AllocatorMaxSplitSizeMb;
+  allocator_policy?: AllocatorPolicy;
+  allow_cpu_toy?: AllowCpuToy;
+  attention_backend?: AttentionBackend;
+  backend?: Backend;
+  base_model: BaseModel;
+  chat_template_sha256?: ChatTemplateSha256;
+  checkpoint_keep_last?: CheckpointKeepLast;
+  checkpoint_steps?: CheckpointSteps;
+  data_seed?: DataSeed;
+  dataset_content_sha256?: DatasetContentSha256;
+  dataset_format?: DatasetFormat;
+  dataset_path: DatasetPath;
+  export_format?: ExportFormat;
+  gradient_accumulation_steps?: GradientAccumulationSteps;
+  learning_rate?: LearningRate;
+  lora_alpha?: LoraAlpha;
+  lora_bias?: LoraBias;
+  lora_dropout?: LoraDropout;
+  lora_r?: LoraR;
+  lora_target_modules?: LoraTargetModules;
+  lr_scheduler?: LrScheduler;
+  max_grad_norm?: MaxGradNorm;
+  max_steps?: MaxSteps;
+  micro_batch_size?: MicroBatchSize;
+  model_content_sha256?: ModelContentSha256;
+  model_revision?: ModelRevision;
+  num_train_epochs?: NumTrainEpochs;
+  optim?: Optim;
+  output_dir?: OutputDir;
+  seed?: Seed;
+  sequence_len?: SequenceLen;
+  supervised_token_accumulation_target?: SupervisedTokenAccumulationTarget;
+  task_type?: TaskType;
+  tokenizer_content_sha256?: TokenizerContentSha256;
+  tokenizer_revision?: TokenizerRevision;
+  truncation_allowed?: TruncationAllowed;
+  use_liger?: UseLiger;
+  verification_requirement?: VerificationRequirement;
+  warmup_ratio?: WarmupRatio;
+  weight_decay?: WeightDecay;
+}

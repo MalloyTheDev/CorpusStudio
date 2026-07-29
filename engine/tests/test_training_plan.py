@@ -1,0 +1,133 @@
+"""TrainingPlan composition + resolver + thin registries (Training Systems P0b, #482).
+
+The load-bearing property is that the resolver adds NO sealing: lowering a TrainingPlan reproduces the
+exact plan_hash a direct build_run_plan produces. The ready-capability fixture is reused from the
+planner test (pytest prepend import) rather than duplicated.
+"""
+
+from __future__ import annotations
+
+import dataclasses
+
+import pytest
+from pydantic import ValidationError
+
+from corpus_studio.platform.common import HashRef, Ref
+from corpus_studio.platform.contracts import (
+    TrainingPlan,
+    TrainingPlanComposition,
+    TrainingPlanParameters,
+    TrainingPlanResolution,
+)
+from corpus_studio.platform.enums import SupportLevel
+from corpus_studio.platform.planner import PlannerConstraints, build_run_plan
+from corpus_studio.platform.training_plan import (
+    THIN_REGISTRIES,
+    framework_registry,
+    resolve_training_plan,
+    training_plan_precheck,
+)
+from test_platform_planner import _NOW, _profile, _report
+
+_DATASET_REF = Ref(id="ds-1", hash=HashRef(value="d" * 64))
+
+
+def _params(**over) -> TrainingPlanParameters:
+    base = {
+        "base_model": "Qwen/Qwen2.5-7B-Instruct",
+        "dataset_path": "data/examples.jsonl",
+        "model_revision": "1" * 40,
+        "dataset_content_sha256": "d" * 64,
+    }
+    base.update(over)
+    return TrainingPlanParameters(**base)
+
+
+def _training_plan(**param_over) -> TrainingPlan:
+    return TrainingPlan(
+        plan_intent_id="intent-1",
+        composition=TrainingPlanComposition(objective_id="qlora-sft"),
+        parameters=_params(**param_over),
+    )
+
+
+def test_resolver_reproduces_the_direct_build_run_plan_hash():
+    # THE GATE: lowering a TrainingPlan produces the SAME plan_hash as a direct build_run_plan with the
+    # equivalent PlannerConstraints. The resolver seals nothing of its own.
+    profile, caps = _profile(cc_major=12), _report()
+    plan = _training_plan()
+    resolution = resolve_training_plan(
+        plan, profile=profile, capabilities=caps, dataset_ref=_DATASET_REF, plan_id="p1", now=_NOW
+    )
+    direct = build_run_plan(
+        profile=profile,
+        capabilities=caps,
+        dataset_ref=_DATASET_REF,
+        constraints=PlannerConstraints(**plan.parameters.model_dump(exclude={"contract_version"})),
+        plan_id="p1",
+        now=_NOW,
+    )
+    assert len(resolution.run_plan_refs) == 1
+    assert resolution.run_plan_refs[0].hash is not None
+    assert resolution.run_plan_refs[0].hash.value == direct.plan_hash
+
+
+def test_parameters_mirror_planner_constraints_field_for_field():
+    # The resolver copies parameters -> PlannerConstraints verbatim, so the two MUST stay in lockstep.
+    constraint_fields = {f.name for f in dataclasses.fields(PlannerConstraints)}
+    param_fields = set(TrainingPlanParameters.model_fields) - {"contract_version"}
+    assert param_fields == constraint_fields
+
+
+def test_training_plan_carries_no_sealed_execution_hash():
+    # Invariant 1: a TrainingPlan is pre-resolution intent; it never carries a sealed execution field.
+    fields = set(TrainingPlan.model_fields)
+    assert "plan_hash" not in fields
+    assert "configuration_hash" not in fields
+    with pytest.raises(ValidationError):  # extra=forbid: one cannot be smuggled in either
+        TrainingPlan(
+            plan_intent_id="i",
+            composition=TrainingPlanComposition(objective_id="o"),
+            parameters=_params(),
+            plan_hash="0" * 64,
+        )
+
+
+def test_precheck_is_advisory_only():
+    # Invariant 2: cross-dimension checks are UX hints, never a gate. A mismatch is reported, not raised.
+    plan = _training_plan(adapter_method="lora")  # composition update_method defaults to qlora
+    findings = training_plan_precheck(plan)
+    assert "update_method_mismatch" in {f.code for f in findings}
+    assert all(f.severity in {"info", "warning"} for f in findings)  # never 'block'
+
+
+def test_resolution_attaches_precheck_findings_without_blocking():
+    profile, caps = _profile(cc_major=12), _report()
+    plan = _training_plan()
+    resolution = resolve_training_plan(
+        plan, profile=profile, capabilities=caps, dataset_ref=_DATASET_REF, plan_id="p1", now=_NOW
+    )
+    assert isinstance(resolution, TrainingPlanResolution)
+    assert isinstance(resolution.precheck_findings, tuple)  # carried, advisory
+
+
+def test_thin_registries_carry_support_levels():
+    for name, registry in THIN_REGISTRIES.items():
+        entries = registry()
+        assert entries, f"registry {name} is empty"
+        assert all(isinstance(entry.support_level, SupportLevel) for entry in entries)
+    # the reference framework is the one with a measured workload
+    assert any(
+        entry.name == "pytorch" and entry.support_level == SupportLevel.workload_verified
+        for entry in framework_registry()
+    )
+
+
+def test_resolution_refs_must_carry_the_sealed_plan_hash():
+    # The resolution POINTS at sealed RunPlans; it never re-seals. A ref without its hash is refused.
+    with pytest.raises(ValidationError):
+        TrainingPlanResolution(
+            plan_intent_id="i",
+            composition=TrainingPlanComposition(objective_id="o"),
+            run_plan_refs=(Ref(id="rp-1"),),
+        )

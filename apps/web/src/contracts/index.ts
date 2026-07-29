@@ -29,4 +29,6 @@ export type { TelemetrySample } from "./TelemetrySample";
 export type { TokenizerDescriptor } from "./TokenizerDescriptor";
 export type { TraceRecord } from "./TraceRecord";
 export type { TrainingObjective } from "./TrainingObjective";
+export type { TrainingPlan } from "./TrainingPlan";
+export type { TrainingPlanResolution } from "./TrainingPlanResolution";
 export type { WorkerMessage } from "./WorkerMessage";

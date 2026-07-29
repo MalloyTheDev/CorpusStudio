@@ -5393,3 +5393,133 @@ class WorkerMessage(ContractModel):
             if failure.taxonomy == FailureTaxonomy.PASS:
                 raise ValueError(f"{self.type} cannot carry PASS taxonomy")
         return self
+
+
+# --------------------------------------------------------------------------------------------------
+# TrainingPlan composition (Training Systems P0b, #482)
+#
+# A pre-resolution, user-facing composition of the training registries + free parameters that lowers
+# into one-or-more RunPlans via the planner. It is NOT an execution authority: it carries no
+# plan_hash / configuration_hash, and any compatibility check on it is an advisory UX pre-check.
+# RunPlan and ResolvedExecutionConfiguration remain the sole sealing/execution authority.
+# --------------------------------------------------------------------------------------------------
+
+
+class TrainingPlanParameters(ContractModel):
+    """The free (numeric / identity) knobs of a training run - a serializable mirror of the planner's
+    ``PlannerConstraints`` user intent. The resolver lowers these verbatim into a RunPlan, so this is
+    the executable-knob source of truth; the registry SELECTIONS in ``TrainingPlanComposition`` are the
+    higher-level capability view. A drift test keeps this mirror field-for-field with
+    ``PlannerConstraints`` so the resolver can reproduce a direct build's ``plan_hash`` exactly."""
+
+    base_model: str
+    dataset_path: str
+    model_revision: str | None = None
+    tokenizer_revision: str | None = None
+    model_content_sha256: str | None = None
+    tokenizer_content_sha256: str | None = None
+    dataset_content_sha256: str | None = None
+    task_type: str = "sft"
+    dataset_format: str = "instruction"
+    adapter_method: str | None = None
+    lora_r: int = 16
+    lora_alpha: int = 32
+    lora_dropout: float = 0.05
+    lora_bias: str = "none"
+    lora_target_modules: tuple[str, ...] = ("all-linear",)
+    sequence_len: int = 4096
+    micro_batch_size: int = 1
+    gradient_accumulation_steps: int = 8
+    learning_rate: float = 2e-4
+    weight_decay: float = 0.0
+    adam_beta1: float = 0.9
+    adam_beta2: float = 0.999
+    adam_epsilon: float = 1e-8
+    max_grad_norm: float = 1.0
+    lr_scheduler: str = "linear"
+    warmup_ratio: float = 0.0
+    seed: int = 42
+    data_seed: int | None = None
+    output_dir: str = "output"
+    supervised_token_accumulation_target: int | None = None
+    attention_backend: str | None = None
+    verification_requirement: str = "require_verified"
+    export_format: str = "adapter_peft"
+    backend: str = "corpus_studio"
+    optim: str = "adamw_torch"
+    use_liger: bool = False
+    allocator_policy: str = "default"
+    allocator_max_split_size_mb: int | None = None
+    allocator_gc_threshold: float | None = None
+    max_steps: int | None = None
+    num_train_epochs: float = 1.0
+    checkpoint_steps: int | None = None
+    checkpoint_keep_last: int | None = None
+    truncation_allowed: bool = False
+    chat_template_sha256: str | None = None
+    allow_cpu_toy: bool = False
+
+
+class TrainingPlanComposition(ContractModel):
+    """One entry selected per registry dimension (the architecture doc's registries). Pre-resolution
+    intent, dense-default and MoE-compatible - it never assumes dense execution. These are capability
+    SELECTIONS (refs into the thin registries), not sealed execution fields; the ``parameters`` block
+    carries the executable knobs and the compatibility pre-check validates the two are consistent."""
+
+    objective_id: str
+    model_topology: Literal["dense", "moe"] = "dense"
+    update_method: AdapterMethod = AdapterMethod.qlora
+    framework: str = "pytorch"
+    orchestrator: str = "corpus_studio"
+    parallelism: tuple[ParallelismKind, ...] = (ParallelismKind.data,)
+    precision: PrecisionMode = PrecisionMode.bf16
+    quantization: QuantizationMode = QuantizationMode.nf4
+    hardware_target: DeviceKind = DeviceKind.cuda
+    checkpoint_strategy: CheckpointImpl = CheckpointImpl.adapter_only
+    evaluation_profile: str | None = None
+    preset: str | None = None
+
+
+class TrainingPlan(ContractModel):
+    """A pre-resolution, user-facing composition of the training registries + free parameters (Training
+    Systems P0b, #482). It lowers into one-or-more RunPlans via the planner; it is NOT an execution
+    authority. Two invariants: (1) it carries NO ``plan_hash`` / ``configuration_hash``-sealed field -
+    RunPlan and ResolvedExecutionConfiguration remain the sole sealing authority; (2) any cross-
+    dimension compatibility check on it is an early UX pre-check, never the authoritative gate."""
+
+    contract_version: CONTRACT_VERSION_LITERAL = "1.0.0"
+    plan_intent_id: str = Field(pattern=_ID)
+    composition: TrainingPlanComposition
+    parameters: TrainingPlanParameters
+    created_at: str | None = None
+
+
+class TrainingPlanCompatibilityFinding(ContractModel):
+    """One advisory cross-dimension compatibility finding from the UX pre-check. Advisory ONLY - it
+    never gates resolution or execution; the authoritative gate stays the planner's declared-and-proven
+    capability check plus the exact ``ExecutionCapabilityCombination``-in-a-passing-probe match."""
+
+    code: str
+    severity: Literal["info", "warning"] = "warning"
+    message: str
+
+
+class TrainingPlanResolution(ContractModel):
+    """The result of lowering a :class:`TrainingPlan` into one-or-more RunPlans (Training Systems P0b,
+    #482). It references the resolved RunPlan(s) by their sealed plan identity, carries the advisory
+    pre-check findings, and links back to the intent. It has NO sealing authority of its own:
+    ``RunPlan.plan_hash`` remains the execution seal, and every ref here must carry it."""
+
+    contract_version: CONTRACT_VERSION_LITERAL = "1.0.0"
+    plan_intent_id: str = Field(pattern=_ID)
+    composition: TrainingPlanComposition
+    run_plan_refs: tuple[Ref, ...] = Field(min_length=1)
+    precheck_findings: tuple[TrainingPlanCompatibilityFinding, ...] = ()
+    resolved_at: str | None = None
+
+    @model_validator(mode="after")
+    def _require_sealed_run_plan_refs(self) -> TrainingPlanResolution:
+        for ref in self.run_plan_refs:
+            if ref.hash is None or ref.hash.value is None:
+                raise ValueError("a resolved RunPlan ref must carry its sealed plan_hash")
+        return self
