@@ -175,3 +175,20 @@ def test_resolver_admits_the_clean_first_party_backend_at_every_tier():
             assurance_tier=tier,
         )
         assert isinstance(resolution, TrainingPlanResolution)
+
+
+def test_resolver_refuses_an_unknown_orchestrator_fail_closed():
+    # #744 review: a fail-closed gate must not silently bypass an orchestrator it cannot vet.
+    plan = TrainingPlan(
+        plan_intent_id="intent-1",
+        composition=TrainingPlanComposition(objective_id="qlora-sft", orchestrator="mystery-backend"),
+        parameters=_params(),
+    )
+    with pytest.raises(BackendSecurityRefused, match="not in the backend registry"):
+        resolve_training_plan(
+            plan,
+            profile=_profile(cc_major=12),
+            capabilities=_report(),
+            dataset_ref=_DATASET_REF,
+            plan_id="p1",
+        )
