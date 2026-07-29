@@ -815,7 +815,18 @@ def _step_summary(
     opt_per_min = None
     if step_times and sum(step_times) > 0:
         opt_per_min = 60.0 * len(step_times) / sum(step_times)
-    samples_per_sec_values: list[float] = []  # placeholder until per-step sample counts flow through
+    # samples/second per measured step, derived from the per-step observed_microbatches that already
+    # flows through EventMetrics (each observed microbatch is a processed sample batch; == literal
+    # samples/sec at per-device batch size 1). An unfired observer (None/<=0) contributes nothing,
+    # never a fabricated zero - the same UNAVAILABLE discipline the token rates use (#511).
+    samples_per_sec_values: list[float] = [
+        row.observed_microbatches / row.step_time_seconds
+        for row in measured_rows
+        if row.observed_microbatches is not None
+        and row.observed_microbatches > 0
+        and row.step_time_seconds is not None
+        and row.step_time_seconds > 0
+    ]
 
     evidence = manifest.training_success_evidence
     gradient_count = changed_count = None
