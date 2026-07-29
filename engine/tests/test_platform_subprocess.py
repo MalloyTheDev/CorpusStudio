@@ -1288,6 +1288,10 @@ def test_capture_worker_stderr_decision_is_tty_aware(monkeypatch):
     monkeypatch.setattr("corpus_studio.platform.subprocess_supervisor.sys.stderr", _Piped())
     assert _capture_worker_stderr(None) is True  # no tty (background/UI) -> capture
 
+    # a stderr with no usable isatty() (None here -> AttributeError) fails safe to capture
+    monkeypatch.setattr("corpus_studio.platform.subprocess_supervisor.sys.stderr", None)
+    assert _capture_worker_stderr(None) is True
+
 
 def test_worker_stderr_is_captured_to_the_run_record_when_requested(tmp_path):
     # #509: a background/UI run persists the child's stderr for post-mortem instead of losing it to a
