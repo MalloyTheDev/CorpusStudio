@@ -259,25 +259,15 @@ def load_effective_policy(ctx: GitContext, base_ref: str,
 
 
 def _fold(text: str) -> str:
-    """Canonical form for matching: Unicode NFC, then case-folded.
+    """Canonical form for obligation matching: Unicode NFC, then case-folded, on BOTH the policy
+    pattern and the changed path.
 
-    CASE-INSENSITIVE ON PURPOSE. Every branch of this matcher was byte-exact, so a one-letter case
-    variant of a protected path fired ZERO obligations - measured: ``Scripts/assurance/x.py``,
-    ``.GitHub/workflows/e.yml`` and ``Research/ieee-linux-training/x.md`` all matched nothing, so a
-    self-modify / CI / sealed-research change could land with the gate silent and the impact record
-    honestly reporting "no obligations fired".
-
-    That is not hypothetical here: this repo carries ``core.ignorecase=true`` (Windows-era), and on any
-    case-insensitive checkout (macOS, Windows) ``Scripts/assurance/x.py`` IS ``scripts/assurance/x.py`` - the same
-    file, judged by a different name. NFC normalization closes the same fail-open for composed vs
-    decomposed forms, which are also the same file on APFS/HFS+.
-
-    Matching MORE is the FAIL-SAFE direction for an obligation matcher: a spurious match fires an extra
-    human gate, while a missed match silently removes one. Verified against this repo: zero tracked paths
-    collide when case-folded, so this cannot over-match real content.
-
-    BOTH sides are folded, not just the changed path: a policy literal is folded too, so a match holds
-    regardless of the case a future policy entry happens to be written in."""
+    Case- and normalization-insensitive on purpose. Byte-exact matching FAILS OPEN: a case variant of a
+    protected path (or a composed-vs-decomposed Unicode form) fires ZERO obligations while the impact
+    record honestly reports "no obligations fired" - yet on a folding checkout (``core.ignorecase=true``,
+    APFS/HFS+) that variant IS the same file. Matching MORE is the fail-SAFE direction here: a spurious
+    match fires an extra human gate; a missed match silently removes one. Verified: zero tracked paths
+    collide when folded, so this cannot over-match real content."""
     return unicodedata.normalize("NFC", text).casefold()
 
 
