@@ -262,13 +262,13 @@ def _fold(text: str) -> str:
     """Canonical form for matching: Unicode NFC, then case-folded.
 
     CASE-INSENSITIVE ON PURPOSE. Every branch of this matcher was byte-exact, so a one-letter case
-    variant of a protected path fired ZERO obligations - measured: ``Scripts/loop/x.py``,
+    variant of a protected path fired ZERO obligations - measured: ``Scripts/assurance/x.py``,
     ``.GitHub/workflows/e.yml`` and ``Research/ieee-linux-training/x.md`` all matched nothing, so a
     self-modify / CI / sealed-research change could land with the gate silent and the impact record
     honestly reporting "no obligations fired".
 
     That is not hypothetical here: this repo carries ``core.ignorecase=true`` (Windows-era), and on any
-    case-insensitive checkout (macOS, Windows) ``Scripts/loop/x.py`` IS ``scripts/loop/x.py`` - the same
+    case-insensitive checkout (macOS, Windows) ``Scripts/assurance/x.py`` IS ``scripts/assurance/x.py`` - the same
     file, judged by a different name. NFC normalization closes the same fail-open for composed vs
     decomposed forms, which are also the same file on APFS/HFS+.
 
@@ -276,8 +276,8 @@ def _fold(text: str) -> str:
     human gate, while a missed match silently removes one. Verified against this repo: zero tracked paths
     collide when case-folded, so this cannot over-match real content.
 
-    BOTH sides are folded - the shipped policy contains ``docs/AUTONOMOUS_LOOP.md``, so folding only the
-    path would have broken that glob."""
+    BOTH sides are folded, not just the changed path: a policy literal is folded too, so a match holds
+    regardless of the case a future policy entry happens to be written in."""
     return unicodedata.normalize("NFC", text).casefold()
 
 
