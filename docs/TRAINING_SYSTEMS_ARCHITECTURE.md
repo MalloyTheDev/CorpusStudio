@@ -127,9 +127,16 @@ authority). The mapping from them is a **lossy partial projection**, defined onl
 `platform/enums.py::SupportLevel` (the 7 states above) + the lossy partial projection
 `platform/support_level.py::project_objective_verification`, which maps the 3-axis
 `ObjectiveVerification` onto one `SupportLevel` and CARRIES the unproven axes (`not_verified` /
-`not_applicable`) instead of promoting them. It is exhaustively property-tested over every axis
-combination the ladder's validator accepts. No ladder was removed, and no contract carries a
-`SupportLevel` yet - wiring it onto capability records is a later P0 slice.
+`not_applicable`, as `CarriedAxis` entries) instead of promoting them. The mapping is lossy:
+
+- hardware axis `hardware_verified` -> `workload_verified` (a measured run);
+- else implementation axis functionally proven -> `probed` (a passed functional probe);
+- else -> `declared`.
+
+`config_generation_only` / `installed` / `production_supported` / `refused` are net-new states the
+objective ladder cannot evidence, so this projection never emits them. It is exhaustively
+property-tested over every axis combination the ladder's validator accepts. No ladder was removed, and
+no contract carries a `SupportLevel` yet - wiring it onto capability records is a later P0 slice.
 
 The **default** framework/orchestrator/preset for any workload is **evidence-selected**: it must reach
 `WORKLOAD_VERIFIED` on the actual host stack. Unsloth (or any project) is **not** the default until its

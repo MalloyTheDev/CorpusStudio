@@ -20,10 +20,15 @@ from corpus_studio.platform.enums import (
     VerificationOutcome,
 )
 from corpus_studio.platform.support_level import (
+    CarriedAxis,
     SupportLevelRollup,
     project_objective_verification,
 )
 
+# These oracle sets are re-declared here ON PURPOSE, NOT imported from support_level: the property test
+# is an INDEPENDENT check on the projection's behavior. Importing the module's own _FUNCTIONALLY_PROVEN
+# / _UNPROVEN would make the assertions tautological - a wrong membership (e.g. a status added to the
+# module's set) would change both the projection AND the "expected", and the bug would pass unseen.
 _FUNCTIONALLY_PROVEN = {
     ObjectiveVerificationStatus.functional_verified,
     ObjectiveVerificationStatus.hardware_verified,
@@ -93,7 +98,7 @@ def test_projection_is_anti_collapse_and_carries_every_unproven_axis():
             ("implementation", verification.implementation),
             ("hardware", verification.hardware),
         ):
-            token = f"{axis}:{status.value}"
+            token = CarriedAxis(axis=axis, status=status.value)
             assert (token in rollup.carried) == (status in _UNPROVEN)
 
     assert seen_valid > 0  # the enumeration actually exercised valid records
@@ -105,7 +110,10 @@ def test_projection_spot_checks():
     bare = project_objective_verification(ObjectiveVerification())
     assert bare == SupportLevelRollup(
         level=SupportLevel.declared,
-        carried=("implementation:not_verified", "hardware:not_verified"),
+        carried=(
+            CarriedAxis("implementation", "not_verified"),
+            CarriedAxis("hardware", "not_verified"),
+        ),
     )
 
     # a functional probe but no hardware run -> probed, hardware carried
@@ -118,7 +126,7 @@ def test_projection_spot_checks():
         )
     )
     assert probed.level == SupportLevel.probed
-    assert probed.carried == ("hardware:not_verified",)
+    assert probed.carried == (CarriedAxis("hardware", "not_verified"),)
 
     # a real measured run -> workload_verified, nothing carried
     proven = project_objective_verification(
