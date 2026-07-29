@@ -233,9 +233,15 @@ is unaffected by this expansion.
 Each phase is a separate reviewed slice; each capability advances the support ladder only on measured
 evidence. No phase is claimed until it is workload-verified.
 
+**Beyond P7 (gated design/study, not scheduled):** a Learning Paradigms & Memory track - RL as an
+architected mode (L1), memory-augmented training (L2), and memory synthesis / consolidation
+("dreaming") + long-horizon memory evals (L3). See
+[`LEARNING_PARADIGMS_AND_MEMORY.md`](LEARNING_PARADIGMS_AND_MEMORY.md).
+
 ## 10. Related documents
 
 - [`PRETRAINING_ARCHITECTURE.md`](PRETRAINING_ARCHITECTURE.md) - pretraining first-class contracts.
+- [`LEARNING_PARADIGMS_AND_MEMORY.md`](LEARNING_PARADIGMS_AND_MEMORY.md) - RL mode, memory-augmented training, and memory synthesis/consolidation ("dreaming"); gated design/study.
 - [`MOE_ARCHITECTURE.md`](MOE_ARCHITECTURE.md) - MoE training contracts.
 - [`TRAINING_BACKEND_REGISTRY.md`](TRAINING_BACKEND_REGISTRY.md) - backend manifest + inventory.
 - [Training Objectives](#training-objectives) - the shipped objective registry.
