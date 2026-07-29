@@ -232,8 +232,20 @@ def _capture_worker_stderr(capture_stderr: bool | None) -> bool:
         return capture_stderr
     try:
         return not sys.stderr.isatty()
-    except Exception:  # noqa: BLE001 - a stderr without a usable isatty is treated as non-interactive.
+    except (AttributeError, ValueError, OSError):
+        # A stderr that is None, closed, or lacks a usable isatty() is treated as non-interactive, so a
+        # background/UI run still captures rather than silently inheriting into a stream nobody reads.
         return True
+
+
+def _best_effort_close(handle: Any) -> None:
+    """Close a durable log handle we are done with; a close failure never rewrites run truth."""
+    if handle is None:
+        return
+    try:
+        handle.close()
+    except Exception:  # noqa: BLE001 - best-effort release; the stream is already flushed per line.
+        pass
 
 
 def execute_run_subprocess(
@@ -494,16 +506,8 @@ def execute_run_subprocess(
         # A spawn failure (a bad worker argv, a missing interpreter, exhausted file descriptors) must
         # become a classified ENVIRONMENT_FAILURE manifest, not an OSError that escapes the supervisor
         # - and it must not leak the already-open run-events log.
-        if events_handle is not None:
-            try:
-                events_handle.close()
-            except Exception:  # noqa: BLE001 - best-effort close of a handle we are abandoning.
-                pass
-        if stderr_handle is not None:
-            try:
-                stderr_handle.close()
-            except Exception:  # noqa: BLE001 - best-effort close of a handle we are abandoning.
-                pass
+        _best_effort_close(events_handle)
+        _best_effort_close(stderr_handle)
         manifest = _failed_manifest(
             plan,
             rid,
@@ -777,16 +781,8 @@ def execute_run_subprocess(
                     write_run_manifest(manifest, record_dir)
                 except Exception:  # noqa: BLE001 - observer notes are not execution truth.
                     pass
-    if events_handle is not None:
-        try:
-            events_handle.close()
-        except Exception:  # noqa: BLE001 - the durable stream is already flushed per line.
-            pass
-    if stderr_handle is not None:
-        try:
-            stderr_handle.close()
-        except Exception:  # noqa: BLE001 - the child has exited; flush and release the capture log.
-            pass
+    _best_effort_close(events_handle)
+    _best_effort_close(stderr_handle)
     return SupervisedRun(manifest=manifest, events=events, artifacts=artifacts)
 
 
