@@ -1264,3 +1264,62 @@ def test_non_utf8_worker_stdout_does_not_strand_the_reader(tmp_path):
         FailureTaxonomy.TIMEOUT,
     }
     assert elapsed < 30
+
+
+def test_capture_worker_stderr_decision_is_tty_aware(monkeypatch):
+    # #509: an explicit True/False is honored; the default (None) is tty-aware.
+    from corpus_studio.platform.subprocess_supervisor import _capture_worker_stderr
+
+    assert _capture_worker_stderr(True) is True
+    assert _capture_worker_stderr(False) is False
+
+    class _Interactive:
+        def isatty(self):
+            return True
+
+    class _Piped:
+        def isatty(self):
+            return False
+
+    monkeypatch.setattr(
+        "corpus_studio.platform.subprocess_supervisor.sys.stderr", _Interactive()
+    )
+    assert _capture_worker_stderr(None) is False  # a tty -> inherit, keep live progress
+    monkeypatch.setattr("corpus_studio.platform.subprocess_supervisor.sys.stderr", _Piped())
+    assert _capture_worker_stderr(None) is True  # no tty (background/UI) -> capture
+
+
+def test_worker_stderr_is_captured_to_the_run_record_when_requested(tmp_path):
+    # #509: a background/UI run persists the child's stderr for post-mortem instead of losing it to a
+    # terminal nobody is watching.
+    argv = [
+        sys.executable,
+        "-c",
+        "import sys; sys.stderr.write('TORCH TRACEBACK boom\\n'); sys.stderr.flush(); sys.exit(5)",
+    ]
+    result = execute_run_subprocess(
+        _PLAN,
+        run_id="stderr-capture",
+        worker_argv=argv,
+        out_dir=str(tmp_path),
+        capture_stderr=True,
+        silence_timeout_s=10,
+    )
+    assert result.manifest.state == "failed"
+    log = tmp_path / "runs" / result.manifest.run_id / "worker-stderr.log"
+    assert log.exists()
+    assert "TORCH TRACEBACK boom" in log.read_text(encoding="utf-8")
+
+
+def test_worker_stderr_is_inherited_when_capture_disabled(tmp_path):
+    argv = [sys.executable, "-c", "import sys; sys.stderr.write('x\\n'); sys.exit(0)"]
+    result = execute_run_subprocess(
+        _PLAN,
+        run_id="stderr-inherit",
+        worker_argv=argv,
+        out_dir=str(tmp_path),
+        capture_stderr=False,
+        silence_timeout_s=10,
+    )
+    log = tmp_path / "runs" / result.manifest.run_id / "worker-stderr.log"
+    assert not log.exists()  # inherited, so no capture file is created

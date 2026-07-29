@@ -220,6 +220,22 @@ def _measured_failure_fit(manifest: RunManifest) -> FitClassification | None:
     return reconcile_measured_fit(evidence.measured_peak, proven=False)
 
 
+WORKER_STDERR_FILENAME = "worker-stderr.log"
+
+
+def _capture_worker_stderr(capture_stderr: bool | None) -> bool:
+    """Whether to redirect the worker child's stderr to a durable log rather than inherit it. Default
+    (None) is tty-aware: an INTERACTIVE parent inherits so live progress reaches the terminal; a
+    background/UI run (no tty) captures, so a real torch/CUDA traceback survives in the run record
+    instead of streaming to a terminal nobody is watching (#509)."""
+    if capture_stderr is not None:
+        return capture_stderr
+    try:
+        return not sys.stderr.isatty()
+    except Exception:  # noqa: BLE001 - a stderr without a usable isatty is treated as non-interactive.
+        return True
+
+
 def execute_run_subprocess(
     plan: RunPlan,
     *,
@@ -235,6 +251,7 @@ def execute_run_subprocess(
     worker_argv: list[str] | None = None,
     telemetry: TelemetryControl | None = None,
     warmup_steps: int = 2,
+    capture_stderr: bool | None = None,
 ) -> SupervisedRun:
     """Run ``plan`` in a supervised child process and return its :class:`SupervisedRun`.
 
@@ -351,9 +368,14 @@ def execute_run_subprocess(
 
     events: list[RunEvent] = []
     events_handle: Any = None
+    stderr_handle: Any = None
     if record_dir is not None:
         record_dir.mkdir(parents=True, exist_ok=True)
         events_handle = (record_dir / RUN_EVENTS_FILENAME).open("w", encoding="utf-8")  # noqa: SIM115
+        if _capture_worker_stderr(capture_stderr):
+            stderr_handle = (record_dir / WORKER_STDERR_FILENAME).open(  # noqa: SIM115
+                "w", encoding="utf-8", errors="replace"
+            )
     artifacts: list[ArtifactManifest] = []
     terminal_manifest: RunManifest | None = None
     deferred_terminal: RunEvent | None = None
@@ -449,15 +471,18 @@ def execute_run_subprocess(
                 if label not in sink_errors:
                     sink_errors.append(label)
 
-    # stderr is INHERITED (not a pipe): the trainer's tqdm/transformers write \r-based progress bars
-    # with no newlines, which would deadlock a line-drained stderr pipe (buffer fills and the child
-    # wedges on write). Inheriting sends telemetry straight to our stderr. Heartbeats never move either
-    # deadline, and preflight has one absolute budget, so a wedged child remains bounded.
+    # stderr: an INTERACTIVE run INHERITS it (live tqdm/transformers \r progress reaches the terminal;
+    # a line-drained PIPE would deadlock the child as its buffer fills, so we never pipe it). A
+    # background/UI run instead redirects it to a durable FILE (record_dir/worker-stderr.log) - a file
+    # is not a pipe, so there is no drain deadlock, and a real torch/CUDA traceback survives in the run
+    # record (#509). Heartbeats never move either deadline and preflight has one absolute budget, so a
+    # wedged child stays bounded. stderr_handle is None -> inherit (the original behavior).
     try:
         proc = subprocess.Popen(  # noqa: S603 - argv is our own worker command (or a test injection)
             argv,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
+            stderr=stderr_handle,
             text=True,
             encoding="utf-8",
             errors="replace",
@@ -472,6 +497,11 @@ def execute_run_subprocess(
         if events_handle is not None:
             try:
                 events_handle.close()
+            except Exception:  # noqa: BLE001 - best-effort close of a handle we are abandoning.
+                pass
+        if stderr_handle is not None:
+            try:
+                stderr_handle.close()
             except Exception:  # noqa: BLE001 - best-effort close of a handle we are abandoning.
                 pass
         manifest = _failed_manifest(
@@ -751,6 +781,11 @@ def execute_run_subprocess(
         try:
             events_handle.close()
         except Exception:  # noqa: BLE001 - the durable stream is already flushed per line.
+            pass
+    if stderr_handle is not None:
+        try:
+            stderr_handle.close()
+        except Exception:  # noqa: BLE001 - the child has exited; flush and release the capture log.
             pass
     return SupervisedRun(manifest=manifest, events=events, artifacts=artifacts)
 
