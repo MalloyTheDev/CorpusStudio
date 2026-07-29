@@ -29,8 +29,10 @@ from .contracts import (
     EvaluationResult,
     FailureRecord,
     FitClassification,
+    FrameworkBackend,
     ModelDescriptor,
     ObjectiveCompatibilityReport,
+    OrchestratorAdapter,
     ParameterAccountingReport,
     ProjectManifest,
     PythonRuntime,
@@ -84,6 +86,8 @@ ROOT_CONTRACTS: dict[str, type[ContractModel]] = {
     "WorkerMessage": WorkerMessage,
     "TrainingPlan": TrainingPlan,
     "TrainingPlanResolution": TrainingPlanResolution,
+    "FrameworkBackend": FrameworkBackend,
+    "OrchestratorAdapter": OrchestratorAdapter,
 }
 
 

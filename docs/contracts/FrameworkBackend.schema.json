@@ -1,0 +1,200 @@
+{
+  "$defs": {
+    "BackendCandidateClass": {
+      "description": "How a training backend is integrated (docs/TRAINING_BACKEND_REGISTRY.md). Classification only -\nnothing is installed, probed, or run by declaring a class.",
+      "enum": [
+        "first_party",
+        "managed_adapter",
+        "config_export_only",
+        "research_only",
+        "defer",
+        "reject"
+      ],
+      "title": "BackendCandidateClass",
+      "type": "string"
+    },
+    "DeviceKind": {
+      "enum": [
+        "cuda",
+        "rocm",
+        "mps",
+        "xpu",
+        "cpu"
+      ],
+      "title": "DeviceKind",
+      "type": "string"
+    },
+    "License": {
+      "additionalProperties": false,
+      "description": "License metadata for a dataset, base model, or produced artifact. The engine reminds users\nthe BASE model's license governs a produced adapter (training/model_card).",
+      "properties": {
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Name"
+        },
+        "redistributable": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Redistributable"
+        },
+        "source": {
+          "default": "unknown",
+          "enum": [
+            "declared",
+            "model_card",
+            "dataset_card",
+            "user_asserted",
+            "unknown"
+          ],
+          "title": "Source",
+          "type": "string"
+        },
+        "spdx_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Spdx Id"
+        },
+        "url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Url"
+        }
+      },
+      "title": "License",
+      "type": "object"
+    },
+    "OperatingSystem": {
+      "enum": [
+        "windows",
+        "wsl",
+        "linux",
+        "macos",
+        "unknown"
+      ],
+      "title": "OperatingSystem",
+      "type": "string"
+    },
+    "SupportLevel": {
+      "description": "A coarse, single-value capability-support ROLLUP - \"how far has this capability been proven,\nend to end?\" - that COEXISTS with the shipped multi-axis ladders (ObjectiveVerification's 3 axes,\nVerificationOutcome, RecipeVerification), which remain the authority. A SupportLevel never says\nWHICH axis is proven: the projection onto it (``support_level.project_objective_verification``) is\na lossy PARTIAL mapping that CARRIES not_applicable / partial / not_checked rather than inventing a\nlevel. \"installed\" is never \"supported\" - a higher state requires the evidence its name implies,\nnever a lower one plus optimism (the repo-wide \"a completed step != proven fit\" invariant).",
+      "enum": [
+        "declared",
+        "config_generation_only",
+        "installed",
+        "probed",
+        "workload_verified",
+        "production_supported",
+        "refused"
+      ],
+      "title": "SupportLevel",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "description": "The compute substrate a training run executes on (PyTorch / JAX / TF-Keras / MLX) - split out of\nthe conflated ``BackendManifest`` (P0c, #483). Additive + append-only; dense-default and MoE-safe.\nEvery capability carries a ``SupportLevel``; \"installed\" is never \"supported\".",
+  "properties": {
+    "candidate_class": {
+      "$ref": "#/$defs/BackendCandidateClass",
+      "default": "defer"
+    },
+    "contract_version": {
+      "const": "1.0.0",
+      "default": "1.0.0",
+      "title": "Contract Version",
+      "type": "string"
+    },
+    "display_name": {
+      "default": "",
+      "title": "Display Name",
+      "type": "string"
+    },
+    "framework_id": {
+      "pattern": "^[A-Za-z0-9._-]+$",
+      "title": "Framework Id",
+      "type": "string"
+    },
+    "framework_version": {
+      "default": "",
+      "title": "Framework Version",
+      "type": "string"
+    },
+    "license": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/License"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "model_topologies": {
+      "default": [
+        "dense"
+      ],
+      "items": {
+        "enum": [
+          "dense",
+          "moe"
+        ],
+        "type": "string"
+      },
+      "title": "Model Topologies",
+      "type": "array"
+    },
+    "support_level": {
+      "$ref": "#/$defs/SupportLevel",
+      "default": "declared"
+    },
+    "supported_devices": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/DeviceKind"
+      },
+      "title": "Supported Devices",
+      "type": "array"
+    },
+    "supported_os": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/OperatingSystem"
+      },
+      "title": "Supported Os",
+      "type": "array"
+    }
+  },
+  "required": [
+    "framework_id"
+  ],
+  "title": "FrameworkBackend",
+  "type": "object"
+}

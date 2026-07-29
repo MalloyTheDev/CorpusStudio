@@ -19,9 +19,10 @@ from corpus_studio.platform.contracts import (
     TrainingPlanParameters,
     TrainingPlanResolution,
 )
-from corpus_studio.platform.enums import SupportLevel
+from corpus_studio.platform.enums import AssuranceTier, SupportLevel
 from corpus_studio.platform.planner import PlannerConstraints, build_run_plan
 from corpus_studio.platform.training_plan import (
+    BackendSecurityRefused,
     THIN_REGISTRIES,
     framework_registry,
     resolve_training_plan,
@@ -138,3 +139,39 @@ def test_resolution_refs_must_carry_the_sealed_plan_hash():
             composition=TrainingPlanComposition(objective_id="o"),
             run_plan_refs=(Ref(id="rp-1"),),
         )
+
+
+def test_resolver_refuses_an_over_tier_backend_security_posture():
+    # #483 wiring: the security refusal is REACHABLE from the admission path, not just its own unit
+    # test. unsloth declares allowlisted network/download; sealed_research permits only 'none', so the
+    # resolver refuses fail-closed BEFORE any RunPlan is built (an unreachable control is not a control).
+    plan = TrainingPlan(
+        plan_intent_id="intent-1",
+        composition=TrainingPlanComposition(objective_id="qlora-sft", orchestrator="unsloth"),
+        parameters=_params(),
+    )
+    with pytest.raises(BackendSecurityRefused, match="sealed_research"):
+        resolve_training_plan(
+            plan,
+            profile=_profile(cc_major=12),
+            capabilities=_report(),
+            dataset_ref=_DATASET_REF,
+            plan_id="p1",
+            assurance_tier=AssuranceTier.sealed_research,
+        )
+
+
+def test_resolver_admits_the_clean_first_party_backend_at_every_tier():
+    # the default corpus_studio orchestrator declares a clean posture, so it resolves at every tier.
+    profile, caps = _profile(cc_major=12), _report()
+    for tier in AssuranceTier:
+        resolution = resolve_training_plan(
+            _training_plan(),
+            profile=profile,
+            capabilities=caps,
+            dataset_ref=_DATASET_REF,
+            plan_id="p1",
+            now=_NOW,
+            assurance_tier=tier,
+        )
+        assert isinstance(resolution, TrainingPlanResolution)

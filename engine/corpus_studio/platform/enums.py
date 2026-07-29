@@ -727,6 +727,38 @@ class SupportLevel(str, Enum):
     refused = "refused"  # known-incompatible or unsafe on this host/stack; fail-closed
 
 
+class AssuranceTier(str, Enum):
+    """The trust tier a run is admitted under. ``sealed_research`` is the strictest (maximum
+    reproducibility + safety); ``standard`` is the most permissive product tier. A backend's declared
+    security posture is REFUSED when it exceeds what the tier permits (see
+    ``backend_registry.refuse_backend_security``)."""
+
+    standard = "standard"
+    verified = "verified"
+    sealed_research = "sealed_research"
+
+
+class BackendCandidateClass(str, Enum):
+    """How a training backend is integrated (docs/TRAINING_BACKEND_REGISTRY.md). Classification only -
+    nothing is installed, probed, or run by declaring a class."""
+
+    first_party = "first_party"  # CorpusStudio owns the loop
+    managed_adapter = "managed_adapter"  # CorpusStudio drives an external tool it installs + probes
+    config_export_only = "config_export_only"  # emit a valid config/launcher; the user runs it elsewhere
+    research_only = "research_only"  # sealed overlay / not a product default
+    defer = "defer"  # revisit later
+    reject = "reject"  # out of scope / unsafe
+
+
+class AccessScope(str, Enum):
+    """How much network / download a backend's isolated worker process is DECLARED to need. Graduated so
+    a stricter assurance tier can refuse a broader scope."""
+
+    none = "none"
+    allowlisted = "allowlisted"
+    unrestricted = "unrestricted"
+
+
 class StorageInterface(str, Enum):
     """How a storage device attaches. The interface — not just free space — decides whether a device
     can sustain the heavy sequential + random writes of optimizer/parameter offload and checkpointing.
