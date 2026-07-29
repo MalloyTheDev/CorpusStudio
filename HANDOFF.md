@@ -1,5 +1,22 @@
 # CorpusStudio — Session Handoff
 
+**Last updated:** 2026-07-29 (**repo re-centered on the product; the 2026-07-18 engine hardening
+cluster is cleared**). The bounded autonomous engineering loop that was built here (#702-#721) was
+**extracted to a separate private repo, `cs-loop`** (#729, -12.3k lines). What stays here is the
+product (engine + `apps/web`), the **assurance plane** (`scripts/assurance/`, `cs_assure` - the repo's
+own judge that the loop *queries*, never owns), and the IEEE research overlay - see AGENTS.md "The
+autonomous loop lives elsewhere". The engine bug/hardening cluster from the 2026-07-18 audit is now
+merged: worker subprocess fails closed on a bad stdout byte / failed spawn (#508/#510 -> #731),
+trace-validator seals the config it actually uses (#507 -> #732), command-level tests for the
+provenance/dataset CLIs (#506 -> #733), a silent unrenderable-row drop is refused (#565 -> #734), the
+dead `samples_per_second` is wired (#511 -> #735), and worker stderr is captured tty-aware to the run
+record (#509 -> #736). #512 (assert `observed_microbatches` == sealed grad-accum) is **deferred**: a
+strict equality assertion would false-fail on a legitimate partial final accumulation and needs
+partial-batch handling first. The measured seq-4096 exploratory result (below) still stands and the
+sealed IEEE ladder is unchanged. Next: high-value product issues - wire `platform-run` + the live
+RunEvent stream into the Tauri client (#513), Training Systems P0 (`SupportLevel` / `TrainingPlan`,
+#481/#482), Rust-core Phase 1 stabilization (#523).
+
 **Last updated:** 2026-07-19 (**exploratory seq-4096 7B QLoRA achieved on the native-Linux host -
 product, NOT a sealed IEEE cell**). An exploratory `platform-run` trained Qwen2.5-7B QLoRA at sequence
 length 4096 on this RTX 5070 (12 GB) box, and the WBG example's untruncated "after" adapter was produced
@@ -366,6 +383,15 @@ regeneration drift checks) and Python CodeQL.
   flagged per role — the reason this migration off F: happened.
 
 ## 7. Immediate next actions (ranked)
+
+> **2026-07-29 status:** items 1-4 below are HISTORICAL. The v5 -> v9 GPU bring-up ladder is complete
+> (v9 trained 7B QLoRA at seq 4096, exploratory - see the lead) and the 2026-07-18 engine hardening
+> cluster is merged (#731-#736, see the top block). **Current next actions:** (a) doc-truth
+> reconciliation (this pass - HANDOFF/CURRENT_STATE were stale after the loop extraction and the
+> desktop removal); (b) high-value product issues - wire `platform-run` + the live RunEvent stream
+> into the Tauri client (#513), Training Systems P0 (`SupportLevel` / `TrainingPlan`, #481/#482),
+> Rust-core Phase 1 stabilization (#523); (c) revisit the deferred #512 with partial-batch handling.
+> The GPU / sealed-research and release gates still require explicit human authorization.
 
 1. **Finish and merge the focused post-trainer precision correction before any new worker wheel.** Do
    not reuse the preserved manager-1.2 v2/v3 or manager-1.3 v4 environments, plans, failed runs, or
