@@ -159,16 +159,12 @@ def test_glob_matches_dir_star_star_is_boundary_correct() -> None:
 
 def test_glob_matches_is_case_INsensitive() -> None:
     """DELIBERATE REVERSAL of the original `test_glob_matches_is_case_sensitive`, which arrived with the
-    feature commit (#643) pinning `fnmatchcase`'s behaviour rather than a stated security rationale.
+    feature commit (#643) pinning `fnmatchcase` without a stated security rationale.
 
-    Byte-exact matching was measured to FAIL OPEN: `Scripts/assurance/x.py`, `.GitHub/workflows/e.yml` and
-    `Research/ieee-linux-training/x.md` fired ZERO obligations, so a self-modify / CI / sealed-research
-    change could land with the gate silent and the impact record reporting "no obligations fired". This
-    repo carries core.ignorecase=true, and on any case-insensitive checkout the variant IS the same file.
-
-    Matching MORE is the fail-SAFE direction here: a spurious match fires an extra human gate; a missed
-    match silently removes one. Verified: zero tracked paths collide when case-folded, so nothing real
-    is over-matched (see test_glob_matches_still_respects_the_directory_boundary for the limits)."""
+    Byte-exact matching FAILS OPEN: a case variant of a protected path fires ZERO obligations while the
+    impact record reports "no obligations fired" - yet on a folding checkout (core.ignorecase=true) the
+    variant IS the same file. Matching MORE is fail-SAFE: a spurious match adds a human gate, a missed
+    one silently removes it (see test_glob_matches_still_respects_the_directory_boundary for the limit)."""
     assert glob_matches("engine/corpus_studio/cli.py", "Engine/corpus_studio/cli.py")
 
 
