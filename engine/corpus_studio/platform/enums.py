@@ -709,6 +709,24 @@ class RecipeVerification(str, Enum):
     hardware_verified = "hardware_verified"
 
 
+class SupportLevel(str, Enum):
+    """A coarse, single-value capability-support ROLLUP - "how far has this capability been proven,
+    end to end?" - that COEXISTS with the shipped multi-axis ladders (ObjectiveVerification's 3 axes,
+    VerificationOutcome, RecipeVerification), which remain the authority. A SupportLevel never says
+    WHICH axis is proven: the projection onto it (``support_level.project_objective_verification``) is
+    a lossy PARTIAL mapping that CARRIES not_applicable / partial / not_checked rather than inventing a
+    level. "installed" is never "supported" - a higher state requires the evidence its name implies,
+    never a lower one plus optimism (the repo-wide "a completed step != proven fit" invariant)."""
+
+    declared = "declared"  # claimed in a manifest; no code path yet
+    config_generation_only = "config_generation_only"  # emits a valid config/launcher; we do not run it
+    installed = "installed"  # dependencies resolve and import in a managed env
+    probed = "probed"  # a functional probe passed (import + tiny construct), NOT a workload
+    workload_verified = "workload_verified"  # a real bounded workload passed on real hardware (measured)
+    production_supported = "production_supported"  # workload_verified + telemetry + resume + failure handling + docs
+    refused = "refused"  # known-incompatible or unsafe on this host/stack; fail-closed
+
+
 class StorageInterface(str, Enum):
     """How a storage device attaches. The interface — not just free space — decides whether a device
     can sustain the heavy sequential + random writes of optimizer/parameter offload and checkpointing.
