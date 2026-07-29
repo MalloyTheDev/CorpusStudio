@@ -5,17 +5,20 @@ control-plane slice - its execution-affecting semantics are byte-identical and i
 self-consistent - and only the workload_verified dense_qlora_sft variant is admitted (every non-SFT
 variant is refused fail-closed).
 
-The semantic pin deliberately excludes the environment-captured provenance: the exact installed
-trainer package versions and the capability/probe refs whose hashes derive from them. Those vary by
-machine - the dependency-light engine venv reports the trainer packages as "not-installed" while CI
-has them installed - and this control-plane slice cannot touch them, so pinning them would break CI
-for reasons unrelated to the sealed config. The real configuration_hash still seals those versions in
-production; here we prove the config is internally sealed rather than pin a machine-specific value.
+The semantic pin deliberately excludes the environment-captured provenance - every value whose bytes
+depend on the machine rather than on the sealed SFT semantics: the installed trainer package versions
+(the dependency-light engine venv reports them "not-installed" while CI has them installed), the input
+POINTERS (an absolute checkout path plus a raw-bytes dataset digest), and the formatter identity
+(inspect.getsource of trainer.py) - the latter two are CRLF in a dev checkout but LF on CI. This
+control-plane slice cannot touch any of them, so pinning them would break CI for reasons unrelated to
+the sealed config. The real configuration_hash still seals them in production; here we prove the config
+is internally sealed rather than pin a machine-specific value.
 """
 
 from __future__ import annotations
 
 import importlib.metadata
+import re
 
 import pytest
 
@@ -36,25 +39,40 @@ from corpus_studio.platform.execution_variants import (
 )
 from corpus_studio.platform.runners import demo_training_plan
 
-# The environment-captured provenance on the sealed config: the installed trainer package versions and
-# the capability/probe refs whose hashes are derived from them. Excluded from the semantic pin so the
-# guard is deterministic across machines (proven env-invariant by
-# test_sealed_sft_configuration_semantics_are_env_invariant). Every execution-affecting field stays in.
+# The environment-captured provenance on the sealed config - everything whose bytes depend on the
+# machine rather than on the sealed SFT semantics, so the pin holds across a CRLF dev checkout and CI's
+# LF checkout regardless of which trainer packages are installed:
+#   - trainer_interface.package_versions : importlib.metadata versions (installed vs "not-installed")
+#   - capability_report_ref / attention.kernel_probe_ref : refs whose hashes derive from those versions
+#   - inputs : dataset/model/tokenizer POINTERS - an absolute checkout path + a raw-bytes file digest
+#     (CRLF vs LF); the dataset FORMAT semantics live in the separate `data` field, kept below
+#   - data.formatter_sha256 : hashes inspect.getsource(format_example_text), i.e. trainer.py's bytes
+#   - configuration_hash : derived from all of the above
+# Every execution-affecting field (adapter / optimizer / loss / precision / sequence / data-format /
+# batching / schedule / the task-type locks) stays in the pin; that no env-specific value leaks in is
+# asserted by test_semantic_pin_has_no_environment_specific_values.
 _ENV_PROVENANCE_EXCLUDE = {
     "configuration_hash": True,
     "capability_report_ref": True,
     "attention": {"kernel_probe_ref": True},
     "trainer_interface": {"package_versions": True},
+    "inputs": True,
+    "data": {"formatter_sha256": True},
 }
 
 # The trainer packages demo_training_plan() version-stamps via importlib.metadata; used only to prove
 # env-invariance of the semantic pin.
 _TRAINER_PACKAGES = frozenset({"accelerate", "datasets", "peft", "torch", "transformers", "trl"})
 
+# In-code model refs whose hashes are over pydantic content (not bytes on disk or package versions), so
+# they are stable across CRLF/LF checkouts and install sets - the only 64-hex values allowed to survive
+# into the semantic pin.
+_STABLE_HASH_ROOTS = frozenset({"backend_ref", "objective_ref", "environment_ref", "environment_binding"})
+
 # GOLDEN semantic baseline of the sealed dense-QLoRA-SFT config, captured before this P0d slice with the
 # environment provenance excluded. If this changes, the sealed worker lineage's execution semantics
 # (adapter / optimizer / loss / precision / sequence / data / task-type locks) have been altered.
-_SFT_SEMANTIC_SHA = "9b79711c5081f818951502ea970cebf8e84f29f3e3fcd7e751acd85072e1f25c"
+_SFT_SEMANTIC_SHA = "ba48d66986b94ad1e941fdf2ff0b18de1042fdf10bc42ce2d9db0e9e8cfeb6f1"
 _SFT_FIELD_COUNT = 33
 
 
@@ -99,6 +117,35 @@ def test_sealed_sft_configuration_semantics_are_env_invariant(monkeypatch):
         lambda name: "9.9.9-test" if name in _TRAINER_PACKAGES else real_version(name),
     )
     assert canonical_sha256(_semantic_dump(_sft_config())) == baseline == _SFT_SEMANTIC_SHA
+
+
+def test_semantic_pin_has_no_environment_specific_values():
+    # the strongest guard on the exclusion set: whatever fields the sealed config carries, the semantic
+    # pin must hold no value whose bytes depend on the machine - no absolute path, and no file/source
+    # digest outside the in-code model refs that hash pydantic content rather than bytes on disk. If a
+    # future field leaks a path, a raw-bytes file digest, or an inspect.getsource hash into the pin,
+    # this fails loudly here instead of silently breaking CI on the next CRLF/LF or version skew.
+    def _leaves(obj, path=""):
+        if isinstance(obj, dict):
+            for key, value in obj.items():
+                yield from _leaves(value, f"{path}.{key}" if path else key)
+        elif isinstance(obj, list):
+            for index, value in enumerate(obj):
+                yield from _leaves(value, f"{path}[{index}]")
+        else:
+            yield path, obj
+
+    offenders = [
+        (path, value)
+        for path, value in _leaves(_semantic_dump(_sft_config()))
+        if isinstance(value, str)
+        and (
+            value.startswith("/")
+            or ":\\" in value
+            or (re.fullmatch(r"[0-9a-f]{64}", value) and path.split(".")[0] not in _STABLE_HASH_ROOTS)
+        )
+    ]
+    assert offenders == [], f"environment-specific values leaked into the semantic pin: {offenders}"
 
 
 # ---- Gate 3: schema identity (no field added / removed / relaxed on the sealed config) -------------
