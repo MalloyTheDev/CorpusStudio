@@ -124,6 +124,14 @@
     {
       "contract": "WorkerMessage",
       "file": "WorkerMessage.schema.json"
+    },
+    {
+      "contract": "TrainingPlan",
+      "file": "TrainingPlan.schema.json"
+    },
+    {
+      "contract": "TrainingPlanResolution",
+      "file": "TrainingPlanResolution.schema.json"
     }
   ]
 }

@@ -1,0 +1,307 @@
+{
+  "$defs": {
+    "AdapterMethod": {
+      "enum": [
+        "none",
+        "lora",
+        "qlora",
+        "dora",
+        "ia3",
+        "full_finetune",
+        "prompt_tuning",
+        "prefix_tuning"
+      ],
+      "title": "AdapterMethod",
+      "type": "string"
+    },
+    "CheckpointImpl": {
+      "enum": [
+        "full_state",
+        "adapter_only",
+        "sharded",
+        "distcp",
+        "safetensors"
+      ],
+      "title": "CheckpointImpl",
+      "type": "string"
+    },
+    "DeviceKind": {
+      "enum": [
+        "cuda",
+        "rocm",
+        "mps",
+        "xpu",
+        "cpu"
+      ],
+      "title": "DeviceKind",
+      "type": "string"
+    },
+    "HashRef": {
+      "additionalProperties": false,
+      "description": "An algorithm-tagged digest. The engine emits sha256 today; the algo tag makes a future\nmigration additive (cf. versions/version_registry.FINGERPRINT_ALGO).",
+      "properties": {
+        "algo": {
+          "default": "sha256",
+          "enum": [
+            "sha256",
+            "sha256-ordered-exact-v1",
+            "blake3",
+            "none"
+          ],
+          "title": "Algo",
+          "type": "string"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Value"
+        }
+      },
+      "title": "HashRef",
+      "type": "object"
+    },
+    "ParallelismKind": {
+      "enum": [
+        "data",
+        "tensor",
+        "pipeline",
+        "expert",
+        "sequence",
+        "context"
+      ],
+      "title": "ParallelismKind",
+      "type": "string"
+    },
+    "PrecisionMode": {
+      "enum": [
+        "fp32",
+        "tf32",
+        "fp16",
+        "bf16",
+        "fp8",
+        "mixed_bf16",
+        "mixed_fp16"
+      ],
+      "title": "PrecisionMode",
+      "type": "string"
+    },
+    "QuantizationMode": {
+      "enum": [
+        "none",
+        "int8",
+        "int4",
+        "nf4",
+        "fp4",
+        "gptq",
+        "awq",
+        "hqq"
+      ],
+      "title": "QuantizationMode",
+      "type": "string"
+    },
+    "Ref": {
+      "additionalProperties": false,
+      "description": "A stable reference to another contract instance by id, optionally pinned to a content hash so\nthe reference cannot silently re-point.",
+      "properties": {
+        "hash": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HashRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "id": {
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "title": "Ref",
+      "type": "object"
+    },
+    "TrainingPlanCompatibilityFinding": {
+      "additionalProperties": false,
+      "description": "One advisory cross-dimension compatibility finding from the UX pre-check. Advisory ONLY - it\nnever gates resolution or execution; the authoritative gate stays the planner's declared-and-proven\ncapability check plus the exact ``ExecutionCapabilityCombination``-in-a-passing-probe match.",
+      "properties": {
+        "code": {
+          "title": "Code",
+          "type": "string"
+        },
+        "message": {
+          "title": "Message",
+          "type": "string"
+        },
+        "severity": {
+          "default": "warning",
+          "enum": [
+            "info",
+            "warning"
+          ],
+          "title": "Severity",
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "message"
+      ],
+      "title": "TrainingPlanCompatibilityFinding",
+      "type": "object"
+    },
+    "TrainingPlanComposition": {
+      "additionalProperties": false,
+      "description": "One entry selected per registry dimension (the architecture doc's registries). Pre-resolution\nintent, dense-default and MoE-compatible - it never assumes dense execution. These are capability\nSELECTIONS (refs into the thin registries), not sealed execution fields; the ``parameters`` block\ncarries the executable knobs and the compatibility pre-check validates the two are consistent.",
+      "properties": {
+        "checkpoint_strategy": {
+          "$ref": "#/$defs/CheckpointImpl",
+          "default": "adapter_only"
+        },
+        "evaluation_profile": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Evaluation Profile"
+        },
+        "framework": {
+          "default": "pytorch",
+          "title": "Framework",
+          "type": "string"
+        },
+        "hardware_target": {
+          "$ref": "#/$defs/DeviceKind",
+          "default": "cuda"
+        },
+        "model_topology": {
+          "default": "dense",
+          "enum": [
+            "dense",
+            "moe"
+          ],
+          "title": "Model Topology",
+          "type": "string"
+        },
+        "objective_id": {
+          "title": "Objective Id",
+          "type": "string"
+        },
+        "orchestrator": {
+          "default": "corpus_studio",
+          "title": "Orchestrator",
+          "type": "string"
+        },
+        "parallelism": {
+          "default": [
+            "data"
+          ],
+          "items": {
+            "$ref": "#/$defs/ParallelismKind"
+          },
+          "title": "Parallelism",
+          "type": "array"
+        },
+        "precision": {
+          "$ref": "#/$defs/PrecisionMode",
+          "default": "bf16"
+        },
+        "preset": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Preset"
+        },
+        "quantization": {
+          "$ref": "#/$defs/QuantizationMode",
+          "default": "nf4"
+        },
+        "update_method": {
+          "$ref": "#/$defs/AdapterMethod",
+          "default": "qlora"
+        }
+      },
+      "required": [
+        "objective_id"
+      ],
+      "title": "TrainingPlanComposition",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "The result of lowering a :class:`TrainingPlan` into one-or-more RunPlans (Training Systems P0b,\n#482). It references the resolved RunPlan(s) by their sealed plan identity, carries the advisory\npre-check findings, and links back to the intent. It has NO sealing authority of its own:\n``RunPlan.plan_hash`` remains the execution seal, and every ref here must carry it.",
+  "properties": {
+    "composition": {
+      "$ref": "#/$defs/TrainingPlanComposition"
+    },
+    "contract_version": {
+      "const": "1.0.0",
+      "default": "1.0.0",
+      "title": "Contract Version",
+      "type": "string"
+    },
+    "plan_intent_id": {
+      "pattern": "^[A-Za-z0-9._-]+$",
+      "title": "Plan Intent Id",
+      "type": "string"
+    },
+    "precheck_findings": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/TrainingPlanCompatibilityFinding"
+      },
+      "title": "Precheck Findings",
+      "type": "array"
+    },
+    "resolved_at": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Resolved At"
+    },
+    "run_plan_refs": {
+      "items": {
+        "$ref": "#/$defs/Ref"
+      },
+      "minItems": 1,
+      "title": "Run Plan Refs",
+      "type": "array"
+    }
+  },
+  "required": [
+    "plan_intent_id",
+    "composition",
+    "run_plan_refs"
+  ],
+  "title": "TrainingPlanResolution",
+  "type": "object"
+}

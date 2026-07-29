@@ -44,6 +44,8 @@ from .contracts import (
     TokenizerDescriptor,
     TraceRecord,
     TrainingObjective,
+    TrainingPlan,
+    TrainingPlanResolution,
     WorkerMessage,
 )
 
@@ -80,6 +82,8 @@ ROOT_CONTRACTS: dict[str, type[ContractModel]] = {
     "FailureRecord": FailureRecord,
     "FitClassification": FitClassification,
     "WorkerMessage": WorkerMessage,
+    "TrainingPlan": TrainingPlan,
+    "TrainingPlanResolution": TrainingPlanResolution,
 }
 
 

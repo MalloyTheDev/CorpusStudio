@@ -94,6 +94,15 @@ pre-check**, never the authoritative gate - the authoritative gate stays the pla
 capability check plus the `ExecutionCapabilityCombination`-in-a-passing-probe match (which is why proving
 one capability tuple never implies another; see §6).
 
+**Implemented (P0b, [#482](https://github.com/MalloyTheDev/CorpusStudio/issues/482)):**
+`TrainingPlan` + `TrainingPlanResolution` contracts (`platform/contracts.py`), the thin registries +
+resolver + advisory pre-check (`platform/training_plan.py`). `resolve_training_plan` lowers a
+`TrainingPlan` into a RunPlan via `build_run_plan` and **reproduces a direct build's `plan_hash` byte
+for byte** (property-tested) - the resolver seals nothing. `TrainingPlan` carries no `plan_hash` /
+`configuration_hash`, its `parameters` mirror `PlannerConstraints` field-for-field (drift-guarded), and
+each registry entry carries a `SupportLevel` (§4). Multi-objective / multi-stage lowering (one
+`TrainingPlan` -> several RunPlans) is structurally allowed but not yet resolved.
+
 ## 4. Support levels (installed is never supported)
 
 Every capability - a registry entry, a backend manifest claim, a preset - carries exactly one state:
