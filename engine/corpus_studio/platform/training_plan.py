@@ -149,7 +149,7 @@ THIN_REGISTRIES = {
     "hardware_target": hardware_target_registry,
     "checkpoint_strategy": checkpoint_strategy_registry,
     "evaluation_profile": evaluation_profile_registry,
-    "training_preset": training_preset_registry,
+    "preset": training_preset_registry,  # keyed by the composition FIELD name (not the registry name)
 }
 
 

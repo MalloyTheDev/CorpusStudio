@@ -123,6 +123,13 @@ def test_thin_registries_carry_support_levels():
     )
 
 
+def test_thin_registry_keys_are_composition_field_names():
+    # #742 review: registries are keyed by the COMPOSITION FIELD name so a consumer can do
+    # THIN_REGISTRIES[field] without special-casing. Guard against drift (e.g. 'training_preset' vs
+    # 'preset'): every registry key must be an actual TrainingPlanComposition field.
+    assert set(THIN_REGISTRIES) <= set(TrainingPlanComposition.model_fields)
+
+
 def test_resolution_refs_must_carry_the_sealed_plan_hash():
     # The resolution POINTS at sealed RunPlans; it never re-seals. A ref without its hash is refused.
     with pytest.raises(ValidationError):
