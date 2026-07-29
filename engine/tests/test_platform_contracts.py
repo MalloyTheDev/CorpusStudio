@@ -39,6 +39,7 @@ def test_contract_version_is_pinned():
 def test_all_root_contracts_registered():
     assert len(P.ROOT_CONTRACTS) == 36
     assert "StorageProfile" in P.ROOT_CONTRACTS
+    assert "BackendExecutionVariant" in P.ROOT_CONTRACTS
     for expected in (
         "ModelDescriptor",
         "ParameterAccountingReport",

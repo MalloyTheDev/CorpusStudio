@@ -19,6 +19,12 @@ from corpus_studio.platform.contracts import BackendExecutionVariant
 from corpus_studio.platform.enums import ExecutionVariantKind, ExecutionVariantSupport
 
 
+# The sealed SFT config's task-type lock (``adapter_task_type: Literal["CAUSAL_LM"]``) is FROZEN by
+# design (the byte-identical constraint), so there is nothing to sync TO; this constant only
+# de-duplicates the value across the envelope table below.
+_CAUSAL_LM = "CAUSAL_LM"
+
+
 class ExecutionVariantRefused(ValueError):
     """A structured, fail-closed refusal from the execution-variant admission gate. The gate never
     silently coerces, downgrades, or substitutes a variant, and never falls back to dense_qlora_sft."""
@@ -41,28 +47,28 @@ class VariantEnvelope:
 # (CAUSAL_LM + a PEFT adapter, one dataset, no full-parameter update); the others relax specific locks.
 _VARIANT_ENVELOPE: dict[ExecutionVariantKind, VariantEnvelope] = {
     ExecutionVariantKind.dense_qlora_sft: VariantEnvelope(
-        task_type="CAUSAL_LM",
+        task_type=_CAUSAL_LM,
         requires_causal_lm=True,
         requires_peft_adapter=True,
         allows_full_parameter=False,
         allows_multiple_datasets=False,
     ),
     ExecutionVariantKind.dense_full_finetune: VariantEnvelope(
-        task_type="CAUSAL_LM",
+        task_type=_CAUSAL_LM,
         requires_causal_lm=True,
         requires_peft_adapter=False,
         allows_full_parameter=True,
         allows_multiple_datasets=False,
     ),
     ExecutionVariantKind.pretraining: VariantEnvelope(
-        task_type="CAUSAL_LM",
+        task_type=_CAUSAL_LM,
         requires_causal_lm=True,
         requires_peft_adapter=False,
         allows_full_parameter=True,
         allows_multiple_datasets=True,
     ),
     ExecutionVariantKind.moe: VariantEnvelope(
-        task_type="CAUSAL_LM",
+        task_type=_CAUSAL_LM,
         requires_causal_lm=True,
         requires_peft_adapter=False,
         allows_full_parameter=True,
@@ -70,11 +76,10 @@ _VARIANT_ENVELOPE: dict[ExecutionVariantKind, VariantEnvelope] = {
     ),
 }
 
+# Derived from the enum's definition order (ascending support), so it cannot drift from the ladder:
+# a member added in order automatically extends it, and the two can never disagree.
 _SUPPORT_ORDER: dict[ExecutionVariantSupport, int] = {
-    ExecutionVariantSupport.declared: 0,
-    ExecutionVariantSupport.contract_validated: 1,
-    ExecutionVariantSupport.worker_implemented: 2,
-    ExecutionVariantSupport.workload_verified: 3,
+    member: index for index, member in enumerate(ExecutionVariantSupport)
 }
 
 
