@@ -3,7 +3,16 @@
 Single source of truth for what Corpus Studio actually does today. When another
 doc disagrees with this file, this file wins (and the other doc should be fixed).
 
-Last reconciled: 2026-07-18 (through **v1.3** — Evaluation Suites & Chat Gates — plus the **platform
+Last reconciled: 2026-07-29 — the bounded autonomous engineering loop was **extracted to a separate
+repo (`cs-loop`, #729)**; what remains here is the product, the **assurance plane**
+(`scripts/assurance/`, `cs_assure`), and the IEEE research overlay. The 2026-07-18 engine
+bug/hardening cluster is merged (#731-#736: worker fail-closed on a bad stdout byte / failed spawn,
+trace-validator config seal, command-level CLI tests, a refused silent unrenderable-row drop, the
+wired `samples_per_second`, and tty-aware worker-stderr capture). **The WPF/Avalonia desktop was
+removed (#545):** the "desktop *&lt;X&gt;* tab" phrasings below describe that removed prototype's
+surfaces (historical) — the engine **CLI is the current surface** and the Tauri/React `apps/web`
+client is in progress; per-line reframing is tracked in #560. Prior reconciliation — 2026-07-18
+(through **v1.3** — Evaluation Suites & Chat Gates — plus the **platform
 run lifecycle** re-scope: profile → plan → predict-fit → run → measure-fit → artifacts, a multi-backend
 registry, and subprocess reliability. The pre-Phase-9B real GPU workload evidence remains historical
 native Windows/WDDM evidence. The managed native-Linux environments now separately seal the legacy
