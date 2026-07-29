@@ -47,6 +47,8 @@ from .enums import (
     DescriptorFileRole,
     DeviceKind,
     EvidenceKind,
+    ExecutionVariantKind,
+    ExecutionVariantSupport,
     ExecutionVerificationRequirement,
     EnvironmentState,
     ExportFormat,
@@ -5588,3 +5590,30 @@ class OrchestratorAdapter(ContractModel):
     failure_parser: str = ""
     security_posture: BackendSecurityPosture = Field(default_factory=BackendSecurityPosture)
     support_level: SupportLevel = SupportLevel.declared
+
+
+# --------------------------------------------------------------------------------------------------
+# Execution variants of the ONE canonical training harness (Training Systems P0d, #484)
+#
+# ADDITIVE + control-plane only. ResolvedExecutionConfiguration (the sealed dense-QLoRA-SFT worker
+# contract) is UNTOUCHED - byte-identical serialization + configuration_hash. BackendExecutionVariant
+# is a CAPABILITY DESCRIPTOR, never a worker configuration; declaring a variant does not make it
+# executable, and only a workload_verified variant passes the fail-closed execution admission gate
+# (execution_variants.admit_execution_variant). Its per-kind capability envelope is DERIVED from the
+# variant kind (execution_variants.variant_envelope), so an impossible combination is unrepresentable.
+# --------------------------------------------------------------------------------------------------
+
+
+class BackendExecutionVariant(ContractModel):
+    """A control-plane CAPABILITY DESCRIPTOR: a backend's support for one execution variant of the
+    canonical training harness. It is NOT the sealed worker configuration
+    (:class:`ResolvedExecutionConfiguration`) and is never passed to a worker as one; the variant's
+    capability envelope (task type, PEFT/full-parameter, dataset cardinality) is DERIVED from
+    ``variant_kind`` (see ``execution_variants.variant_envelope``), so a contradictory envelope cannot
+    be expressed. Declaring a variant does not make it executable - only ``workload_verified`` passes
+    the execution admission gate."""
+
+    contract_version: CONTRACT_VERSION_LITERAL = "1.0.0"
+    backend_id: str = Field(pattern=_ID)
+    variant_kind: ExecutionVariantKind
+    support: ExecutionVariantSupport = ExecutionVariantSupport.declared

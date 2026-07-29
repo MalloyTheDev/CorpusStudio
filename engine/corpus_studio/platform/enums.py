@@ -759,6 +759,32 @@ class AccessScope(str, Enum):
     unrestricted = "unrestricted"
 
 
+class ExecutionVariantKind(str, Enum):
+    """An execution variant of the ONE canonical training harness (not a separate harness). The
+    dense-QLoRA-SFT variant is the sealed, workload-verified path (``ResolvedExecutionConfiguration``);
+    the others are contract-expressible modes that are NOT executable until separately implemented,
+    measured, and admitted. The set is deliberately small - only variants justified by current scope."""
+
+    dense_qlora_sft = "dense_qlora_sft"
+    dense_full_finetune = "dense_full_finetune"
+    pretraining = "pretraining"
+    moe = "moe"
+
+
+class ExecutionVariantSupport(str, Enum):
+    """How far an execution variant has been proven, as a closed ladder (a Boolean 'verified' is too
+    easy to set without saying what was proven). ``declared`` = exists in the capability model only;
+    ``contract_validated`` = its descriptor + invariants are test-covered but no worker path is
+    established; ``worker_implemented`` = an execution path exists but the real-workload evidence has
+    not passed; ``workload_verified`` = the real training workload + artifact-verification gates
+    passed. Only ``workload_verified`` may pass the execution admission gate."""
+
+    declared = "declared"
+    contract_validated = "contract_validated"
+    worker_implemented = "worker_implemented"
+    workload_verified = "workload_verified"
+
+
 class StorageInterface(str, Enum):
     """How a storage device attaches. The interface — not just free space — decides whether a device
     can sustain the heavy sequential + random writes of optimizer/parameter offload and checkpointing.

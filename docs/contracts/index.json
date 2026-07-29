@@ -140,6 +140,10 @@
     {
       "contract": "OrchestratorAdapter",
       "file": "OrchestratorAdapter.schema.json"
+    },
+    {
+      "contract": "BackendExecutionVariant",
+      "file": "BackendExecutionVariant.schema.json"
     }
   ]
 }

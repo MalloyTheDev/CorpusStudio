@@ -103,6 +103,32 @@ for byte** (property-tested) - the resolver seals nothing. `TrainingPlan` carrie
 each registry entry carries a `SupportLevel` (§4). Multi-objective / multi-stage lowering (one
 `TrainingPlan` -> several RunPlans) is structurally allowed but not yet resolved.
 
+### 3.1 One canonical training harness; execution variants (P0d, [#484](https://github.com/MalloyTheDev/CorpusStudio/issues/484))
+
+CorpusStudio has **one** training harness. The **dense-QLoRA-SFT** path is that canonical harness - it
+has completed a **real, workload-verified** training run (evidence preserved under `.../runs/*`; see
+[`HOST_STATE.md`](HOST_STATE.md)), and its sealed worker contract is **`ResolvedExecutionConfiguration`**.
+Dense full fine-tune, pretraining, and MoE are **execution variants of that same harness**, not separate
+harnesses.
+
+`ResolvedExecutionConfiguration` stays **exactly as-is** (byte-identical serialization + unchanged
+`configuration_hash`; hard-locked to `CAUSAL_LM` / `adapter_peft` / `adapter_only` / one dataset / one
+`adapter_model.safetensors`). The additive **`BackendExecutionVariant`** is a control-plane **capability
+descriptor** - it is *not* the sealed worker configuration and is never passed to a worker as one; each
+variant's envelope is **derived from its `ExecutionVariantKind`** (`execution_variants.variant_envelope`),
+so a contradictory combination cannot be expressed. **Declaring a variant does not make it executable:**
+`execution_variants.admit_execution_variant` is **fail-closed** and admits only a variant at
+`ExecutionVariantSupport.workload_verified` - it never coerces, downgrades, substitutes, or falls back
+to dense-QLoRA-SFT. This slice is **control-plane only - no worker change, no new worker wheel**; future
+variants each require their own implementation + workload-verification gate.
+
+| Execution variant | Contract-expressible | Worker-implemented | Workload-verified | Admitted |
+|---|---|---|---|---|
+| dense_qlora_sft | yes | yes | **yes** (real run evidence) | **yes** |
+| dense_full_finetune | yes | no | no | no |
+| pretraining | yes | no | no | no |
+| moe | yes | no | no | no |
+
 ## 4. Support levels (installed is never supported)
 
 Every capability - a registry entry, a backend manifest claim, a preset - carries exactly one state:
