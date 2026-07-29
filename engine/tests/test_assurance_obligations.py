@@ -161,7 +161,7 @@ def test_glob_matches_is_case_INsensitive() -> None:
     """DELIBERATE REVERSAL of the original `test_glob_matches_is_case_sensitive`, which arrived with the
     feature commit (#643) pinning `fnmatchcase`'s behaviour rather than a stated security rationale.
 
-    Byte-exact matching was measured to FAIL OPEN: `Scripts/loop/x.py`, `.GitHub/workflows/e.yml` and
+    Byte-exact matching was measured to FAIL OPEN: `Scripts/assurance/x.py`, `.GitHub/workflows/e.yml` and
     `Research/ieee-linux-training/x.md` fired ZERO obligations, so a self-modify / CI / sealed-research
     change could land with the gate silent and the impact record reporting "no obligations fired". This
     repo carries core.ignorecase=true, and on any case-insensitive checkout the variant IS the same file.
@@ -409,20 +409,20 @@ def test_glob_matches_is_case_insensitive_on_both_sides() -> None:
     ZERO obligations and the impact record honestly reported "no obligations fired". This repo carries
     core.ignorecase=true, and on any case-insensitive checkout the variant IS the same file."""
     # dir/** branch
-    assert glob_matches("scripts/loop/**", "Scripts/loop/x.py")
-    assert glob_matches("scripts/loop/**", "SCRIPTS/LOOP/x.py")
-    assert glob_matches("scripts/loop/**", "scripts/loop")          # the directory itself
-    # literal branch - and BOTH sides fold (the shipped policy contains docs/AUTONOMOUS_LOOP.md)
-    assert glob_matches("docs/AUTONOMOUS_LOOP.md", "docs/autonomous_loop.md")
-    assert glob_matches("docs/autonomous_loop.md", "docs/AUTONOMOUS_LOOP.md")
+    assert glob_matches("scripts/assurance/**", "Scripts/assurance/x.py")
+    assert glob_matches("scripts/assurance/**", "SCRIPTS/ASSURANCE/x.py")
+    assert glob_matches("scripts/assurance/**", "scripts/assurance")          # the directory itself
+    # literal branch - BOTH sides fold, so a case variant of a protected doc is the same file
+    assert glob_matches("docs/HOST_STATE.md", "docs/host_state.md")
+    assert glob_matches("docs/host_state.md", "docs/HOST_STATE.md")
     # wildcard branch
-    assert glob_matches("engine/tests/test_loop_*.py", "engine/tests/TEST_LOOP_x.py")
+    assert glob_matches("engine/tests/test_assurance_*.py", "engine/tests/TEST_ASSURANCE_x.py")
 
 
 def test_glob_matches_still_respects_the_directory_boundary() -> None:
     # insensitivity must not blunt the boundary: a SIBLING sharing the prefix is still not a match
-    assert not glob_matches("scripts/loop/**", "scripts/loopx/y.py")
-    assert not glob_matches("scripts/loop/**", "Scripts/loopx/y.py")
+    assert not glob_matches("scripts/assurance/**", "scripts/assurancex/y.py")
+    assert not glob_matches("scripts/assurance/**", "Scripts/assurancex/y.py")
     assert not glob_matches("scripts/assurance/**", "scripts/assurance-notes.md")
 
 
