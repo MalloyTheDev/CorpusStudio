@@ -1,5 +1,6 @@
 /* GENERATED — do not edit. Run: npm run gen:contracts */
 export type { ArtifactManifest } from "./ArtifactManifest";
+export type { BackendExecutionVariant } from "./BackendExecutionVariant";
 export type { BackendManifest } from "./BackendManifest";
 export type { CapabilityReport } from "./CapabilityReport";
 export type { CheckpointManifest } from "./CheckpointManifest";

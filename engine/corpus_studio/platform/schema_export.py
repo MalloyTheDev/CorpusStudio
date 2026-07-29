@@ -14,6 +14,7 @@ from pathlib import Path
 from .common import CONTRACT_VERSION
 from .contracts import (
     ArtifactManifest,
+    BackendExecutionVariant,
     BackendManifest,
     CapabilityReport,
     CheckpointManifest,
@@ -88,6 +89,7 @@ ROOT_CONTRACTS: dict[str, type[ContractModel]] = {
     "TrainingPlanResolution": TrainingPlanResolution,
     "FrameworkBackend": FrameworkBackend,
     "OrchestratorAdapter": OrchestratorAdapter,
+    "BackendExecutionVariant": BackendExecutionVariant,
 }
 
 
