@@ -32,10 +32,12 @@ from .common import (
     TokenStats,
 )
 from .enums import (
+    AccessScope,
     AdapterMethod,
     AllocatorPolicy,
     AttentionImpl,
     AttentionKernel,
+    BackendCandidateClass,
     CheckpointImpl,
     CommunicationBackend,
     CompatibilityStatus,
@@ -101,6 +103,7 @@ from .enums import (
     StorageInterface,
     StorageRole,
     StorageSuitability,
+    SupportLevel,
     TaskType,
     TokenizerFormat,
     TrainerTarget,
@@ -5523,3 +5526,65 @@ class TrainingPlanResolution(ContractModel):
             if ref.hash is None or ref.hash.value is None:
                 raise ValueError("a resolved RunPlan ref must carry its sealed plan_hash")
         return self
+
+
+# --------------------------------------------------------------------------------------------------
+# FrameworkBackend / OrchestratorAdapter split + security posture (Training Systems P0c, #483)
+#
+# APPEND-ONLY: BackendManifest is NOT mutated. Its digest (backend_manifest_digest) pins backend_ref
+# across RunPlan / ResolvedExecutionConfiguration / CheckpointBoundIdentities, so the split lands as a
+# NEW backend identity, never a change to the sealed reference manifest. These are additive registry
+# contracts + a DECLARABLE security posture the planner can refuse by assurance tier.
+# --------------------------------------------------------------------------------------------------
+
+
+class BackendSecurityPosture(ContractModel):
+    """A backend's DECLARED security posture - what its isolated worker process is allowed to do. The
+    TrainingPlan resolver REFUSES a posture that exceeds the run's assurance tier (fail-closed; see
+    ``training_plan.resolve_training_plan`` -> ``backend_registry.refuse_backend_security``). ``trust_remote_code`` is arbitrary code execution:
+    it is declarable ON PURPOSE (so a managed adapter cannot enable it invisibly inside its own
+    process) and refused at every tier. ``network_access`` / ``download_access`` tighten as the tier
+    hardens. This is separate from the sealed reference execution path, which keeps its own
+    ``trust_remote_code`` hard-lock (``Literal[False]``)."""
+
+    contract_version: CONTRACT_VERSION_LITERAL = "1.0.0"
+    trust_remote_code: bool = False
+    network_access: AccessScope = AccessScope.none
+    download_access: AccessScope = AccessScope.none
+    security_boundaries: tuple[str, ...] = ()
+
+
+class FrameworkBackend(ContractModel):
+    """The compute substrate a training run executes on (PyTorch / JAX / TF-Keras / MLX) - split out of
+    the conflated ``BackendManifest`` (P0c, #483). Additive + append-only; dense-default and MoE-safe.
+    Every capability carries a ``SupportLevel``; "installed" is never "supported"."""
+
+    contract_version: CONTRACT_VERSION_LITERAL = "1.0.0"
+    framework_id: str = Field(pattern=_ID)
+    display_name: str = ""
+    framework_version: str = ""
+    supported_os: tuple[OperatingSystem, ...] = ()
+    supported_devices: tuple[DeviceKind, ...] = ()
+    model_topologies: tuple[Literal["dense", "moe"], ...] = ("dense",)
+    license: License | None = None
+    candidate_class: BackendCandidateClass = BackendCandidateClass.defer
+    support_level: SupportLevel = SupportLevel.declared
+
+
+class OrchestratorAdapter(ContractModel):
+    """The training-loop driver (HF/TRL, Unsloth, torchtune, Axolotl, Megatron, ...) bound to a
+    ``FrameworkBackend`` - split out of the conflated ``BackendManifest`` (P0c, #483). It declares its
+    config generator / launcher / progress + failure parsers and its ``BackendSecurityPosture``, which
+    the planner can refuse by assurance tier. Additive + append-only; ``BackendManifest`` is untouched."""
+
+    contract_version: CONTRACT_VERSION_LITERAL = "1.0.0"
+    orchestrator_id: str = Field(pattern=_ID)
+    display_name: str = ""
+    framework_ref: str = Field(pattern=_ID)
+    candidate_class: BackendCandidateClass = BackendCandidateClass.defer
+    config_generator: str = ""
+    launcher: str = ""
+    progress_parser: str = ""
+    failure_parser: str = ""
+    security_posture: BackendSecurityPosture = Field(default_factory=BackendSecurityPosture)
+    support_level: SupportLevel = SupportLevel.declared

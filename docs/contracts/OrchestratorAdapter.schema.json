@@ -1,0 +1,138 @@
+{
+  "$defs": {
+    "AccessScope": {
+      "description": "How much network / download a backend's isolated worker process is DECLARED to need. Graduated so\na stricter assurance tier can refuse a broader scope.",
+      "enum": [
+        "none",
+        "allowlisted",
+        "unrestricted"
+      ],
+      "title": "AccessScope",
+      "type": "string"
+    },
+    "BackendCandidateClass": {
+      "description": "How a training backend is integrated (docs/TRAINING_BACKEND_REGISTRY.md). Classification only -\nnothing is installed, probed, or run by declaring a class.",
+      "enum": [
+        "first_party",
+        "managed_adapter",
+        "config_export_only",
+        "research_only",
+        "defer",
+        "reject"
+      ],
+      "title": "BackendCandidateClass",
+      "type": "string"
+    },
+    "BackendSecurityPosture": {
+      "additionalProperties": false,
+      "description": "A backend's DECLARED security posture - what its isolated worker process is allowed to do. The\nTrainingPlan resolver REFUSES a posture that exceeds the run's assurance tier (fail-closed; see\n``training_plan.resolve_training_plan`` -> ``backend_registry.refuse_backend_security``). ``trust_remote_code`` is arbitrary code execution:\nit is declarable ON PURPOSE (so a managed adapter cannot enable it invisibly inside its own\nprocess) and refused at every tier. ``network_access`` / ``download_access`` tighten as the tier\nhardens. This is separate from the sealed reference execution path, which keeps its own\n``trust_remote_code`` hard-lock (``Literal[False]``).",
+      "properties": {
+        "contract_version": {
+          "const": "1.0.0",
+          "default": "1.0.0",
+          "title": "Contract Version",
+          "type": "string"
+        },
+        "download_access": {
+          "$ref": "#/$defs/AccessScope",
+          "default": "none"
+        },
+        "network_access": {
+          "$ref": "#/$defs/AccessScope",
+          "default": "none"
+        },
+        "security_boundaries": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Security Boundaries",
+          "type": "array"
+        },
+        "trust_remote_code": {
+          "default": false,
+          "title": "Trust Remote Code",
+          "type": "boolean"
+        }
+      },
+      "title": "BackendSecurityPosture",
+      "type": "object"
+    },
+    "SupportLevel": {
+      "description": "A coarse, single-value capability-support ROLLUP - \"how far has this capability been proven,\nend to end?\" - that COEXISTS with the shipped multi-axis ladders (ObjectiveVerification's 3 axes,\nVerificationOutcome, RecipeVerification), which remain the authority. A SupportLevel never says\nWHICH axis is proven: the projection onto it (``support_level.project_objective_verification``) is\na lossy PARTIAL mapping that CARRIES not_applicable / partial / not_checked rather than inventing a\nlevel. \"installed\" is never \"supported\" - a higher state requires the evidence its name implies,\nnever a lower one plus optimism (the repo-wide \"a completed step != proven fit\" invariant).",
+      "enum": [
+        "declared",
+        "config_generation_only",
+        "installed",
+        "probed",
+        "workload_verified",
+        "production_supported",
+        "refused"
+      ],
+      "title": "SupportLevel",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "description": "The training-loop driver (HF/TRL, Unsloth, torchtune, Axolotl, Megatron, ...) bound to a\n``FrameworkBackend`` - split out of the conflated ``BackendManifest`` (P0c, #483). It declares its\nconfig generator / launcher / progress + failure parsers and its ``BackendSecurityPosture``, which\nthe planner can refuse by assurance tier. Additive + append-only; ``BackendManifest`` is untouched.",
+  "properties": {
+    "candidate_class": {
+      "$ref": "#/$defs/BackendCandidateClass",
+      "default": "defer"
+    },
+    "config_generator": {
+      "default": "",
+      "title": "Config Generator",
+      "type": "string"
+    },
+    "contract_version": {
+      "const": "1.0.0",
+      "default": "1.0.0",
+      "title": "Contract Version",
+      "type": "string"
+    },
+    "display_name": {
+      "default": "",
+      "title": "Display Name",
+      "type": "string"
+    },
+    "failure_parser": {
+      "default": "",
+      "title": "Failure Parser",
+      "type": "string"
+    },
+    "framework_ref": {
+      "pattern": "^[A-Za-z0-9._-]+$",
+      "title": "Framework Ref",
+      "type": "string"
+    },
+    "launcher": {
+      "default": "",
+      "title": "Launcher",
+      "type": "string"
+    },
+    "orchestrator_id": {
+      "pattern": "^[A-Za-z0-9._-]+$",
+      "title": "Orchestrator Id",
+      "type": "string"
+    },
+    "progress_parser": {
+      "default": "",
+      "title": "Progress Parser",
+      "type": "string"
+    },
+    "security_posture": {
+      "$ref": "#/$defs/BackendSecurityPosture"
+    },
+    "support_level": {
+      "$ref": "#/$defs/SupportLevel",
+      "default": "declared"
+    }
+  },
+  "required": [
+    "orchestrator_id",
+    "framework_ref"
+  ],
+  "title": "OrchestratorAdapter",
+  "type": "object"
+}

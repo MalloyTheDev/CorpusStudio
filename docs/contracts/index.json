@@ -132,6 +132,14 @@
     {
       "contract": "TrainingPlanResolution",
       "file": "TrainingPlanResolution.schema.json"
+    },
+    {
+      "contract": "FrameworkBackend",
+      "file": "FrameworkBackend.schema.json"
+    },
+    {
+      "contract": "OrchestratorAdapter",
+      "file": "OrchestratorAdapter.schema.json"
     }
   ]
 }

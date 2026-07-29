@@ -17,13 +17,22 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from corpus_studio.platform.backend_registry import (
+    reference_orchestrator_adapters,
+    refuse_backend_security,
+)
 from corpus_studio.platform.common import HashRef, Ref
 from corpus_studio.platform.contracts import (
     TrainingPlan,
     TrainingPlanCompatibilityFinding,
     TrainingPlanResolution,
 )
-from corpus_studio.platform.enums import ParallelismKind, SupportLevel
+from corpus_studio.platform.enums import AssuranceTier, ParallelismKind, SupportLevel
+
+
+class BackendSecurityRefused(ValueError):
+    """A TrainingPlan's composed orchestrator declares a security posture the run's assurance tier
+    refuses (see ``backend_registry.refuse_backend_security``). Fail-closed: resolution never proceeds."""
 
 if TYPE_CHECKING:  # pragma: no cover - typing only; the planner is imported lazily at call time.
     from corpus_studio.platform.contracts import (
@@ -206,6 +215,7 @@ def resolve_training_plan(
     capabilities: CapabilityReport,
     dataset_ref: Ref,
     plan_id: str,
+    assurance_tier: AssuranceTier = AssuranceTier.standard,
     environment_ref: Ref | None = None,
     parameter_accounting: ParameterAccountingReport | None = None,
     physical_execution: PhysicalExecutionSpec | None = None,
@@ -218,9 +228,26 @@ def resolve_training_plan(
     :class:`TrainingPlanResolution`. The resolver builds the SAME ``PlannerConstraints`` a direct caller
     would and calls ``build_run_plan``, so the resolved RunPlan carries the SAME ``plan_hash`` as a
     direct build - the resolver seals nothing. Raises the planner's ``PlannerError`` when the host
-    cannot honor the request."""
+    cannot honor the request. Fail-closed SECURITY GATE: if the composed orchestrator is unknown to the
+    backend registry, or its declared security posture exceeds ``assurance_tier``, resolution is
+    REFUSED with :class:`BackendSecurityRefused` before any RunPlan is built."""
     from corpus_studio.platform.planner import PlannerConstraints, build_run_plan  # noqa: PLC0415
 
+    adapters = {a.orchestrator_id: a for a in reference_orchestrator_adapters()}
+    adapter = adapters.get(training_plan.composition.orchestrator)
+    if adapter is None:
+        # Fail-closed: an orchestrator not in the backend registry has no vetted security posture, so
+        # it cannot be admitted. A silent bypass here would defeat the whole gate (#744 review).
+        raise BackendSecurityRefused(
+            f"orchestrator '{training_plan.composition.orchestrator}' is not in the backend registry; "
+            "its security posture cannot be vetted and is refused (fail-closed)"
+        )
+    refusal = refuse_backend_security(adapter.security_posture, tier=assurance_tier)
+    if refusal is not None:
+        raise BackendSecurityRefused(
+            f"orchestrator '{adapter.orchestrator_id}' refused at assurance tier "
+            f"'{assurance_tier.value}': {refusal}"
+        )
     constraints = PlannerConstraints(
         **training_plan.parameters.model_dump(exclude={"contract_version"})
     )
