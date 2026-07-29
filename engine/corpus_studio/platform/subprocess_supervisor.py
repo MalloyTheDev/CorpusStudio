@@ -25,7 +25,7 @@ import threading
 import time
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 from corpus_studio.platform.contracts import (
     ArtifactManifest,
@@ -238,7 +238,11 @@ def _capture_worker_stderr(capture_stderr: bool | None) -> bool:
         return True
 
 
-def _best_effort_close(handle: Any) -> None:
+class _Closable(Protocol):
+    def close(self) -> None: ...
+
+
+def _best_effort_close(handle: _Closable | None) -> None:
     """Close a durable log handle we are done with; a close failure never rewrites run truth."""
     if handle is None:
         return
