@@ -7,14 +7,18 @@ match the dataset's structure therefore renders ZERO usable rows and fails only 
 on the GPU (``UNSUPPORTED_CONFIGURATION`` / "The dataset produced no usable training rows.").
 
 This module lets the planner refuse such a plan at planning time, on the CPU, before any plan id is
-minted. It mirrors the formatter's per-format structural contract WITHOUT importing torch or the worker:
+minted. It matches the formatter's per-format renderability WITHOUT importing torch or the worker module
+(``trainer.py``). The ``instruction``/``chat`` classifiers replicate the structural contract; ``trace``
+defers to the torch-free renderer itself, so it cannot drift:
 
 * ``instruction`` (Alpaca): a row is compatible when ``instruction`` or ``output`` has text - exactly
   the condition under which ``format_example_text`` renders a non-empty string.
 * ``chat``: stricter than the formatter's minimal "non-empty messages list" so a structurally useless
   row is caught early - a compatible row has a non-empty ``messages`` list whose every message is an
   object with a recognized role and non-empty content, including at least one trainable assistant turn.
-* ``trace``: a trace-record row, or a chat row with an assistant turn (mirrors ``traces.trace_from_row``).
+* ``trace``: compatible exactly when ``format_trace(trace_from_row(row))`` renders non-empty - a sealed
+  TraceRecord row, a prompt+answer row (any of the renderer's field aliases), or a ``messages`` list
+  ending in an assistant turn. Calls the torch-free renderer directly, so it never drifts from training.
 
 It never reinterprets one format as another, never auto-switches the format, and never rewrites dataset
 bytes. The dataset is read once, read-only.
@@ -182,17 +186,22 @@ def _classify_chat(row: Mapping[str, Any]) -> str | None:
 
 
 def _classify_trace(row: Mapping[str, Any]) -> str | None:
-    messages = row.get("messages")
-    if isinstance(messages, list) and messages:
-        return _classify_chat(row)
-    has_prompt = any(str(row.get(key, "")).strip() for key in ("prompt", "question", "instruction"))
-    has_answer = any(
-        str(row.get(key, "")).strip() for key in ("answer", "output", "response", "final")
-    )
-    if has_prompt and has_answer:
+    # Defer to the worker's OWN trace renderer (both functions torch-free) so this preflight can never
+    # drift from what actually trains: trace_from_row handles sealed TraceRecord rows, the full
+    # prompt/answer alias sets, and the last-assistant <think> split; format_trace returns "" for an
+    # unrenderable trace. The tokenizer only shapes chat-context formatting, never whether the output is
+    # empty (traces.format_trace), so tokenizer=None yields the same renderability verdict as the worker.
+    from corpus_studio.training.traces import format_trace, trace_from_row  # noqa: PLC0415
+
+    try:
+        rendered = format_trace(trace_from_row(dict(row)))
+    except (ValueError, KeyError, TypeError) as exc:
+        return f"not a renderable trace row ({exc})"
+    if rendered.strip():
         return None
     return (
-        "no trace structure (needs a prompt/question and an answer/output, or a chat 'messages' list)"
+        "no trace structure (needs an answer/output plus a prompt or chat context - a TraceRecord row, "
+        "a prompt+answer row, or a 'messages' list ending in an assistant turn)"
     )
 
 
