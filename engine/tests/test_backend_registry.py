@@ -144,3 +144,23 @@ def test_default_binding_is_none_when_no_tuple_is_workload_verified(monkeypatch)
     )
     monkeypatch.setattr(reg, "reference_orchestrator_adapters", lambda: only_config)
     assert reg.select_default_binding(tier=AssuranceTier.standard) is None
+
+
+def test_default_binding_is_none_when_the_verified_tuple_is_security_inadmissible(monkeypatch):
+    # Evidence alone is not enough - the tier's security gate must also admit the tuple. A
+    # workload-verified tuple whose posture the tier REFUSES is not default-eligible, so there is no
+    # default at that tier.
+    import corpus_studio.platform.backend_registry as reg
+
+    patched = tuple(
+        o.model_copy(
+            update={"security_posture": BackendSecurityPosture(network_access=AccessScope.allowlisted)}
+        )
+        if o.orchestrator_id == "corpus_studio"
+        else o
+        for o in reg.reference_orchestrator_adapters()
+    )
+    monkeypatch.setattr(reg, "reference_orchestrator_adapters", lambda: patched)
+    # standard admits an allowlisted posture -> still a default; sealed_research refuses it -> none.
+    assert reg.select_default_binding(tier=AssuranceTier.standard) is not None
+    assert reg.select_default_binding(tier=AssuranceTier.sealed_research) is None
