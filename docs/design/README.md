@@ -12,6 +12,8 @@ eventual **Tauri 2 + React** shell. Because the tokens + IA are framework-agnost
 is being built to match this design so it **ports over to Tauri/React close to 1:1**.
 
 ## Files
+- **[`IA_RECONCILIATION.md`](IA_RECONCILIATION.md)** - how this reference maps onto the seven co-equal
+  product areas (reuse-as-is / adapt / net-new per screen); read it first before a UI slice.
 - **[`nocturne-tokens.json`](nocturne-tokens.json)** — the canonical, framework-agnostic tokens
   (dark + light palettes, typography, radii, spacing, elevation). Avalonia consumes them as
   `ResourceDictionary` brushes (`App.axaml`); a React shell would consume them as CSS custom
