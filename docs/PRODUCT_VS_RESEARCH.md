@@ -49,23 +49,29 @@ The intended model is three tiers, from lightest to strictest. Each higher tier 
 | Artifacts | verified | reproducibly verified | reproducibly verified + evidence-sealed |
 | Telemetry | progress + metrics | progress + metrics | paper completeness required |
 
-## This is the target design, not the current implementation
+## Implementation status
 
-Today the code exposes these boundaries **imperfectly**: there is **no explicit assurance-tier selector**.
-`requires_worker_wheel` is an implementation **mechanism** - it selects exact-wheel packaging and
-provenance admission - **not a tier and not a research classification**. Concretely:
+The explicit assurance-tier selector now exists (#492): `EnvironmentRecipe.assurance_tier`
+(`standard` / `verified` / `sealed_research`) is chosen **directly** rather than inferred from
+`requires_worker_wheel`, and a recipe validator keeps the tier and the pinned-wheel mechanism
+consistent (STANDARD must not pin a wheel; VERIFIED / SEALED_RESEARCH must). `requires_worker_wheel`
+remains the exact-wheel packaging / provenance-admission **mechanism** - now GOVERNED by the tier, not a
+tier itself. Concretely:
 
-- `backend-corpus-studio` (`requires_worker_wheel=false`) uses the loose **STANDARD** path.
-- Readiness recipes (`requires_worker_wheel=true`) use exact-wheel verification but are **not** paper
-  experiments; they are a packaging / provenance-admission mechanism that a future **VERIFIED** product
-  recipe may also use without becoming research.
-- A run becomes **SEALED_RESEARCH** only when it is *additionally* bound to the paper's amendment,
-  effective matrix, reserved identities, matrix cell, and study-evidence requirements.
+- `backend-corpus-studio` (`assurance_tier=standard`, `requires_worker_wheel=false`) uses the loose
+  **STANDARD** path.
+- The worker-wheel readiness recipes are classified **SEALED_RESEARCH**: a pinned wheel AND the reviewed
+  per-lineage git floor. The reviewed `required_git_ancestor` floor (and a reviewed `worker_source_commit`)
+  are now required at plan time **iff** the tier is `sealed_research`, keyed on the tier rather than on
+  the `requires_worker_wheel` mechanism.
+- A run is **SEALED_RESEARCH** only when it is *additionally* bound to the paper's amendment, effective
+  matrix, reserved identities, matrix cell, and study-evidence requirements (still only in `research/`).
 
-The **VERIFIED tier does not yet exist as a distinct mode** - no product recipe today installs a pinned,
-hash-verified package under STANDARD-tier governance (`backend-corpus-studio` uses loose version ranges).
-So the tiers above are the intended target, not a claim that all three are fully implemented. See "Known
-gaps" below.
+The **VERIFIED tier now resolves as a distinct plan-time mode** (#492): a `verified` worker-wheel recipe
+is pinned + provenance-admitted but resolves with **no** reviewed git floor, and a floor / source-commit
+handed to it is refused. Two pieces remain **follow-ups**: no *builtin product* recipe ships at the
+VERIFIED tier yet, and the env-CREATE admission gate still *always* requires an embedded floor in the
+wheel, so building + admitting a verified wheel end to end is not yet wired. See "Known gaps" below.
 
 ## Product (STANDARD) must never require
 

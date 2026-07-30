@@ -14,6 +14,16 @@
       "title": "AdapterMethod",
       "type": "string"
     },
+    "AssuranceTier": {
+      "description": "The trust tier a run is admitted under. ``sealed_research`` is the strictest (maximum\nreproducibility + safety); ``standard`` is the most permissive product tier. A backend's declared\nsecurity posture is REFUSED when it exceeds what the tier permits (see\n``backend_registry.refuse_backend_security``).",
+      "enum": [
+        "standard",
+        "verified",
+        "sealed_research"
+      ],
+      "title": "AssuranceTier",
+      "type": "string"
+    },
     "AttentionImpl": {
       "description": "``math``/``eager`` is forced on native-Windows/WDDM Blackwell sm_120 because the fused flash\nkernel deadlocks there. Other platforms require their own functional capability result; WSL\nevidence is not bare-Linux proof.",
       "enum": [
@@ -423,6 +433,10 @@
   "additionalProperties": false,
   "description": "A declarative, platform/CUDA-aware recipe for building one isolated environment \u2014 the WHAT to\ninstall, not the act of installing. A recipe is only a declaration: ``verification`` says whether\nit has ever produced a working environment (declared \u2192 hardware_verified). Grounded in the engine's\nreal optional extras (pyproject ``[train]`` / ``[parquet]`` / ``[tokenizer]``).",
   "properties": {
+    "assurance_tier": {
+      "$ref": "#/$defs/AssuranceTier",
+      "default": "standard"
+    },
     "bootstrap_pip_version": {
       "anyOf": [
         {

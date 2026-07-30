@@ -1,5 +1,12 @@
 /* GENERATED from docs/contracts/EnvironmentRecipe.schema.json — do not edit. Run: npm run gen:contracts */
 
+/**
+ * The trust tier a run is admitted under. ``sealed_research`` is the strictest (maximum
+ * reproducibility + safety); ``standard`` is the most permissive product tier. A backend's declared
+ * security posture is REFUSED when it exceeds what the tier permits (see
+ * ``backend_registry.refuse_backend_security``).
+ */
+export type AssuranceTier = "standard" | "verified" | "sealed_research";
 export type BootstrapPipVersion = string | null;
 export type CapabilityProbes = string[];
 export type ContractVersion = "1.0.0";
@@ -114,6 +121,7 @@ export type RecipeVerification = "declared" | "build_verified" | "functional_ver
  * real optional extras (pyproject ``[train]`` / ``[parquet]`` / ``[tokenizer]``).
  */
 export interface EnvironmentRecipe {
+  assurance_tier?: AssuranceTier;
   bootstrap_pip_version?: BootstrapPipVersion;
   capability_probes?: CapabilityProbes;
   contract_version?: ContractVersion;

@@ -35,6 +35,7 @@ from .enums import (
     AccessScope,
     AdapterMethod,
     AllocatorPolicy,
+    AssuranceTier,
     AttentionImpl,
     AttentionKernel,
     BackendCandidateClass,
@@ -3125,15 +3126,45 @@ class EnvironmentRecipe(ContractModel):
     known_conflicts: list[DependencyConflict] = Field(default_factory=list)
     capability_probes: list[str] = Field(default_factory=list)
     required_execution_probe: QloraExecutionProbeSpec | None = None
-    # A worker-wheel recipe DECLARES (via requires_worker_wheel) that an exact reviewed per-lineage
-    # source floor is required at plan time - but the recipe deliberately does NOT carry the floor
-    # VALUE. The changing per-amendment/per-lineage floor is supplied through env-plan's
-    # ``--required-git-ancestor`` and sealed into the DependencyResolution, so one field never conflates
-    # "a floor is required here" with "this exact commit is the floor". See DependencyResolution.
+    # The assurance tier this recipe operates under - the EXPLICIT selector for how strictly its worker
+    # and provenance are governed, chosen directly rather than inferred from ``requires_worker_wheel``:
+    #   - ``standard``: loose local product install (no pinned worker wheel, no provenance floor);
+    #   - ``verified``: a pinned, hash-verified worker wheel + generic build provenance, but NO reviewed
+    #     git floor / reserved identity / amendment / matrix cell;
+    #   - ``sealed_research``: all of VERIFIED plus a reviewed per-lineage ``required_git_ancestor`` floor
+    #     (the paper program additionally binds identities, amendments, and matrix cells in ``research/``).
+    # The reviewed git floor is required at plan time iff the tier is ``sealed_research`` (see
+    # resolve_environment); it is NOT implied merely by carrying a worker wheel.
+    assurance_tier: AssuranceTier = AssuranceTier.standard
+    # A worker-wheel recipe pins + hash-verifies an exact worker package and runs the build-provenance
+    # admission (used by VERIFIED and SEALED_RESEARCH). It deliberately does NOT carry the per-lineage
+    # floor VALUE; the changing floor is supplied through env-plan's ``--required-git-ancestor`` and
+    # sealed into the DependencyResolution, so one field never conflates "a floor applies here" with
+    # "this exact commit is the floor". See DependencyResolution.
     requires_worker_wheel: bool = False
     bootstrap_pip_version: str | None = None
     verification: RecipeVerification = RecipeVerification.declared
     notes: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _validate_assurance_tier(self) -> EnvironmentRecipe:
+        # The tier is the ENFORCED control, not a doc convention, keeping the explicit tier and the
+        # pinned-wheel mechanism from drifting apart: STANDARD is a loose install that must NOT pin a
+        # worker wheel, while VERIFIED and SEALED_RESEARCH are DEFINED by a pinned, hash-verified worker,
+        # so they require one.
+        if self.assurance_tier is AssuranceTier.standard:
+            if self.requires_worker_wheel:
+                raise ValueError(
+                    "assurance_tier 'standard' is inconsistent with requires_worker_wheel=True: a "
+                    "STANDARD recipe is a loose install and must not pin a worker wheel"
+                )
+        elif not self.requires_worker_wheel:
+            raise ValueError(
+                f"assurance_tier '{self.assurance_tier.value}' is inconsistent with "
+                "requires_worker_wheel=False: VERIFIED / SEALED_RESEARCH are defined by a pinned, "
+                "hash-verified worker, so they require one"
+            )
+        return self
 
 
 class InstallStep(ContractModel):

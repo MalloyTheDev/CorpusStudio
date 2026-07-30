@@ -23,6 +23,7 @@ from corpus_studio.platform.contracts import (
 )
 from corpus_studio.platform.common import Ref
 from corpus_studio.platform.enums import (
+    AssuranceTier,
     DependencyLayer,
     EnvironmentState,
     OperatingSystem,
@@ -333,7 +334,10 @@ def test_worker_source_commit_is_validated_and_scoped():
         worker_source_commit=_REVIEWED_SOURCE_COMMIT,
     )
     assert refused.resolvable is False
-    assert any("non-worker recipe does not accept" in reason for reason in refused.blocking_reasons)
+    assert any(
+        "only a sealed_research recipe accepts a --worker-source-commit" in reason
+        for reason in refused.blocking_reasons
+    )
 
 
 def test_worker_recipe_refuses_missing_or_malformed_plan_floor():
@@ -389,7 +393,10 @@ def test_non_worker_recipe_unaffected_by_floor():
         required_git_ancestor=_V7_EXACT_FLOOR,
     )
     assert refused.resolvable is False
-    assert any("does not accept" in reason for reason in refused.blocking_reasons)
+    assert any(
+        "only a sealed_research recipe accepts a --required-git-ancestor" in reason
+        for reason in refused.blocking_reasons
+    )
 
 
 def test_historical_minimum_and_exact_lineage_floor_are_not_interchangeable():
@@ -872,7 +879,7 @@ def test_env_plan_cli_threads_required_git_ancestor_to_resolver():
         ],
     )
     assert result.exit_code == 1
-    assert "does not accept" in result.stdout
+    assert "only a sealed_research recipe accepts a --required-git-ancestor" in result.stdout
 
 
 # ---- contract round-trips ----------------------------------------------------
@@ -895,3 +902,114 @@ def test_environment_contracts_round_trip():
 
     health = EnvironmentHealthReport(environment_ref=Ref(id="env-1"), state=EnvironmentState.importable)
     assert EnvironmentHealthReport.model_validate_json(health.model_dump_json()).drift_detected is False
+
+
+# ---- explicit assurance-tier selector (#492) --------------------------------
+
+
+def _verified_recipe(**overrides) -> EnvironmentRecipe:
+    # A minimal VERIFIED product recipe: a pinned worker wheel under standard-tier governance, with NO
+    # reviewed git floor. requires_worker_wheel must be True to satisfy the tier<->wheel invariant.
+    kwargs = dict(
+        recipe_id="synthetic-verified",
+        layer=DependencyLayer.backend_worker,
+        assurance_tier=AssuranceTier.verified,
+        requires_worker_wheel=True,
+        dependency_requirements=[DependencyRequirement(name="torch", specifier="==2.5.0")],
+        supported_os=[OperatingSystem.linux],
+    )
+    kwargs.update(overrides)
+    return EnvironmentRecipe(**kwargs)
+
+
+def test_builtin_recipe_tiers_are_standard_or_sealed_research():
+    # backend-corpus-studio (loose product) is STANDARD; every worker-wheel readiness recipe is
+    # SEALED_RESEARCH (behavior-preserving - they keep demanding the reviewed floor).
+    tiers = {r.recipe_id: r.assurance_tier for r in builtin_recipes()}
+    assert tiers["backend-corpus-studio"] == AssuranceTier.standard
+    for recipe in builtin_recipes():
+        expected = (
+            AssuranceTier.sealed_research if recipe.requires_worker_wheel else AssuranceTier.standard
+        )
+        assert recipe.assurance_tier == expected, recipe.recipe_id
+
+
+def test_tier_and_worker_wheel_must_agree():
+    # The tier is the ENFORCED control: STANDARD may not pin a worker wheel; VERIFIED / SEALED_RESEARCH
+    # are defined by one, so they must pin it.
+    with pytest.raises(ValueError, match="inconsistent"):
+        EnvironmentRecipe(
+            recipe_id="bad-standard-with-wheel",
+            layer=DependencyLayer.backend_worker,
+            assurance_tier=AssuranceTier.standard,
+            requires_worker_wheel=True,
+        )
+    with pytest.raises(ValueError, match="inconsistent"):
+        EnvironmentRecipe(
+            recipe_id="bad-verified-without-wheel",
+            layer=DependencyLayer.backend_worker,
+            assurance_tier=AssuranceTier.verified,
+            requires_worker_wheel=False,
+        )
+
+
+def test_verified_recipe_resolves_without_a_git_floor():
+    # The core VERIFIED capability: a pinned-wheel recipe resolves with NO reviewed
+    # --required-git-ancestor (which only sealed_research demands). No floor block, no sealed floor.
+    resolution = resolve_dependencies(
+        _verified_recipe(),
+        os_value=OperatingSystem.linux,
+        accelerator_tag="cu128",
+        python_version="3.12",
+    )
+    assert not any("required-git-ancestor" in r for r in resolution.blocking_reasons)
+    assert resolution.required_git_ancestor is None
+
+
+def test_verified_recipe_refuses_a_supplied_git_floor():
+    # Only sealed_research carries the reviewed floor; a floor handed to a verified recipe is refused.
+    resolution = resolve_dependencies(
+        _verified_recipe(),
+        os_value=OperatingSystem.linux,
+        accelerator_tag="cu128",
+        python_version="3.12",
+        required_git_ancestor=_V7_EXACT_FLOOR,
+    )
+    assert any(
+        "only a sealed_research recipe accepts a --required-git-ancestor" in r
+        for r in resolution.blocking_reasons
+    )
+
+
+def test_sealed_research_recipe_still_requires_the_floor():
+    # Unchanged behavior: a sealed_research (worker-wheel) recipe with NO floor is unresolvable.
+    recipe = get_recipe("backend-corpus-studio-readiness-v2")
+    assert recipe is not None and recipe.assurance_tier == AssuranceTier.sealed_research
+    resolution = resolve_dependencies(
+        recipe,
+        os_value=OperatingSystem.linux,
+        accelerator_tag="cu128",
+        python_version="3.12",
+    )  # no required_git_ancestor supplied
+    assert resolution.resolvable is False
+    assert any(
+        "sealed_research recipe requires an exact reviewed --required-git-ancestor" in r
+        for r in resolution.blocking_reasons
+    )
+
+
+def test_recipe_install_drift_digest_ignores_the_governance_tier():
+    # assurance_tier is governance, not an install-affecting field, so it is excluded from the
+    # recipe-install-drift digest - this additive migration never invalidates an existing managed
+    # environment. verified and sealed_research (both worker-wheel, so tier<->wheel-consistent) differ
+    # ONLY in tier, and must hash identically.
+    common = dict(
+        recipe_id="drift-probe",
+        layer=DependencyLayer.backend_worker,
+        requires_worker_wheel=True,
+        dependency_requirements=[DependencyRequirement(name="torch", specifier="==2.5.0")],
+        supported_os=[OperatingSystem.linux],
+    )
+    verified = EnvironmentRecipe(assurance_tier=AssuranceTier.verified, **common)
+    sealed = EnvironmentRecipe(assurance_tier=AssuranceTier.sealed_research, **common)
+    assert recipe_digest(verified) == recipe_digest(sealed)
