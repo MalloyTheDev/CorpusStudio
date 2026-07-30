@@ -1397,8 +1397,10 @@ def test_stale_objective_hash_is_refused_before_trainer_invocation(monkeypatch):
 def test_reload_verify_adapter_missing_file_is_false(tmp_path):
     from corpus_studio.platform.runners import _reload_verify_adapter
 
-    # No adapter_model.safetensors under the dir -> nothing to reload -> NOT verified, and no crash.
-    assert _reload_verify_adapter(str(tmp_path), "any-sha") is False
+    # No adapter_model.safetensors under the dir -> NOT verified, with a reason, and no crash.
+    verified, reason = _reload_verify_adapter(str(tmp_path), "any-sha")
+    assert verified is False
+    assert reason is not None and "not found" in reason
 
 
 def _mock_torch_stack(monkeypatch, tmp_path, *, load_file, reloaded_state_sha256=None):
@@ -1430,10 +1432,12 @@ def test_reload_verify_adapter_true_on_match_false_on_mismatch(monkeypatch, tmp_
     _mock_torch_stack(
         monkeypatch, tmp_path, load_file=lambda _: {"lora_A": "t"}, reloaded_state_sha256="MATCH"
     )
-    # Reloaded weights reproduce the trained export digest -> verified.
-    assert _reload_verify_adapter(str(tmp_path), "MATCH") is True
-    # A different trained digest (the saved file did not round-trip) -> NOT verified.
-    assert _reload_verify_adapter(str(tmp_path), "DIFFERENT") is False
+    # Reloaded weights reproduce the trained export digest -> verified, no reason.
+    assert _reload_verify_adapter(str(tmp_path), "MATCH") == (True, None)
+    # A different trained digest (the saved file did not round-trip) -> NOT verified, with a reason.
+    verified, reason = _reload_verify_adapter(str(tmp_path), "DIFFERENT")
+    assert verified is False
+    assert reason is not None and "does not reproduce" in reason
 
 
 def test_reload_verify_adapter_returns_false_on_a_bad_reload(monkeypatch, tmp_path):
@@ -1443,5 +1447,7 @@ def test_reload_verify_adapter_returns_false_on_a_bad_reload(monkeypatch, tmp_pa
         raise ValueError("truncated safetensors header")
 
     _mock_torch_stack(monkeypatch, tmp_path, load_file=_truncated)
-    # A corrupt/truncated artifact must fail closed to False, never crash success admission.
-    assert _reload_verify_adapter(str(tmp_path), "any-sha") is False
+    # A corrupt/truncated artifact must fail closed to (False, reason), never crash success admission.
+    verified, reason = _reload_verify_adapter(str(tmp_path), "any-sha")
+    assert verified is False
+    assert reason is not None and "could not reload" in reason

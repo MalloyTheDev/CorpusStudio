@@ -98,18 +98,27 @@ def classify_training_error(exc: BaseException) -> tuple[FailureTaxonomy, str | 
     return FailureTaxonomy.FAIL, None
 
 
-def _reload_verify_adapter(adapter_dir: str, expected_after_sha256: str) -> bool:
+# The peft export weights filename we reload to verify equivalence. A single named constant instead of
+# the scattered literal (it also appears in artifacts.py / probes.py; a fully shared home is out of
+# scope for this slice).
+_ADAPTER_WEIGHTS_FILENAME = "adapter_model.safetensors"
+
+
+def _reload_verify_adapter(adapter_dir: str, expected_after_sha256: str) -> tuple[bool, str | None]:
     """Reload the exported adapter weights from disk and assert they reproduce the trained export state
     - the ``reload_verified`` guarantee ("the producing backend reloaded these weights and asserted
-    equivalence"). Reads only the adapter-sized safetensors, never the base model. Returns ``False`` for
-    any missing/unreadable/corrupt/non-round-tripping artifact: a bad artifact is honestly admitted as
-    NOT reload-verified rather than crashing admission or being falsely claimed verified.
+    equivalence"). Reads only the adapter-sized safetensors, never the base model.
+
+    Returns ``(verified, reason)``: ``reason`` is ``None`` on success and a short human-readable string
+    when an adapter that SHOULD reload does not (missing / unreadable / corrupt / mismatched), so the
+    runner can surface WHY on the run's event stream instead of a bad artifact failing silently. A
+    failure is always ``(False, reason)`` - never a crash of success admission, never a false claim.
     """
     from pathlib import Path  # noqa: PLC0415
 
-    weights = Path(adapter_dir) / "adapter_model.safetensors"
+    weights = Path(adapter_dir) / _ADAPTER_WEIGHTS_FILENAME
     if not weights.is_file():
-        return False
+        return False, f"exported adapter weights not found ({_ADAPTER_WEIGHTS_FILENAME})"
     try:
         import torch  # noqa: PLC0415
         from safetensors.torch import load_file  # noqa: PLC0415
@@ -118,9 +127,11 @@ def _reload_verify_adapter(adapter_dir: str, expected_after_sha256: str) -> bool
 
         reloaded = load_file(str(weights))
         snapshot = capture_adapter_export_state(reloaded, torch, stage=StageMarker.export)
-    except Exception:  # noqa: BLE001 - any reload/parse failure means NOT verified, never a crash.
-        return False
-    return snapshot.state_sha256 == expected_after_sha256
+    except Exception as exc:  # noqa: BLE001 - any reload/parse failure means NOT verified, never a crash.
+        return False, f"could not reload the exported adapter: {type(exc).__name__}: {exc}"
+    if snapshot.state_sha256 != expected_after_sha256:
+        return False, "the reloaded adapter does not reproduce the trained export state"
+    return True, None
 
 
 class TrainingRunner:
@@ -450,11 +461,13 @@ class TrainingRunner:
             if result.execution_evidence is not None
             else None
         )
-        reload_verified = (
-            _reload_verify_adapter(result.adapter_path, export_state.after_sha256)
-            if export_state is not None
-            else False
-        )
+        reload_verified = False
+        if export_state is not None:
+            reload_verified, reload_reason = _reload_verify_adapter(
+                result.adapter_path, export_state.after_sha256
+            )
+            if reload_reason is not None:
+                ctx.emit_log(f"reload_verified=false: {reload_reason}")
         ctx.emit_stage(StageMarker.export, f"adapter saved: {result.adapter_path}")
         artifact = ProducedArtifact(
             artifact_id=f"{ctx.run_id}-adapter-{content_hash[:12]}",
