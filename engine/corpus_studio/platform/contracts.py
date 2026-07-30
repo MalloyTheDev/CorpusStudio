@@ -3148,16 +3148,21 @@ class EnvironmentRecipe(ContractModel):
 
     @model_validator(mode="after")
     def _validate_assurance_tier(self) -> EnvironmentRecipe:
-        # The tier is the ENFORCED control, not a doc convention: STANDARD is a loose install and must
-        # NOT pin a worker wheel, while VERIFIED and SEALED_RESEARCH are DEFINED by a pinned,
-        # hash-verified worker, so they require one. This keeps the explicit tier and the packaging
-        # mechanism from drifting apart (a "standard" recipe that secretly pins, or a "verified"/
-        # "sealed_research" recipe that does not).
-        if self.requires_worker_wheel != (self.assurance_tier is not AssuranceTier.standard):
+        # The tier is the ENFORCED control, not a doc convention, keeping the explicit tier and the
+        # pinned-wheel mechanism from drifting apart: STANDARD is a loose install that must NOT pin a
+        # worker wheel, while VERIFIED and SEALED_RESEARCH are DEFINED by a pinned, hash-verified worker,
+        # so they require one.
+        if self.assurance_tier is AssuranceTier.standard:
+            if self.requires_worker_wheel:
+                raise ValueError(
+                    "assurance_tier 'standard' is inconsistent with requires_worker_wheel=True: a "
+                    "STANDARD recipe is a loose install and must not pin a worker wheel"
+                )
+        elif not self.requires_worker_wheel:
             raise ValueError(
                 f"assurance_tier '{self.assurance_tier.value}' is inconsistent with "
-                f"requires_worker_wheel={self.requires_worker_wheel}: STANDARD must not pin a worker "
-                "wheel, and VERIFIED / SEALED_RESEARCH require one"
+                "requires_worker_wheel=False: VERIFIED / SEALED_RESEARCH are defined by a pinned, "
+                "hash-verified worker, so they require one"
             )
         return self
 
