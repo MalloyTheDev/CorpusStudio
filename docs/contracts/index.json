@@ -144,6 +144,10 @@
     {
       "contract": "BackendExecutionVariant",
       "file": "BackendExecutionVariant.schema.json"
+    },
+    {
+      "contract": "PretrainingDataPolicy",
+      "file": "PretrainingDataPolicy.schema.json"
     }
   ]
 }

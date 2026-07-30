@@ -3605,6 +3605,59 @@ class TrainingDataPolicy(ContractModel):
         return self
 
 
+class PretrainingShard(ContractModel):
+    """One content-hashed corpus shard in a :class:`PretrainingDataPolicy`: a stable id + location, its
+    row and token counts, its sha256, and the mixture source it belongs to. The token count feeds the
+    token budget; the sha256 pins the exact bytes so a resumed stream reads the same shard."""
+
+    shard_id: str = Field(min_length=1)
+    location: str = Field(min_length=1)
+    source: str = ""
+    row_count: int = Field(ge=0)
+    token_count: int = Field(ge=0)
+    content_sha256: str = Field(pattern=SHA256_PATTERN)
+
+
+class PretrainingDataPolicy(ContractModel):
+    """Additive, dense/MoE-safe pretraining data policy (#487), PARALLEL to the SFT-only
+    ``TrainingDataPolicy`` - never reuse the SFT contract for a sharded / streamed / mixture-weighted
+    corpus. It declares a content-hashed shard set, streaming, per-source mixture weights, document
+    boundaries, pretraining packing, a seeded deterministic global order, and a stop condition (token
+    budget and/or epochs) so a run stops at the budget and never silently truncates. The runtime
+    per-rank data cursor + streaming resume is a separate (worker) slice."""
+
+    contract_version: CONTRACT_VERSION_LITERAL = "1.0.0"
+    shards: tuple[PretrainingShard, ...]
+    streaming: bool = True
+    mixture_weights: dict[str, float] = Field(default_factory=dict)
+    document_boundaries: bool = True
+    packing: Literal["none", "concat_and_split", "best_fit"] = "concat_and_split"
+    data_seed: int = Field(ge=0)
+    global_batch_size: int = Field(ge=1)
+    token_budget: int | None = Field(default=None, ge=1)
+    epochs: int | None = Field(default=None, ge=1)
+
+    @model_validator(mode="after")
+    def _validate_policy(self) -> PretrainingDataPolicy:
+        if not self.shards:
+            raise ValueError("a pretraining data policy needs at least one shard")
+        ids = [s.shard_id for s in self.shards]
+        if len(ids) != len(set(ids)):
+            raise ValueError("shard ids must be unique")
+        if self.token_budget is None and self.epochs is None:
+            raise ValueError(
+                "a pretraining run needs a stop condition: set token_budget and/or epochs "
+                "(a run must never stream without a bound)"
+            )
+        if self.mixture_weights:
+            if any(weight <= 0 for weight in self.mixture_weights.values()):
+                raise ValueError("mixture weights must be positive")
+            unknown = set(self.mixture_weights) - {s.source for s in self.shards}
+            if unknown:
+                raise ValueError(f"mixture weights name sources with no shard: {sorted(unknown)}")
+        return self
+
+
 class TrainerInterfacePolicy(ContractModel):
     """Version- and field-exact adapter to the installed TRL/Transformers surface."""
 
