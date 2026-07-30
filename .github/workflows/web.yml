@@ -70,3 +70,27 @@ jobs:
         run: npm run typecheck
       - name: Build
         run: npm run build
+
+  # The Tauri client's Rust core (src-tauri) is compiled by no other job, so a break there - or in a
+  # #[tauri::command] wired into the app - ships uncaught (the `web` job above is TS-only). Compile and
+  # lint it here, on the same apps/web/** trigger. (#520; the tauri BUNDLE + release job still remain.)
+  tauri-rust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # This job compiles repository code, including from an unreviewed branch; keep no token in .git.
+          persist-credentials: false
+      - name: Install Tauri Linux system dependencies
+        # Tauri 2 links the system webkit2gtk / gtk stack, so even `cargo check` needs these headers.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev \
+            libayatana-appindicator3-dev libxdo-dev libssl-dev
+      - name: cargo check (src-tauri, locked)
+        working-directory: apps/web/src-tauri
+        run: cargo check --locked
+      - name: cargo clippy (deny warnings)
+        working-directory: apps/web/src-tauri
+        run: cargo clippy --all-targets --locked -- -D warnings
