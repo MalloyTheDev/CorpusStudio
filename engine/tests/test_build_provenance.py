@@ -262,6 +262,20 @@ def test_admission_gate_refuses_external_mismatch(tmp_path: Path) -> None:
         bp.validate_wheel_provenance_for_sealed_admission(str(wheel))
 
 
+def test_admission_admits_a_verified_wheel_without_a_reviewed_floor(tmp_path: Path) -> None:
+    # VERIFIED tier (#492): the wheel is a pinned, self-attesting (embedded-provenance) wheel, but the
+    # caller supplies NO reviewed floor to match (expected_required_git_ancestor=None). Admission still
+    # REQUIRES the embedded floor to be present (the always-embedded-floor guarantee), it just does not
+    # match it against a reviewed value - so a verified env admits its wheel end to end.
+    wheel = _stamped_wheel(tmp_path / "verified.whl")
+    assert (
+        bp.validate_wheel_provenance_for_sealed_admission(
+            str(wheel), expected_required_git_ancestor=None
+        )
+        == _GOOD
+    )
+
+
 def _embed_raw(wheel: Path, document: dict) -> None:
     """Embed an ARBITRARY (possibly non-canonical) provenance doc + RECORD line, for refusal tests."""
 
