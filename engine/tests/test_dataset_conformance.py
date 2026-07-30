@@ -163,6 +163,104 @@ def test_trace_without_structure_is_rejected():
     assert not report.is_conformant
 
 
+# ---- trace: #750 regression - the classifier must mirror the worker's own renderer ---------------
+
+
+def _sealed_trace_record_row() -> dict:
+    """A valid sealed TraceRecord row (top-level trace identity/segments/producer, NO messages/prompt) -
+    exactly what write_trace_records emits and what the worker renders via trace_from_row."""
+    import corpus_studio.platform as P  # noqa: PLC0415
+    from corpus_studio.platform.trace_records import (  # noqa: PLC0415
+        build_reasoning_trace_record,
+        imported_trace_producer,
+    )
+    from corpus_studio.training.traces import Trace  # noqa: PLC0415
+
+    record = build_reasoning_trace_record(
+        trace=Trace(prompt="What is 17 * 23?", thinking="20*17 + 3*17 = 340 + 51.", answer="391"),
+        source=P.TraceSource(
+            artifact_ref="source.jsonl",
+            artifact_sha256="a" * 64,
+            source_row_id="b" * 64,
+            source_row_index=1,
+        ),
+        producer=imported_trace_producer(),
+        created_at="2026-07-13T12:00:00+00:00",
+        trace_id="trace-750",
+        tags=["reasoning"],
+    )
+    return record.model_dump(mode="json")
+
+
+def test_trace_accepts_sealed_trace_record_row():
+    # #750 (most severe): a sealed TraceRecord row (no top-level messages/prompt/answer) is rendered by
+    # the worker via trace_from_row -> legacy_trace_from_record; the classifier must recognize it.
+    from corpus_studio.platform.trace_records import is_trace_record_row  # noqa: PLC0415
+
+    row = _sealed_trace_record_row()
+    assert is_trace_record_row(row) and "messages" not in row and "prompt" not in row
+    report = assess_dataset_format_conformance([row], "trace")
+    assert report.is_conformant and report.compatible_rows == 1
+
+
+def test_trace_accepts_full_worker_alias_sets():
+    # #750: the classifier omitted input/query (prompt) and solution/completion (answer) that the
+    # worker's trace_from_row accepts, so renderable reasoning datasets were falsely refused at plan time.
+    rows = [
+        {"query": "What is 2+2?", "solution": "4"},
+        {"input": "Translate 'hi'.", "completion": "hola"},
+    ]
+    report = assess_dataset_format_conformance(rows, "trace")
+    assert report.is_conformant and report.compatible_rows == 2
+
+
+def test_trace_messages_not_ending_in_assistant_is_rejected():
+    # trace_from_row only derives an answer from the LAST assistant message; a conversation whose last
+    # turn is the user (with no separate answer field) renders "" - the classifier must reject it, not
+    # false-accept it by delegating to the chat path.
+    row = {
+        "messages": [
+            {"role": "user", "content": "u1"},
+            {"role": "assistant", "content": "a1"},
+            {"role": "user", "content": "u2"},
+        ]
+    }
+    assert not assess_dataset_format_conformance([row], "trace").is_conformant
+
+
+def test_trace_classifier_agrees_with_the_worker_renderer():
+    # Anti-drift invariant: for every fixture, the trace preflight admits a row IFF the worker's own
+    # format_example_text renders it non-empty - this keeps the preflight from diverging again (import is
+    # torch-free: trainer.py's torch imports are all lazy and the trace path is pure). Routed through the
+    # PUBLIC assess_dataset_format_conformance, not the private classifier.
+    from corpus_studio.training.trainer import format_example_text  # noqa: PLC0415
+
+    fixtures = [
+        _sealed_trace_record_row(),
+        {"query": "q", "solution": "s"},
+        {"input": "i", "completion": "c"},
+        {"prompt": "p", "answer": "a"},
+        CHAT_ROW,  # ends in an assistant turn -> renders
+        {"messages": [{"role": "user", "content": "u"}]},  # no assistant -> ""
+        {"messages": [{"role": "assistant", "content": "a"}, {"role": "user", "content": "u"}]},  # not last
+        {"prompt": "p only, no answer"},  # no answer -> ""
+        {"note": "nothing trainable"},  # nothing -> ""
+    ]
+    for row in fixtures:
+        admitted = assess_dataset_format_conformance([row], "trace").is_conformant
+        renders = format_example_text(dict(row), "trace").strip() != ""
+        assert admitted == renders, f"preflight vs worker disagree on {row!r}: {admitted} != {renders}"
+
+
+def test_trace_malformed_record_is_incompatible_not_a_crash():
+    # A row that LOOKS like a sealed TraceRecord (is_trace_record_row) but is invalid makes the renderer
+    # raise TraceRecordError (a ValueError subclass); the preflight must surface it as a typed
+    # incompatible reason at plan time - never crash, and never pass it to a run that would then fail.
+    report = assess_dataset_format_conformance([{"trace_hash": "not-a-valid-record"}], "trace")
+    assert not report.is_conformant
+    assert report.representative_rejections[0].reason.startswith("not a renderable trace row")
+
+
 # ---- format + loader errors ----------------------------------------------------------------------
 
 
