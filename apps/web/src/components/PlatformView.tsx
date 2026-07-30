@@ -1,7 +1,14 @@
-import type { PlatformSnapshot } from "../platform/api";
+import { useRef, useState } from "react";
+import { executeRun, isTauri, type PlatformSnapshot } from "../platform/api";
 import type { FitClass } from "../contracts/FitClassification";
+import type { RunEvent } from "../contracts/RunEvent";
+import type { RunManifest } from "../contracts/RunManifest";
 import { BackendPicker } from "./BackendPicker";
 import { Card, Chip, Chips, Eyebrow, Hash, Row, type Tone } from "./ui";
+
+// Cap the retained live event stream: a long run can emit thousands of RunEvents, and rendering an
+// unbounded array would grow memory + slow the DOM. streamedCount tracks the true total separately.
+const MAX_LIVE_EVENTS = 1000;
 
 const gb = (bytes: number | null | undefined): string =>
   bytes == null ? "—" : `${(bytes / 1_000_000_000).toFixed(1)} GB`;
@@ -42,6 +49,43 @@ export function PlatformView({
   const fit = snap.fit;
   const manifest = snap.manifest;
   const execution = snap.plan.resolved_execution;
+
+  // Live run state: launching the resolved, sealed plan streams RunEvents in and lands a terminal
+  // RunManifest. The live run supersedes any snapshot manifest/events for display.
+  const [running, setRunning] = useState(false);
+  const [liveEvents, setLiveEvents] = useState<RunEvent[]>([]);
+  const [streamedCount, setStreamedCount] = useState(0);
+  const [runManifest, setRunManifest] = useState<RunManifest | undefined>(undefined);
+  const [runError, setRunError] = useState<string | undefined>(undefined);
+  // A synchronous re-entrancy guard: setRunning is async, so two fast clicks could both pass a state
+  // check and spawn two runs against the same output dir. This ref flips before any await.
+  const runningRef = useRef(false);
+  const effectiveManifest = runManifest ?? manifest;
+  const effectiveEvents = liveEvents.length ? liveEvents : (snap.events ?? []);
+
+  const launch = async () => {
+    if (runningRef.current) return;
+    runningRef.current = true;
+    setRunning(true);
+    setRunError(undefined);
+    setLiveEvents([]);
+    setStreamedCount(0);
+    setRunManifest(undefined);
+    try {
+      const result = await executeRun(snap.plan, snap.plan.export.output_dir ?? "", (event) => {
+        setStreamedCount((n) => n + 1);
+        // Window the retained stream so a long run can't grow memory without bound; streamedCount
+        // keeps the true total honest even after the oldest events are dropped.
+        setLiveEvents((prev) => [...prev, event].slice(-MAX_LIVE_EVENTS));
+      });
+      setRunManifest(result);
+    } catch (err) {
+      setRunError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setRunning(false);
+      runningRef.current = false;
+    }
+  };
 
   return (
     <div className="cs-body">
@@ -134,33 +178,58 @@ export function PlatformView({
         </Card>
 
         <Card title="Run">
-          {manifest ? (
+          {effectiveManifest ? (
             <>
               <Row k="State">
-                <Chip tone={manifest.state === "succeeded" ? "ok" : "bad"}>{manifest.state}</Chip>
+                <Chip tone={effectiveManifest.state === "succeeded" ? "ok" : "bad"}>
+                  {effectiveManifest.state}
+                </Chip>
               </Row>
-              <Row k="Run id">{manifest.run_id}</Row>
-              <Row k="Runner">{manifest.target}</Row>
-              <Row k="Artifacts">{(manifest.artifact_ids ?? []).join(", ") || "—"}</Row>
+              <Row k="Run id">{effectiveManifest.run_id}</Row>
+              <Row k="Runner">{effectiveManifest.target}</Row>
+              <Row k="Artifacts">{(effectiveManifest.artifact_ids ?? []).join(", ") || "-"}</Row>
+            </>
+          ) : running ? (
+            <>
+              <Row k="State">
+                <Chip tone="warn">running</Chip>
+              </Row>
+              <p className="cs-note">
+                Executing the sealed plan through the engine&apos;s headless supervisor -{" "}
+                {streamedCount} RunEvent(s) streamed so far (live below).
+              </p>
             </>
           ) : (
             <>
               <Row k="State">
                 <Chip tone="neutral">not launched</Chip>
               </Row>
-              <p className="cs-note">
-                Plan resolved — nothing has executed yet. Launch it from the Tauri app
-                (<span className="cs-mono">platform-run --runner training</span>); the live RunEvent
-                stream lands here.
-              </p>
+              {isTauri() ? (
+                <>
+                  <button className="cs-btn" onClick={launch} disabled={busy || running}>
+                    Launch run
+                  </button>
+                  <p className="cs-note">
+                    Executes the resolved, hash-sealed plan (
+                    <span className="cs-mono">platform-run --subprocess</span>); the engine stays the
+                    sole run authority. The live RunEvent stream lands here and below.
+                  </p>
+                </>
+              ) : (
+                <p className="cs-note">
+                  Plan resolved - nothing has executed yet. Launching a run requires the Tauri app (the
+                  browser preview has no engine).
+                </p>
+              )}
+              {runError ? <p className="cs-error">Run failed: {runError}</p> : null}
             </>
           )}
         </Card>
 
         <Card title="Event stream">
-          {snap.events?.length ? (
+          {effectiveEvents.length ? (
             <div className="cs-events">
-              {snap.events.map((e) => (
+              {effectiveEvents.map((e) => (
                 <div className="cs-event" key={e.seq}>
                   <span className="seq">{e.seq}</span>
                   <span className="kind">{e.event_type}</span>
@@ -185,7 +254,7 @@ export function PlatformView({
         Rendered from the engine's language-neutral JSON-Schema contracts (docs/contracts) — the same
         boundary this Tauri client consumes.{" "}
         {onPickBackend
-          ? "This is a live probe → plan against your host; launch a run from the Tauri app to populate the run stream."
+          ? "This is a live probe → plan against your host; use the Run card's Launch button to execute it and stream RunEvents here."
           : "This is a real engine-generated snapshot; switch to “Live host” inside the Tauri app to probe your own machine."}
       </p>
     </div>
