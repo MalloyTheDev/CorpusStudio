@@ -46,7 +46,7 @@ from .app_paths import corpusstudio_data_home
 from .backends import backend_manifest_digest, get_worker_backend
 from .build_provenance import (
     BuildProvenanceError,
-    validate_wheel_provenance_for_scientific_admission,
+    validate_wheel_provenance_for_sealed_admission,
 )
 from .common import HashRef, PackageLock, PackageSource, Ref
 from .contracts import (
@@ -3136,7 +3136,7 @@ class EnvironmentManager:
             #
             # SCOPE / honesty boundary: admission still does NOT prove the floor is the correct PROTOCOL
             # floor by DESCENT, nor that source_commit descends from it - that needs the source repo,
-            # which is not present on a scientific host. Descent is enforced at BUILD time by
+            # which is not present on a sealed host. Descent is enforced at BUILD time by
             # ``build-worker-wheel`` and by the research-protocol validator; admission proves the wheel's
             # embedded floor matches THIS PLAN's confirmed floor (equality), not descent.
             confirmed_floor = resolution.required_git_ancestor
@@ -3146,7 +3146,7 @@ class EnvironmentManager:
                 )
             # Optional reviewed worker source commit sealed into THIS resolution. When present, admission
             # additionally requires the wheel's EMBEDDED source_commit to equal it exactly - the field
-            # that becomes the recorded scientific provenance gets the same value-match as the floor. A
+            # that becomes the recorded sealed provenance gets the same value-match as the floor. A
             # malformed sealed value is refused (it cannot have been produced by a resolvable plan).
             confirmed_source_commit = resolution.worker_source_commit
             if confirmed_source_commit is not None and not _GIT_SHA1_RE.fullmatch(
@@ -3156,7 +3156,7 @@ class EnvironmentManager:
                     "the confirmed plan carries a non-canonical reviewed worker_source_commit"
                 )
             try:
-                validate_wheel_provenance_for_scientific_admission(
+                validate_wheel_provenance_for_sealed_admission(
                     resolution.worker_artifact.path,
                     expected_required_git_ancestor=confirmed_floor,
                     expected_source_commit=confirmed_source_commit,
@@ -4114,7 +4114,7 @@ class EnvironmentManager:
         # mints, matching the 1.1/1.2/1.3 one-minor-bump-per-additive-lock-generation convention; the
         # matrix 1.5.0 manager_version_exact is bound to it). Non-worker locks (and every lock sealed
         # before this field existed, i.e. manager 1.0-1.3) carry None here; pop it so their seals stay
-        # byte-identical - only scientific-worker locks bind a non-null floor.
+        # byte-identical - only sealed-worker locks bind a non-null floor.
         if lock.required_git_ancestor is None:
             body.pop("required_git_ancestor", None)
         # Additive optional reviewed worker source commit: pop when None so every lock that did not

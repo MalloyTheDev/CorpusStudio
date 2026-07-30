@@ -1218,17 +1218,17 @@ def build_worker_wheel(
     """Build the first-party CorpusStudio worker wheel FROM THE CLEAN SOURCE CHECKOUT and EMBED canonical
     build provenance.
 
-    This is the authoritative scientific builder, so it makes no false source claim possible:
+    This is the authoritative sealed-wheel builder, so it makes no false source claim possible:
     - it always builds from the repository's own HEAD - there is NO path to stamp arbitrary pre-built
       wheel bytes as if they came from source (a fixture-stamping path is not authentic provenance);
     - it always refuses ANY worktree change, tracked or untracked (``git status --porcelain``) - there
-      is no dirty/dev override, so a non-clean build is always scientifically inadmissible;
+      is no dirty/dev override, so a non-clean build is always inadmissible;
     - it requires ``--required-ancestor`` (the research floor) and refuses a missing or non-canonical
       value; it embeds BOTH ``source_commit`` and ``required_git_ancestor`` and enforces that the floor
       is an ancestor of the source commit.
     The canonical BUILD_PROVENANCE.json is embedded under the wheel's .dist-info sealed in RECORD (hence
     inside the wheel sha256 identity that flows through the artifact/environment/lock/plan/execution/
-    telemetry contracts), and the result is re-verified against scientific admission before it returns.
+    telemetry contracts), and the result is re-verified against sealed admission before it returns.
     Every launch is an argv list, never a shell string.
     """
     import shutil
@@ -1240,7 +1240,7 @@ def build_worker_wheel(
         build_provenance_document,
         stamp_wheel_with_provenance,
         validate_source_commit_against_repo,
-        validate_wheel_provenance_for_scientific_admission,
+        validate_wheel_provenance_for_sealed_admission,
     )
 
     repo_root = repository_root()
@@ -1370,7 +1370,7 @@ def build_worker_wheel(
     )
     try:
         stamp = stamp_wheel_with_provenance(wheel, document, external_copy=external_copy)
-        admission_commit = validate_wheel_provenance_for_scientific_admission(str(wheel))
+        admission_commit = validate_wheel_provenance_for_sealed_admission(str(wheel))
     except BuildProvenanceError as exc:
         typer.echo(f"provenance stamping/verification failed: {exc}", err=True)
         raise typer.Exit(2) from exc
