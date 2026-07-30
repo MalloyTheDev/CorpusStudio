@@ -1389,3 +1389,59 @@ def test_stale_objective_hash_is_refused_before_trainer_invocation(monkeypatch):
     assert result.manifest.failure.taxonomy == FailureTaxonomy.UNSUPPORTED_CONFIGURATION
     assert "objective hash" in result.manifest.failure.message
     assert called is False
+
+
+# ---- reload_verified (#747): reload the exported adapter and assert equivalence --------------------
+
+
+def test_reload_verify_adapter_missing_file_is_false(tmp_path):
+    from corpus_studio.platform.runners import _reload_verify_adapter
+
+    # No adapter_model.safetensors under the dir -> nothing to reload -> NOT verified, and no crash.
+    assert _reload_verify_adapter(str(tmp_path), "any-sha") is False
+
+
+def _mock_torch_stack(monkeypatch, tmp_path, *, load_file, reloaded_state_sha256=None):
+    """Install fake torch / safetensors.torch modules (this suite runs with no torch) so the reload path
+    is exercisable, optionally patching the re-captured export snapshot's digest."""
+    import sys  # noqa: PLC0415
+    import types  # noqa: PLC0415
+
+    (tmp_path / "adapter_model.safetensors").write_bytes(b"exported-weights")
+    monkeypatch.setitem(sys.modules, "torch", types.ModuleType("torch"))
+    monkeypatch.setitem(sys.modules, "safetensors", types.ModuleType("safetensors"))
+    safetensors_torch = types.ModuleType("safetensors.torch")
+    safetensors_torch.load_file = load_file
+    monkeypatch.setitem(sys.modules, "safetensors.torch", safetensors_torch)
+    if reloaded_state_sha256 is not None:
+        from corpus_studio.training import trainer as trainer_module  # noqa: PLC0415
+
+        class _Snapshot:
+            state_sha256 = reloaded_state_sha256
+
+        monkeypatch.setattr(
+            trainer_module, "capture_adapter_export_state", lambda *a, **k: _Snapshot()
+        )
+
+
+def test_reload_verify_adapter_true_on_match_false_on_mismatch(monkeypatch, tmp_path):
+    from corpus_studio.platform.runners import _reload_verify_adapter
+
+    _mock_torch_stack(
+        monkeypatch, tmp_path, load_file=lambda _: {"lora_A": "t"}, reloaded_state_sha256="MATCH"
+    )
+    # Reloaded weights reproduce the trained export digest -> verified.
+    assert _reload_verify_adapter(str(tmp_path), "MATCH") is True
+    # A different trained digest (the saved file did not round-trip) -> NOT verified.
+    assert _reload_verify_adapter(str(tmp_path), "DIFFERENT") is False
+
+
+def test_reload_verify_adapter_returns_false_on_a_bad_reload(monkeypatch, tmp_path):
+    from corpus_studio.platform.runners import _reload_verify_adapter
+
+    def _truncated(_):
+        raise ValueError("truncated safetensors header")
+
+    _mock_torch_stack(monkeypatch, tmp_path, load_file=_truncated)
+    # A corrupt/truncated artifact must fail closed to False, never crash success admission.
+    assert _reload_verify_adapter(str(tmp_path), "any-sha") is False

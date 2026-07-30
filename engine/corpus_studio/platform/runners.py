@@ -98,6 +98,31 @@ def classify_training_error(exc: BaseException) -> tuple[FailureTaxonomy, str | 
     return FailureTaxonomy.FAIL, None
 
 
+def _reload_verify_adapter(adapter_dir: str, expected_after_sha256: str) -> bool:
+    """Reload the exported adapter weights from disk and assert they reproduce the trained export state
+    - the ``reload_verified`` guarantee ("the producing backend reloaded these weights and asserted
+    equivalence"). Reads only the adapter-sized safetensors, never the base model. Returns ``False`` for
+    any missing/unreadable/corrupt/non-round-tripping artifact: a bad artifact is honestly admitted as
+    NOT reload-verified rather than crashing admission or being falsely claimed verified.
+    """
+    from pathlib import Path  # noqa: PLC0415
+
+    weights = Path(adapter_dir) / "adapter_model.safetensors"
+    if not weights.is_file():
+        return False
+    try:
+        import torch  # noqa: PLC0415
+        from safetensors.torch import load_file  # noqa: PLC0415
+
+        from corpus_studio.training.trainer import capture_adapter_export_state  # noqa: PLC0415
+
+        reloaded = load_file(str(weights))
+        snapshot = capture_adapter_export_state(reloaded, torch, stage=StageMarker.export)
+    except Exception:  # noqa: BLE001 - any reload/parse failure means NOT verified, never a crash.
+        return False
+    return snapshot.state_sha256 == expected_after_sha256
+
+
 class TrainingRunner:
     """Executes a real training run through ``training.trainer.run_training`` under the supervisor.
 
@@ -417,11 +442,25 @@ class TrainingRunner:
                 stage=StageMarker.optimizer_step,
             )
         ctx.training_execution_evidence = result.execution_evidence
+        # reload_verified (#747): reload the exported adapter and assert it reproduces the trained export
+        # state. The trained after-digest lives on the sealed execution evidence; without it (echo /
+        # cpu-toy) there is nothing to assert equivalence against, so the artifact stays unverified.
+        export_state = (
+            result.execution_evidence.adapter_export_state
+            if result.execution_evidence is not None
+            else None
+        )
+        reload_verified = (
+            _reload_verify_adapter(result.adapter_path, export_state.after_sha256)
+            if export_state is not None
+            else False
+        )
         ctx.emit_stage(StageMarker.export, f"adapter saved: {result.adapter_path}")
         artifact = ProducedArtifact(
             artifact_id=f"{ctx.run_id}-adapter-{content_hash[:12]}",
             kind="adapter",
             path=result.adapter_path,
+            reload_verified=reload_verified,
         )
         ctx.emit_artifact(artifact)
         return [artifact]
