@@ -221,6 +221,11 @@ def validate_wheel_provenance_for_sealed_admission(
 ) -> str:
     """Gate a worker wheel for admission into a sealed environment; return its ``source_commit``.
 
+    "Sealed" here means the wheel's own embedded-provenance SEAL (a pinned, self-attesting wheel), NOT
+    the ``sealed_research`` tier: this gate serves BOTH the VERIFIED and SEALED_RESEARCH tiers (any
+    ``requires_worker_wheel`` recipe). The stricter sealed_research-only floor / commit equality checks
+    are layered on by the caller via ``expected_required_git_ancestor`` / ``expected_source_commit``.
+
     This is the artifact-self-contained check the Environment Manager runs at admission (before any
     environment directory, installation, lock, capability probe, or GPU operation), so it does NOT
     require the source repository to be present on the host. It enforces, in order:

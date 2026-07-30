@@ -137,7 +137,7 @@ remains:
    validator enforcing tier <-> pinned-wheel consistency; the reviewed git floor keys on
    `sealed_research`, not the worker-wheel mechanism.
 2. **VERIFIED tier - PLAN-PATH DONE (#492).** A `verified` worker-wheel recipe resolves floor-free
-   (pinned + provenance-admitted, no reviewed floor). **Remaining:** no builtin *product* recipe ships
+   (pinned + provenance-admitted, no reviewed floor). **Remaining:** no built-in *product* recipe ships
    at VERIFIED yet, and the env-CREATE admission gate still always requires an embedded floor in the
    wheel, so building + admitting a verified wheel end to end is not wired. Today `backend-corpus-studio`
    still uses loose version ranges.
