@@ -3648,9 +3648,10 @@ def eval_run(
         "--content-fidelity",
         help="Score STRUCTURED-OUTPUT content fidelity (metric=content_fidelity): per reference key, "
         "does the model output agree with the reference on empty vs non-empty? average_score is the "
-        "field-level match rate. Reported ALONGSIDE - not replacing - schema_conformance, so a "
-        "structurally complete but all-empty-optional output (fully complete yet low fidelity) becomes "
-        "visible. Mutually exclusive with --output-schema / --judge-model.",
+        "field-level match rate. A SEPARATE, complementary pass to schema_conformance (one scorer per "
+        "run - run each as its own eval), it surfaces a structurally complete but all-empty-optional "
+        "output that schema_conformance alone scores 100. Mutually exclusive with --output-schema / "
+        "--judge-model.",
     ),
     judge_model: Optional[str] = typer.Option(
         None,
