@@ -192,7 +192,8 @@ per-item error isolation, and off-thread document opens.
 - The former WPF/Avalonia Training Studio (removed #545) launched reviewed, no-shell argv for installed
   **external** trainers. It emitted no direct first-party launch and refused the old mutable-config path. The
   Tauri/React Platform client plans and executes first-party work through `platform-plan` →
-  `platform-run`. Supporting first-party commands are `train-check`, `train-merge`, and `model-fetch`;
+  `platform-run`, streaming the live RunEvent log back into the client. Supporting first-party commands
+  are `train-check`, `train-merge`, and `model-fetch`;
   low-level `train-run` is an explicitly acknowledged and labeled development-only route.
 - **Truncation guardrail** (`dataset-tokens`): measures a dataset's token-length distribution and how
   many examples a given `sequence_len` would **truncate** (cutting the end - including the model's
