@@ -134,6 +134,10 @@ class ProducedArtifact:
     artifact_id: str
     kind: str = "adapter"
     path: str = ""
+    # Whether the producing backend reloaded these exported weights from disk and asserted equivalence
+    # to the trained export state (feeds ArtifactManifest.reload_verified). Set by the runner; stays
+    # False when the artifact cannot be independently reloaded to the same canonical state.
+    reload_verified: bool = False
 
 
 RunEventSink = Callable[[RunEvent], None]
@@ -617,6 +621,7 @@ def execute_run(
                     kind=artifact.kind,
                     run_id=rid,
                     base_model=plan.base_model,
+                    reload_verified=artifact.reload_verified,
                     now=clock(),
                 )
                 for artifact in produced
