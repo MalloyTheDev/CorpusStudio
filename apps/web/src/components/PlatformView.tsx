@@ -1,10 +1,14 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { executeRun, isTauri, type PlatformSnapshot } from "../platform/api";
 import type { FitClass } from "../contracts/FitClassification";
 import type { RunEvent } from "../contracts/RunEvent";
 import type { RunManifest } from "../contracts/RunManifest";
 import { BackendPicker } from "./BackendPicker";
 import { Card, Chip, Chips, Eyebrow, Hash, Row, type Tone } from "./ui";
+
+// Cap the retained live event stream: a long run can emit thousands of RunEvents, and rendering an
+// unbounded array would grow memory + slow the DOM. streamedCount tracks the true total separately.
+const MAX_LIVE_EVENTS = 1000;
 
 const gb = (bytes: number | null | undefined): string =>
   bytes == null ? "—" : `${(bytes / 1_000_000_000).toFixed(1)} GB`;
@@ -50,25 +54,36 @@ export function PlatformView({
   // RunManifest. The live run supersedes any snapshot manifest/events for display.
   const [running, setRunning] = useState(false);
   const [liveEvents, setLiveEvents] = useState<RunEvent[]>([]);
+  const [streamedCount, setStreamedCount] = useState(0);
   const [runManifest, setRunManifest] = useState<RunManifest | undefined>(undefined);
   const [runError, setRunError] = useState<string | undefined>(undefined);
+  // A synchronous re-entrancy guard: setRunning is async, so two fast clicks could both pass a state
+  // check and spawn two runs against the same output dir. This ref flips before any await.
+  const runningRef = useRef(false);
   const effectiveManifest = runManifest ?? manifest;
   const effectiveEvents = liveEvents.length ? liveEvents : (snap.events ?? []);
 
   const launch = async () => {
+    if (runningRef.current) return;
+    runningRef.current = true;
     setRunning(true);
     setRunError(undefined);
     setLiveEvents([]);
+    setStreamedCount(0);
     setRunManifest(undefined);
     try {
-      const result = await executeRun(snap.plan, snap.plan.export.output_dir ?? "", (event) =>
-        setLiveEvents((prev) => [...prev, event]),
-      );
+      const result = await executeRun(snap.plan, snap.plan.export.output_dir ?? "", (event) => {
+        setStreamedCount((n) => n + 1);
+        // Window the retained stream so a long run can't grow memory without bound; streamedCount
+        // keeps the true total honest even after the oldest events are dropped.
+        setLiveEvents((prev) => [...prev, event].slice(-MAX_LIVE_EVENTS));
+      });
       setRunManifest(result);
     } catch (err) {
       setRunError(err instanceof Error ? err.message : String(err));
     } finally {
       setRunning(false);
+      runningRef.current = false;
     }
   };
 
@@ -181,7 +196,7 @@ export function PlatformView({
               </Row>
               <p className="cs-note">
                 Executing the sealed plan through the engine&apos;s headless supervisor -{" "}
-                {liveEvents.length} RunEvent(s) streamed so far (live below).
+                {streamedCount} RunEvent(s) streamed so far (live below).
               </p>
             </>
           ) : (
@@ -191,7 +206,7 @@ export function PlatformView({
               </Row>
               {isTauri() ? (
                 <>
-                  <button className="cs-btn" onClick={launch} disabled={busy}>
+                  <button className="cs-btn" onClick={launch} disabled={busy || running}>
                     Launch run
                   </button>
                   <p className="cs-note">
