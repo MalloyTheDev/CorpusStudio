@@ -580,3 +580,20 @@ def test_echo_run_produces_no_artifacts():
 
     result = execute_run(demo_run_plan(), EchoRunner(), clock=_CLOCK)
     assert result.artifacts == []
+
+
+def test_build_artifact_manifest_records_reload_verified(tmp_path):
+    # #747: the reload_verified flag the runner sets must be carried onto the ArtifactManifest (the
+    # functional tier of two-tier integrity), defaulting False when the runner did not verify it.
+    directory = tmp_path / "adapter"
+    directory.mkdir()
+    (directory / "adapter_config.json").write_text('{"r": 4}', encoding="utf-8")
+    (directory / "adapter_model.safetensors").write_bytes(b"weights-v1")
+
+    verified = build_artifact_manifest(
+        artifact_id="a-1", path=str(directory), run_id="run-1", reload_verified=True
+    )
+    assert verified.reload_verified is True
+
+    default = build_artifact_manifest(artifact_id="a-2", path=str(directory), run_id="run-1")
+    assert default.reload_verified is False
