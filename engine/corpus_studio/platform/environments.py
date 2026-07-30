@@ -33,7 +33,7 @@ from .contracts import (
     PythonRuntime,
     QloraExecutionProbeSpec,
 )
-from .enums import DependencyLayer, OperatingSystem, RecipeVerification
+from .enums import AssuranceTier, DependencyLayer, OperatingSystem, RecipeVerification
 
 # The PyTorch wheel indices, by accelerator tag (grounded in the download.pytorch.org layout). torch
 # is installed from its OWN index; the rest resolve from PyPI — so a CUDA build is selected without
@@ -272,6 +272,7 @@ def builtin_recipes() -> list[EnvironmentRecipe]:
                     ]
                 ),
             ),
+            assurance_tier=AssuranceTier.sealed_research,
             requires_worker_wheel=True,
             bootstrap_pip_version="26.1.2",
             verification=RecipeVerification.declared,
@@ -355,6 +356,7 @@ def builtin_recipes() -> list[EnvironmentRecipe]:
                     ]
                 ),
             ),
+            assurance_tier=AssuranceTier.sealed_research,
             requires_worker_wheel=True,
             bootstrap_pip_version="26.1.2",
             verification=RecipeVerification.declared,
@@ -453,6 +455,7 @@ def builtin_recipes() -> list[EnvironmentRecipe]:
                     ]
                 ),
             ),
+            assurance_tier=AssuranceTier.sealed_research,
             requires_worker_wheel=True,
             bootstrap_pip_version="26.1.2",
             verification=RecipeVerification.declared,
@@ -547,6 +550,7 @@ def builtin_recipes() -> list[EnvironmentRecipe]:
                     ]
                 ),
             ),
+            assurance_tier=AssuranceTier.sealed_research,
             requires_worker_wheel=True,
             bootstrap_pip_version="26.1.2",
             verification=RecipeVerification.declared,
@@ -640,6 +644,7 @@ def builtin_recipes() -> list[EnvironmentRecipe]:
                     ]
                 ),
             ),
+            assurance_tier=AssuranceTier.sealed_research,
             requires_worker_wheel=True,
             bootstrap_pip_version="26.1.2",
             verification=RecipeVerification.declared,
@@ -756,6 +761,11 @@ def _estimate_download_mb(requirements: list[DependencyRequirement], accelerator
 def recipe_digest(recipe: EnvironmentRecipe) -> str:
     """Stable sha256 over a recipe declaration for recipe-drift detection."""
     body = recipe.model_dump(mode="json")
+    # assurance_tier is a GOVERNANCE classification, not an install-affecting field (it changes how
+    # strictly the worker / provenance are governed, never WHAT is installed). Exclude it from the
+    # recipe-INSTALL-drift digest so this additive migration preserves every existing managed
+    # environment's digest byte-for-byte; the tier is enforced by the recipe validator + resolve gate.
+    body.pop("assurance_tier", None)
     # Preserve the digest of pre-readiness-v2 recipes so existing managed environments remain valid
     # rollback targets after the additive contract migration.
     if (
@@ -855,20 +865,24 @@ def resolve_dependencies(
     is False (with reasons) when the host can't satisfy the recipe — unmet python floor, unsupported
     OS, or a CUDA-required recipe on a host with no CUDA accelerator.
 
-    ``required_git_ancestor`` is the exact reviewed per-lineage source floor for a worker-wheel plan,
-    supplied here (never taken from the recipe or a global constant). A worker-wheel recipe REQUIRES a
+    ``required_git_ancestor`` is the exact reviewed per-lineage source floor for a SEALED_RESEARCH plan,
+    supplied here (never taken from the recipe or a global constant). A sealed_research recipe REQUIRES a
     canonical (40-char lowercase-hex) value - omission or a malformed value makes the plan unresolvable;
-    a non-worker recipe must not carry one.
+    a standard or verified recipe must not carry one.
     """
     blocking: list[str] = []
     warnings: list[str] = []
 
-    # --- reviewed per-lineage source floor (sealed into the resolution, never from the recipe) ---
+    # --- reviewed per-lineage source floor + worker source commit: REVIEWED values only a
+    #     SEALED_RESEARCH recipe carries. A VERIFIED worker-wheel recipe is pinned + provenance-admitted
+    #     but takes NO reviewed floor / commit; a STANDARD recipe carries neither. Keyed on the tier, not
+    #     on the requires_worker_wheel packaging mechanism (that is what #492 made explicit). ---
+    is_sealed_research = recipe.assurance_tier is AssuranceTier.sealed_research
     sealed_floor: str | None = None
-    if recipe.requires_worker_wheel:
+    if is_sealed_research:
         if required_git_ancestor is None:
             blocking.append(
-                "this worker-wheel recipe requires an exact reviewed --required-git-ancestor "
+                "this sealed_research recipe requires an exact reviewed --required-git-ancestor "
                 "(40-char lowercase-hex source floor)"
             )
         elif not _CANONICAL_GIT_SHA1.match(required_git_ancestor):
@@ -878,13 +892,19 @@ def resolve_dependencies(
         else:
             sealed_floor = required_git_ancestor
     elif required_git_ancestor is not None:
-        blocking.append("a non-worker recipe does not accept a --required-git-ancestor floor")
+        blocking.append(
+            "only a sealed_research recipe accepts a --required-git-ancestor floor "
+            "(standard and verified recipes take none)"
+        )
 
     # --- optional reviewed worker source commit (sealed; equality-checked at admission) ---
     sealed_source_commit: str | None = None
     if worker_source_commit is not None:
-        if not recipe.requires_worker_wheel:
-            blocking.append("a non-worker recipe does not accept a --worker-source-commit")
+        if not is_sealed_research:
+            blocking.append(
+                "only a sealed_research recipe accepts a --worker-source-commit "
+                "(standard and verified recipes take none)"
+            )
         elif not _CANONICAL_GIT_SHA1.match(worker_source_commit):
             blocking.append(
                 "--worker-source-commit must be an exact 40-character lowercase-hex commit"
