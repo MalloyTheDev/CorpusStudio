@@ -3,8 +3,8 @@
 //! telemetry) and returns the parsed contract to the React frontend. The engine remains the single
 //! source of truth; the shell never contains platform logic (see docs/platform-architecture-epic).
 
-use std::io::Write;
-use std::process::Command;
+use std::io::{BufRead, BufReader, Read, Write};
+use std::process::{Command, Stdio};
 
 use serde_json::Value;
 
@@ -66,6 +66,74 @@ fn platform_plan(
         args.push(&backend_id);
     }
     run_engine(&args)
+}
+
+/// Execute a hash-sealed RunPlan through the headless run supervisor and STREAM its RunEvents to the
+/// frontend as they happen — the plan->run half of the one-training-authority flow. The engine emits
+/// RunEvents on stderr (one per line) and the terminal RunManifest on stdout; the shell never owns run
+/// behaviour, it only forwards the sealed plan to `platform-run --subprocess` and relays the engine's
+/// own event stream + manifest. `on_event` is a Tauri channel the frontend subscribes to for live events.
+#[tauri::command]
+fn platform_run(
+    plan: Value,
+    out_dir: String,
+    on_event: tauri::ipc::Channel<Value>,
+) -> Result<Value, String> {
+    // The frontend holds the sealed RunPlan object (from `platform_plan`); persist it to a temp file the
+    // engine can read + hash-verify. platform-run re-canonicalizes for the hash, so exact bytes are fine.
+    let plan_text =
+        serde_json::to_string(&plan).map_err(|e| format!("the RunPlan is not serializable: {e}"))?;
+    let plan_path = write_temp_jsonl(&plan_text)?;
+    let plan_arg = plan_path.to_string_lossy().to_string();
+
+    // The plan's sealed export.output_dir governs run artifacts; --out additionally writes the terminal
+    // manifest + enables telemetry. Omit it when the caller passes no directory (the manifest still
+    // arrives on stdout).
+    let mut args: Vec<&str> = vec!["platform-run", &plan_arg, "--subprocess"];
+    if !out_dir.trim().is_empty() {
+        args.push("--out");
+        args.push(&out_dir);
+    }
+    let child = Command::new("corpus-studio")
+        .args(&args)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn();
+    let mut child = match child {
+        Ok(child) => child,
+        Err(e) => {
+            let _ = std::fs::remove_file(&plan_path);
+            return Err(format!("could not launch the engine: {e}"));
+        }
+    };
+
+    // Drain the terminal RunManifest (stdout) on a separate thread so a full stdout pipe can never
+    // deadlock against the stderr event stream we relay below.
+    let stdout = child.stdout.take();
+    let stdout_reader = std::thread::spawn(move || {
+        let mut buffer = String::new();
+        if let Some(mut handle) = stdout {
+            let _ = handle.read_to_string(&mut buffer);
+        }
+        buffer
+    });
+
+    // Relay each RunEvent (one JSON object per stderr line) to the frontend as it is emitted. A line
+    // the engine did not format as JSON is forwarded as a `{ "log": ... }` note rather than dropped.
+    if let Some(stderr) = child.stderr.take() {
+        for line in BufReader::new(stderr).lines().map_while(Result::ok) {
+            let event = serde_json::from_str::<Value>(&line)
+                .unwrap_or_else(|_| serde_json::json!({ "log": line }));
+            let _ = on_event.send(event);
+        }
+    }
+
+    let manifest_text = stdout_reader.join().unwrap_or_default();
+    let _ = child.wait(); // reap the child; the RunManifest carries the authoritative success/failure state
+    let _ = std::fs::remove_file(&plan_path);
+    serde_json::from_str(&manifest_text).map_err(|e| {
+        format!("the engine produced no parseable RunManifest ({e}); see the streamed events")
+    })
 }
 
 // --- Data Studio ------------------------------------------------------------
@@ -234,6 +302,7 @@ pub fn run() {
             platform_probe,
             platform_plan,
             platform_backends,
+            platform_run,
             data_schemas,
             data_projects,
             data_new_project,

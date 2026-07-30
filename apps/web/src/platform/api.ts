@@ -84,3 +84,19 @@ export async function buildLiveSnapshot(inputs: PlanInputs): Promise<PlatformSna
   const { plan, fit } = await resolvePlan(inputs);
   return { profile, capabilities, plan, fit };
 }
+
+/** Execute a resolved, hash-sealed RunPlan through the engine's headless supervisor, STREAMING each
+ *  RunEvent to `onEvent` as it is emitted (shells `corpus-studio platform-run --subprocess`, relayed
+ *  over a Tauri channel), then resolving with the terminal RunManifest. This is the plan→run half of
+ *  the one-training-authority flow; the engine remains the sole run authority. Only callable inside
+ *  Tauri (the browser build has no engine). `outDir` is the sealed run-output root. */
+export async function executeRun(
+  plan: RunPlan,
+  outDir: string,
+  onEvent: (event: RunEvent) => void,
+): Promise<RunManifest> {
+  const core = await import("@tauri-apps/api/core");
+  const channel = new core.Channel<RunEvent>();
+  channel.onmessage = onEvent;
+  return core.invoke<RunManifest>("platform_run", { plan, outDir, onEvent: channel });
+}
