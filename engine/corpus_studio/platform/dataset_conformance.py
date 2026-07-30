@@ -195,7 +195,11 @@ def _classify_trace(row: Mapping[str, Any]) -> str | None:
 
     try:
         rendered = format_trace(trace_from_row(dict(row)))
-    except (ValueError, KeyError, TypeError) as exc:
+    except ValueError as exc:
+        # A DATA problem the worker would also hit: malformed <think> markup (traces._split_think) or an
+        # invalid sealed TraceRecord (parse_trace_record -> TraceRecordError, a ValueError subclass). An
+        # unexpected KeyError/TypeError is NOT swallowed here - that would be a renderer BUG and must
+        # surface, not be silently reclassified as a user data problem.
         return f"not a renderable trace row ({exc})"
     if rendered.strip():
         return None

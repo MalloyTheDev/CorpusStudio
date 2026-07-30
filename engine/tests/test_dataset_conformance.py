@@ -229,10 +229,10 @@ def test_trace_messages_not_ending_in_assistant_is_rejected():
 
 
 def test_trace_classifier_agrees_with_the_worker_renderer():
-    # Anti-drift invariant: for every fixture, the trace classifier admits a row IFF the worker's own
-    # format_example_text renders it non-empty. This is what keeps the preflight from diverging again
-    # (import is torch-free: trainer.py's torch imports are all lazy and the trace path is pure).
-    from corpus_studio.platform.dataset_conformance import _classify_trace  # noqa: PLC0415
+    # Anti-drift invariant: for every fixture, the trace preflight admits a row IFF the worker's own
+    # format_example_text renders it non-empty - this keeps the preflight from diverging again (import is
+    # torch-free: trainer.py's torch imports are all lazy and the trace path is pure). Routed through the
+    # PUBLIC assess_dataset_format_conformance, not the private classifier.
     from corpus_studio.training.trainer import format_example_text  # noqa: PLC0415
 
     fixtures = [
@@ -247,9 +247,18 @@ def test_trace_classifier_agrees_with_the_worker_renderer():
         {"note": "nothing trainable"},  # nothing -> ""
     ]
     for row in fixtures:
-        admitted = _classify_trace(row) is None
+        admitted = assess_dataset_format_conformance([row], "trace").is_conformant
         renders = format_example_text(dict(row), "trace").strip() != ""
-        assert admitted == renders, f"classifier vs worker disagree on {row!r}: {admitted} != {renders}"
+        assert admitted == renders, f"preflight vs worker disagree on {row!r}: {admitted} != {renders}"
+
+
+def test_trace_malformed_record_is_incompatible_not_a_crash():
+    # A row that LOOKS like a sealed TraceRecord (is_trace_record_row) but is invalid makes the renderer
+    # raise TraceRecordError (a ValueError subclass); the preflight must surface it as a typed
+    # incompatible reason at plan time - never crash, and never pass it to a run that would then fail.
+    report = assess_dataset_format_conformance([{"trace_hash": "not-a-valid-record"}], "trace")
+    assert not report.is_conformant
+    assert report.representative_rejections[0].reason.startswith("not a renderable trace row")
 
 
 # ---- format + loader errors ----------------------------------------------------------------------
