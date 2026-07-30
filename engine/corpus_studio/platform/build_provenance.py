@@ -2,12 +2,12 @@
 sealed worker wheel in the artifact store.
 
 Why this module exists (the v7 lesson): the telemetry identity reader requires the exact key
-``source_commit`` to populate ``identity.repository_commit`` for a run's scientific summary. The v7 wheel
+``source_commit`` to populate ``identity.repository_commit`` for a run's sealed provenance summary. The v7 wheel
 was built by ad-hoc tooling that recorded the authentic commit under ``audited_commit`` and omitted
 ``source_commit``, so every auto-derived v7 summary was ``scientific_resource_complete=false`` even though
 all measurement was complete, and the commit had to be supplied post-hoc through an identity overlay. This
 module makes the contract canonical and machine-checked so FUTURE wheels populate the identity WITHOUT an
-overlay and a wheel with malformed/absent provenance fails before it is admitted for a scientific
+overlay and a wheel with malformed/absent provenance fails before it is admitted for a sealed
 environment.
 
 Torch-free by construction (stdlib + git subprocess only); safe to import from ``corpus_studio.platform``.
@@ -32,7 +32,7 @@ from typing import Any
 PROVENANCE_FILENAME = "BUILD_PROVENANCE.json"
 
 # Exact full lowercase hex Git object name. Abbreviated or uppercase SHAs are rejected: an ambiguous or
-# non-canonical commit id must never masquerade as authoritative scientific provenance.
+# non-canonical commit id must never masquerade as authoritative sealed provenance.
 _SOURCE_COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
 
 # The reader consumes ONLY this key. Listed here so the prohibition is explicit and testable.
@@ -210,7 +210,7 @@ def validate_source_commit_against_repo(
             )
 
 
-def validate_wheel_provenance_for_scientific_admission(
+def validate_wheel_provenance_for_sealed_admission(
     wheel_path: str | Path,
     *,
     repo_root: str | Path | None = None,
@@ -219,7 +219,7 @@ def validate_wheel_provenance_for_scientific_admission(
     expected_required_git_ancestor: str | None = None,
     expected_source_commit: str | None = None,
 ) -> str:
-    """Gate a worker wheel for admission into a scientific environment; return its ``source_commit``.
+    """Gate a worker wheel for admission into a sealed environment; return its ``source_commit``.
 
     This is the artifact-self-contained check the Environment Manager runs at admission (before any
     environment directory, installation, lock, capability probe, or GPU operation), so it does NOT
@@ -252,12 +252,12 @@ def validate_wheel_provenance_for_scientific_admission(
       When given, the embedded floor must equal it exactly (a value match, no repo needed).
     - ``expected_source_commit``: a reviewed source commit the CALLER already trusts. When given, the
       embedded ``source_commit`` must equal it exactly - the same value-match discipline as the floor,
-      applied to the field that becomes the recorded scientific provenance.
+      applied to the field that becomes the recorded sealed provenance.
     The Environment Manager admission gate now passes ``expected_required_git_ancestor``: the exact
     reviewed per-lineage floor carried on the sealed ``DependencyResolution`` (supplied to
     ``env-plan --required-git-ancestor`` and bound by the confirmation hash). So admission proves EXACT
     EQUALITY between the confirmed plan floor and the wheel's embedded floor. The Environment Manager
-    still does NOT pass ``repo_root`` (no source repository reaches a scientific host), so admission does
+    still does NOT pass ``repo_root`` (no source repository reaches a sealed host), so admission does
     NOT independently prove Git ANCESTRY - it does not prove ``source_commit`` descends from the floor,
     only that the embedded floor equals the confirmed plan floor. Descent is proven where the repo is
     present: at BUILD time by the authoritative clean-source ``build-worker-wheel`` (``--required-ancestor``
@@ -306,7 +306,7 @@ def validate_wheel_provenance_for_scientific_admission(
         )
     # A reviewed source_commit the CALLER already trusts (e.g. one recorded in the sealed plan or the
     # research protocol). When given, the wheel's embedded source_commit must equal it exactly - the
-    # same value-match discipline the floor gets, so the field that becomes the recorded scientific
+    # same value-match discipline the floor gets, so the field that becomes the recorded sealed
     # provenance is not merely format-checked.
     if expected_source_commit is not None and commit != expected_source_commit:
         raise BuildProvenanceError(

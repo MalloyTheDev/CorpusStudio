@@ -230,7 +230,7 @@ def test_record_integrity_detects_swapped_embedded_provenance(tmp_path: Path) ->
 
 def test_admission_gate_returns_commit_for_embedded_provenance(tmp_path: Path) -> None:
     wheel = _stamped_wheel(tmp_path / "w.whl", external_copy=True)
-    assert bp.validate_wheel_provenance_for_scientific_admission(str(wheel)) == _GOOD
+    assert bp.validate_wheel_provenance_for_sealed_admission(str(wheel)) == _GOOD
 
 
 def test_admission_gate_refuses_external_only_v7_shape(tmp_path: Path) -> None:
@@ -238,7 +238,7 @@ def test_admission_gate_refuses_external_only_v7_shape(tmp_path: Path) -> None:
     wheel = _minimal_wheel(tmp_path / "w.whl")
     _write(tmp_path, {"source_commit": _GOOD})
     with pytest.raises(bp.BuildProvenanceError, match="no embedded"):
-        bp.validate_wheel_provenance_for_scientific_admission(str(wheel))
+        bp.validate_wheel_provenance_for_sealed_admission(str(wheel))
 
 
 def test_admission_gate_refuses_audited_commit_only_with_alias_hint(tmp_path: Path) -> None:
@@ -246,20 +246,20 @@ def test_admission_gate_refuses_audited_commit_only_with_alias_hint(tmp_path: Pa
     # Embed a provenance doc carrying ONLY the prohibited alias (no canonical source_commit).
     _embed_raw(wheel, {"audited_commit": _GOOD})
     with pytest.raises(bp.BuildProvenanceError, match="audited_commit"):
-        bp.validate_wheel_provenance_for_scientific_admission(str(wheel))
+        bp.validate_wheel_provenance_for_sealed_admission(str(wheel))
 
 
 def test_admission_gate_refuses_missing_provenance(tmp_path: Path) -> None:
     wheel = _minimal_wheel(tmp_path / "w.whl")
     with pytest.raises(bp.BuildProvenanceError, match="no embedded"):
-        bp.validate_wheel_provenance_for_scientific_admission(str(wheel))
+        bp.validate_wheel_provenance_for_sealed_admission(str(wheel))
 
 
 def test_admission_gate_refuses_external_mismatch(tmp_path: Path) -> None:
     wheel = _stamped_wheel(tmp_path / "w.whl", external_copy=True)
     (wheel.parent / bp.PROVENANCE_FILENAME).write_text('{"source_commit":"0000"}', encoding="utf-8")
     with pytest.raises(bp.BuildProvenanceError, match="disagrees with the embedded"):
-        bp.validate_wheel_provenance_for_scientific_admission(str(wheel))
+        bp.validate_wheel_provenance_for_sealed_admission(str(wheel))
 
 
 def _embed_raw(wheel: Path, document: dict) -> None:
@@ -312,7 +312,7 @@ def test_admission_requires_canonical_embedded_floor(tmp_path: Path, floor: obje
         members={f"{_DIST_INFO}BUILD_PROVENANCE.json": provenance_bytes},
     )
     with pytest.raises(bp.BuildProvenanceError, match="required_git_ancestor is"):
-        bp.validate_wheel_provenance_for_scientific_admission(str(wheel))
+        bp.validate_wheel_provenance_for_sealed_admission(str(wheel))
 
 
 # ---- repository validation (real tmp git repo) ---------------------------------------------------
@@ -429,13 +429,13 @@ def test_admission_expected_floor_match_and_mismatch(tmp_path: Path) -> None:
     # no repository needed). The Environment Manager passes no expected floor, so this is a hook for a
     # future plumbed floor, not something admission enforces today.
     assert (
-        bp.validate_wheel_provenance_for_scientific_admission(
+        bp.validate_wheel_provenance_for_sealed_admission(
             str(wheel), expected_required_git_ancestor=floor
         )
         == _GOOD
     )
     with pytest.raises(bp.BuildProvenanceError, match="does not match the reviewed floor"):
-        bp.validate_wheel_provenance_for_scientific_admission(
+        bp.validate_wheel_provenance_for_sealed_admission(
             str(wheel), expected_required_git_ancestor="0" * 40
         )
 
@@ -609,7 +609,7 @@ def test_build_cli_real_source_build_embeds_provenance_and_admits(tmp_path: Path
     assert wheel.exists() and wheel.suffix == ".whl"
     # Real build -> embedded provenance -> passes Environment Manager admission -> telemetry reads it.
     assert bp.read_embedded_source_commit(str(wheel)) == head
-    assert bp.validate_wheel_provenance_for_scientific_admission(str(wheel)) == head
+    assert bp.validate_wheel_provenance_for_sealed_admission(str(wheel)) == head
     overlay = worker_identity_overlay(_artifact(wheel))
     assert overlay.repository_commit == head
 
@@ -635,7 +635,7 @@ def test_build_cli_builds_project_under_engine_subdir(tmp_path: Path, monkeypatc
     wheel = Path(payload["wheel"])
     assert wheel.exists() and wheel.suffix == ".whl"
     assert bp.read_embedded_source_commit(str(wheel)) == head
-    assert bp.validate_wheel_provenance_for_scientific_admission(str(wheel)) == head
+    assert bp.validate_wheel_provenance_for_sealed_admission(str(wheel)) == head
 
 
 def test_build_cli_refuses_when_no_buildable_project(tmp_path: Path, monkeypatch) -> None:
@@ -697,11 +697,11 @@ def test_admission_enforces_expected_source_commit(tmp_path: Path, monkeypatch) 
     assert result.exit_code == 0, result.output
     wheel = Path(json.loads(result.stdout)["wheel"])
     assert (
-        bp.validate_wheel_provenance_for_scientific_admission(str(wheel), expected_source_commit=head)
+        bp.validate_wheel_provenance_for_sealed_admission(str(wheel), expected_source_commit=head)
         == head
     )
     with pytest.raises(bp.BuildProvenanceError, match="does not match the reviewed source commit"):
-        bp.validate_wheel_provenance_for_scientific_admission(str(wheel), expected_source_commit=_GOOD)
+        bp.validate_wheel_provenance_for_sealed_admission(str(wheel), expected_source_commit=_GOOD)
 
 
 def test_build_cli_two_builds_same_commit_are_byte_identical(tmp_path: Path, monkeypatch) -> None:

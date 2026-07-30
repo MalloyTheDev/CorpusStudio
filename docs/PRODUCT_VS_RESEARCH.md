@@ -127,24 +127,28 @@ The separation already exists in code, mostly as an implicit mechanism rather th
   normal product run path depend on amendments, matrix membership, reserved identities, or paper
   promotion.
 
-## Known gaps / planned work (not yet implemented)
+## Status and remaining work
 
-These make the three tiers explicit and give the product a real VERIFIED tier. They are design intent,
-not current behavior:
+The three tiers are now explicit and the product has a plan-time VERIFIED tier. What has landed vs. what
+remains:
 
-1. **Name the tier.** Introduce an explicit assurance selector (`standard` / `verified` /
-   `sealed_research`) on the recipe/plan, so a tier is chosen directly rather than inferred from the
-   `requires_worker_wheel` packaging mechanism.
-2. **Implement the VERIFIED tier.** A product training recipe that installs a **pinned, hash-verified**
-   worker package - reproducible enough for ordinary use - with environment lock + capability evidence
-   and generic build provenance, but no reviewed git floor, reserved identity, amendment, or matrix cell.
-   Today `backend-corpus-studio` uses loose version ranges; this fills the gap between STANDARD and
-   SEALED_RESEARCH.
-3. **De-research the shared vocabulary.** Rename research-flavored names on the general Environment
-   Manager (e.g. `validate_wheel_provenance_for_scientific_admission` -> `..._for_sealed_admission`);
-   keep the concepts in `research/`.
-4. **Plugin/skill overlay split.** A product-first skill plus an optional research-overlay skill scoped
-   to `research/ieee-linux-training/` and `docs/paper/` that loads only for paper work.
+1. **Name the tier - DONE (#492).** `EnvironmentRecipe.assurance_tier` (`standard` / `verified` /
+   `sealed_research`) is chosen directly rather than inferred from `requires_worker_wheel`, with a
+   validator enforcing tier <-> pinned-wheel consistency; the reviewed git floor keys on
+   `sealed_research`, not the worker-wheel mechanism.
+2. **VERIFIED tier - PLAN-PATH DONE (#492).** A `verified` worker-wheel recipe resolves floor-free
+   (pinned + provenance-admitted, no reviewed floor). **Remaining:** no builtin *product* recipe ships
+   at VERIFIED yet, and the env-CREATE admission gate still always requires an embedded floor in the
+   wheel, so building + admitting a verified wheel end to end is not wired. Today `backend-corpus-studio`
+   still uses loose version ranges.
+3. **De-research the shared vocabulary - DONE (#493).** The general admission gate was renamed
+   `validate_wheel_provenance_for_scientific_admission` -> `..._for_sealed_admission`, and "scientific"
+   was scrubbed from the general Environment-Manager / build-provenance comments (sealed environment /
+   host / provenance / admission). The descriptive PAPER-telemetry fields (`scientifically_complete`,
+   `ScientificCompleteness`, `scientific_resource_complete` / `_throughput_complete`) are **intentionally
+   kept** - they measure PAPER completeness, the concept that belongs with `research/`.
+4. **Plugin/skill overlay split - remaining.** A product-first skill plus an optional research-overlay
+   skill scoped to `research/ieee-linux-training/` and `docs/paper/` that loads only for paper work.
 
 ## Rule of thumb
 
