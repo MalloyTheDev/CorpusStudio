@@ -925,12 +925,13 @@ def _verified_recipe(**overrides) -> EnvironmentRecipe:
 def test_builtin_recipe_tiers_are_consistent():
     # backend-corpus-studio (loose product) is STANDARD; backend-corpus-studio-verified is VERIFIED
     # (pinned wheel, no reviewed floor); every worker-wheel readiness recipe is SEALED_RESEARCH.
-    tiers = {r.recipe_id: r.assurance_tier for r in builtin_recipes()}
+    recipes = builtin_recipes()
+    tiers = {r.recipe_id: r.assurance_tier for r in recipes}
     assert tiers["backend-corpus-studio"] == AssuranceTier.standard
     assert tiers["backend-corpus-studio-verified"] == AssuranceTier.verified
     # A worker wheel iff the tier is not standard (the recipe validator enforces the pairing); every
     # worker-wheel builtin is either the VERIFIED product recipe or a SEALED_RESEARCH readiness recipe.
-    for recipe in builtin_recipes():
+    for recipe in recipes:
         if recipe.requires_worker_wheel:
             assert recipe.assurance_tier in {
                 AssuranceTier.verified,
