@@ -31,7 +31,11 @@ requires complete positive RECORD counts. Real optimizer steps have since passed
 (the sealed v6/v7 0.5B smokes), and an **exploratory product run** (NOT a sealed IEEE cell) trained 7B
 QLoRA at sequence length 4096 on this host (flash SDPA + liger fused-CE + bnb paged-8bit-AdamW +
 `max_split_size_mb:128`; see [`POST_4096_ROADMAP_RESEARCH.md`](POST_4096_ROADMAP_RESEARCH.md) and
-`examples/wbg/README.md`). This is exploratory/product evidence: real offload paths remain unverified and
+`examples/wbg/README.md`). The **product** lineage has since reproduced this end to end (2026-07-30) on a
+`HARDWARE_VERIFIED` `backend-corpus-studio-flash-liger-paged-v9-product` env built from the sealed v9
+**product** wheel (`45bdd989`): the WBG after-r8 run measured `NATIVE_TIGHT` (peak ~11.4 GB, loss 0.65) and
+its held-out eval scored **27/27 = 100% complete-JSON** (bit-identical reproducible, zero train/test
+leakage; run `run-019fb083`, see `docs/HOST_STATE.md`). This is exploratory/product evidence: real offload paths remain unverified and
 the sealed IEEE ladder (e.g. the v8 math-2048 OOM cell) stands unchanged.
 The post-v1.3 additions reconciled below include the **reasoning-traces** data loop, a dataset
 **truncation guardrail** +

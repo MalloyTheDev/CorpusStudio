@@ -1,6 +1,10 @@
 # CorpusStudio — Session Handoff
 
-**Last updated:** 2026-07-29 (**repo re-centered on the product; the 2026-07-18 engine hardening
+**Last updated:** 2026-07-30 - Training Systems P0d merged (#745) and the v9 PRODUCT lineage validated
+end to end (WBG seq-4096, `NATIVE_TIGHT`, 27/27 = 100% held-out eval, reproducible, zero train/test
+leakage); details in the §7 2026-07-30 update, `docs/HOST_STATE.md`, and `examples/wbg/README.md`.
+
+**Prior (2026-07-29):** (**repo re-centered on the product; the 2026-07-18 engine hardening
 cluster is cleared**). The bounded autonomous engineering loop that was built here (#702-#721) was
 **extracted to a separate private repo, `cs-loop`** (#729, -12.3k lines). What stays here is the
 product (engine + `apps/web`), the **assurance plane** (`scripts/assurance/`, `cs_assure` - the repo's
@@ -384,6 +388,18 @@ regeneration drift checks) and Python CodeQL.
 
 ## 7. Immediate next actions (ranked)
 
+> **2026-07-30 update:** Training Systems P0 shipped through **P0d** (#481/#482/#483/#484 -> merged as
+> #745): `SupportLevel`, `TrainingPlan` composition, FrameworkBackend/OrchestratorAdapter + a wired
+> backend-security gate, and backend-scoped execution variants of the ONE canonical harness - the sealed
+> SFT `ResolvedExecutionConfiguration` stays byte-identical (its regression guard was made
+> environment-invariant so the env-captured provenance can't break CI). The **v9 PRODUCT lineage** was
+> then validated end to end: a `HARDWARE_VERIFIED` `...-flash-liger-paged-v9-product` env (sealed product
+> wheel `45bdd989`) trained the WBG after-r8 adapter at seq-4096 (`NATIVE_TIGHT`, peak ~11.4 GB, loss
+> 3.19->0.65) and its held-out eval scored **27/27 = 100% complete-JSON**, bit-identical reproducible,
+> zero train/test leakage (exploratory/product - see the lead + `examples/wbg/README.md`,
+> `docs/HOST_STATE.md`). Still open: web client #513 (wire `platform-run` + live RunEvent stream), then
+> the rest of (b)/(c) below.
+>
 > **2026-07-29 status:** items 1-4 below are HISTORICAL. The v5 -> v9 GPU bring-up ladder is complete
 > (v9 trained 7B QLoRA at seq 4096, exploratory - see the lead) and the 2026-07-18 engine hardening
 > cluster is merged (#731-#736, see the top block). **Current next actions:** (a) doc-truth

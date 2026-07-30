@@ -61,6 +61,31 @@ per-example reports, caveats) under `runs/wbg-after-seq4096/eval-closeout/`.
 after-r8 were reproducible (27/27 per-example). This is exploratory/product evidence, not a sealed research
 result.
 
+### v9 PRODUCT-lineage reproduction (2026-07-30)
+
+The 2026-07-19 "after" above ran on a **research** env (`...-research-flash-liger-paged-v9c`). To give the
+**product** lineage its own end-to-end evidence, the exact after-r8 recipe was re-run on a freshly created
+**product** environment (`backend-corpus-studio-flash-liger-paged-v9-product`, `HARDWARE_VERIFIED`) built
+from the sealed v9 **product** wheel (`corpus_studio_engine-1.3.0`, sha `45bdd989`, source `7ae4ea6`). Same
+corpus/split (`train.jsonl` 469, sha `bb0bbf21`), same `r=8, alpha=16`, 3 epochs, `lr=2e-4`, `seed=42`,
+seq-4096, flash SDPA + liger fused-CE + paged-8bit-AdamW + `max_split_size_mb:128`. The only difference
+from the research run: the product recipe floats `liger-kernel` (`>=0.3.0`), which resolved to `0.8.1` here
+vs `0.8.0` there; every training hyperparameter was byte-identical.
+
+- **Training**: `state=succeeded`, measured fit **`NATIVE_TIGHT`** (peak ~11.4 GB of 12.3 GB, **zero
+  spill**), 177 optimizer steps / 3 epochs, loss **3.19 -> 0.65**, ~70 min, GPU util mean ~98%.
+  Real-training proven (trainable-state hash changed across 392 tensors). Run identity `study_id=null` -
+  a product run, not a sealed IEEE cell.
+- **Eval** (same held-out test split, harness, seed): **27/27 = 100.0%** complete-JSON, **bit-identical
+  across two greedy passes** (per-example reproducible), on data with **zero train/test overlap**
+  (verified: the 469/26/27 splits are disjoint and reconstruct the 522-row corpus exactly). Matches and
+  slightly exceeds the research after-r8 (26/27); the extra example is consistent with the marginally
+  lower final loss.
+- **Honest scope**: the 100% is **structural completeness / no truncation** (the deliverable), not content
+  identity - on the 4 optional-content keys the outputs match the gold **98/108**, the divergences mostly
+  `canonNotes` (where the gold sometimes holds info the model cannot infer). Exploratory/product evidence;
+  the ~77 MB adapter is not committed. Evidence under `runs/wbg-after-seq4096-v9product/`.
+
 ## The base model — NOT in the repo
 `Qwen/Qwen2.5-7B-Instruct` is ~15 GB (individual shards > GitHub's 100 MB/file limit), so it is **not**
 committed. It re-downloads automatically:
