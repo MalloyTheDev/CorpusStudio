@@ -115,6 +115,69 @@ class SchemaConformanceScorer:
         return ScoreResult(score=100.0)
 
 
+_MISSING = object()
+
+
+def _is_empty_content(value: object) -> bool:
+    """A value carries no content when it is absent, null, blank text, or an empty list/dict/tuple.
+    Numbers and booleans ARE content. Used for empty/non-empty parity: does the model fill a field
+    exactly when the reference does?"""
+    if value is _MISSING or value is None:
+        return True
+    if isinstance(value, str):
+        return not value.strip()
+    if isinstance(value, (list, dict, tuple)):
+        return len(value) == 0
+    return False
+
+
+class ContentFidelityScorer:
+    """Structured-output CONTENT-fidelity scorer (``metric="content_fidelity"``): given the JSON
+    reference (the expected output) and the model's JSON output, what fraction of the reference's keys
+    does the model reproduce with the right CONTENT? Reported ALONGSIDE - never replacing -
+    schema_conformance/completeness. A structurally complete output whose optional fields are empty
+    where the reference has content scores 100% complete but LOW fidelity; this dimension surfaces that,
+    so a degenerate always-empty-optional output cannot be mistaken for "content-correct".
+
+    Per reference key, agreement is EMPTY/NON-EMPTY parity by default (does the model fill a field
+    exactly when the reference does? - an absent key counts as empty); ``exact_match`` instead requires
+    the values to be equal. The per-example score is the mean per-key agreement * 100 (a field-level
+    match rate), so the report's ``average_score`` IS the fidelity rate.
+
+    Honesty (evaluation-honesty rule): an unparseable / absent MODEL output is a measured 0 with a typed
+    reason (the model delivered no content - a real measurement). An unparseable or empty REFERENCE
+    cannot anchor a fidelity measurement and is NOT a model miss; it raises ``ValueError`` so the
+    evaluator isolates it as an (excluded) ``scorer_error`` rather than fabricating a 0 or a 100.
+    """
+
+    metric = "content_fidelity"
+
+    def __init__(self, *, exact_match: bool = False) -> None:
+        self._exact_match = exact_match
+
+    def score(self, prompt: str, expected: str, actual: str) -> ScoreResult:
+        reference, ref_reason = _extract_json_object(expected)
+        if reference is None:
+            raise ValueError(f"content_fidelity reference is not one JSON object ({ref_reason})")
+        if not reference:
+            raise ValueError("content_fidelity reference has no keys to compare against")
+        obj, reason = _extract_json_object(actual)
+        if obj is None:
+            return ScoreResult(score=0.0, rationale=reason)
+        mismatched: list[str] = []
+        for key, ref_value in reference.items():
+            model_value = obj.get(key, _MISSING)
+            if self._exact_match:
+                agree = model_value is not _MISSING and model_value == ref_value
+            else:
+                agree = _is_empty_content(model_value) == _is_empty_content(ref_value)
+            if not agree:
+                mismatched.append(key)
+        rate = round(100.0 * (len(reference) - len(mismatched)) / len(reference), 2)
+        rationale = None if not mismatched else "field_mismatch: " + ",".join(sorted(mismatched)[:8])
+        return ScoreResult(score=rate, rationale=rationale)
+
+
 def build_eval_judge_prompt(prompt: str, expected: str, actual: str) -> str:
     """Prompt asking an evaluator model to score one answer 0-100 vs a reference."""
 

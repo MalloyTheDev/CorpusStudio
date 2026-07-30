@@ -410,6 +410,41 @@ def test_eval_run_output_schema_and_judge_model_are_mutually_exclusive(tmp_path:
     assert "mutually exclusive" in result.output
 
 
+def test_eval_run_content_fidelity_flag_is_wired_and_scores_field_parity(tmp_path: Path, monkeypatch):
+    # #749: --content-fidelity must be reachable and select the content_fidelity scorer. Reference fills
+    # two keys; the model reproduces one and empties the other -> field-parity rate 50 (not 100).
+    reference = json.dumps({"title": "The Grove", "canonNotes": "old growth"})
+    model_output = json.dumps({"title": "The Grove", "canonNotes": ""})
+    input_path = tmp_path / "instruction.jsonl"
+    write_rows(input_path, [{"instruction": "x", "input": "", "output": reference, "tags": ["t"]}])
+
+    class FakeBackend:
+        def generate(self, request):
+            return BackendGenerateResponse(text=model_output, model_name="fake")
+
+    monkeypatch.setattr(cli, "_build_backend", lambda **_: FakeBackend())
+    result = runner.invoke(
+        app, ["eval-run", str(input_path), "instruction", "--model", "m", "--content-fidelity"]
+    )
+    assert result.exit_code == 0, result.output
+    report = json.loads(result.output)
+    assert report["metric"] == "content_fidelity"
+    assert report["average_score"] == 50.0  # title agrees, canonNotes under-filled
+
+
+def test_eval_run_content_fidelity_and_output_schema_are_mutually_exclusive(tmp_path: Path, monkeypatch):
+    input_path = tmp_path / "instruction.jsonl"
+    write_rows(input_path, [{"instruction": "x", "input": "", "output": "y", "tags": ["t"]}])
+    monkeypatch.setattr(cli, "_build_backend", lambda **_: object())
+    result = runner.invoke(
+        app,
+        ["eval-run", str(input_path), "instruction", "--model", "m",
+         "--content-fidelity", "--output-schema", "airesult"],
+    )
+    assert result.exit_code == 1
+    assert "mutually exclusive" in result.output
+
+
 def test_eval_run_with_judge_model_uses_llm_judge_metric(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
