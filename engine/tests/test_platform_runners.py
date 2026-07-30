@@ -1391,6 +1391,17 @@ def test_stale_objective_hash_is_refused_before_trainer_invocation(monkeypatch):
     assert called is False
 
 
+def test_classify_progress_name_stages_notes_and_typos():
+    # #752: precision_verified is emitted by the trainer but is NOT a typed StageMarker (the enum is
+    # pinned by the sealed research matrix). It must be a DELIBERATE log note, while an unexpected/typo'd
+    # name is surfaced as unrecognized rather than silently normalized into the progress stream.
+    from corpus_studio.platform.runners import _classify_progress_name
+
+    assert _classify_progress_name("export") == (StageMarker.export, False)  # a typed stage
+    assert _classify_progress_name("precision_verified") == (None, True)  # a deliberate sub-stage note
+    assert _classify_progress_name("definitely_a_typo") == (None, False)  # a bug, surfaced not swallowed
+
+
 # ---- reload_verified (#747): reload the exported adapter and assert equivalence --------------------
 
 

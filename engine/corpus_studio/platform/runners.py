@@ -134,6 +134,23 @@ def _reload_verify_adapter(adapter_dir: str, expected_after_sha256: str) -> tupl
     return True, None
 
 
+# Progress names the first-party trainer emits that are DELIBERATE sub-stage NOTES, not typed stages:
+# they are logged, never promoted onto the enum-bound StageMarker spine (which the sealed IEEE research
+# matrix pins exactly, so a new typed stage would need an amendment). Listed explicitly so an
+# UNRECOGNIZED name is treated as a trainer bug and surfaced, rather than silently normalized (#752).
+_INTENTIONAL_PROGRESS_NOTES = frozenset({"precision_verified"})
+
+
+def _classify_progress_name(name: str) -> tuple[StageMarker | None, bool]:
+    """Map a trainer progress name to ``(marker, is_intentional_note)``: a typed ``StageMarker`` gives
+    ``(marker, False)``; a known intentional sub-stage note gives ``(None, True)``; anything else gives
+    ``(None, False)`` so an unexpected/typo'd name surfaces instead of being silently logged as progress."""
+    try:
+        return StageMarker(name), False
+    except ValueError:
+        return None, name in _INTENTIONAL_PROGRESS_NOTES
+
+
 class TrainingRunner:
     """Executes a real training run through ``training.trainer.run_training`` under the supervisor.
 
@@ -322,10 +339,13 @@ class TrainingRunner:
             # the subprocess supervisor's silence timer. Real progress, not a liveness heartbeat.
             watchdog.beat()
             nonlocal last_stage
-            try:
-                marker = StageMarker(name)
-            except ValueError:
-                ctx.emit_log(f"{name}: {message}")
+            marker, intentional_note = _classify_progress_name(name)
+            if marker is None:
+                # Not a typed stage -> emit a LOG. A known intentional sub-stage note (precision_verified)
+                # is deliberate; an unrecognized name is a trainer bug, marked so a typo surfaces rather
+                # than being silently normalized into the progress stream (#752).
+                prefix = "" if intentional_note else "unrecognized progress stage "
+                ctx.emit_log(f"{prefix}{name}: {message}")
                 return
             last_stage = marker
             ctx.emit_stage(marker, message)
