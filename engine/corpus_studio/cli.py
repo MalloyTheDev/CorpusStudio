@@ -40,7 +40,12 @@ from corpus_studio.evaluation.evaluator import (
     run_evaluation,
     should_report_progress,
 )
-from corpus_studio.evaluation.scorers import LlmJudgeScorer, SchemaConformanceScorer, Scorer
+from corpus_studio.evaluation.scorers import (
+    ContentFidelityScorer,
+    LlmJudgeScorer,
+    SchemaConformanceScorer,
+    Scorer,
+)
 from corpus_studio.exporters.cleaning import clean_rows
 from corpus_studio.exporters.redaction import redact_rows
 from corpus_studio.exporters.jsonl_exporter import export_jsonl, write_jsonl
@@ -3636,7 +3641,17 @@ def eval_run(
         "--output-schema",
         help="Score STRUCTURED-OUTPUT conformance (metric=schema_conformance): each answer must be one "
         "JSON object carrying every required key of this builtin schema (e.g. airesult); average_score is "
-        "the conformance rate. Mutually exclusive with --judge-model.",
+        "the conformance rate. Mutually exclusive with --content-fidelity / --judge-model.",
+    ),
+    content_fidelity: bool = typer.Option(
+        False,
+        "--content-fidelity",
+        help="Score STRUCTURED-OUTPUT content fidelity (metric=content_fidelity): per reference key, "
+        "does the model output agree with the reference on empty vs non-empty? average_score is the "
+        "field-level match rate. A SEPARATE, complementary pass to schema_conformance (one scorer per "
+        "run - run each as its own eval), it surfaces a structurally complete but all-empty-optional "
+        "output that schema_conformance alone scores 100. Mutually exclusive with --output-schema / "
+        "--judge-model.",
     ),
     judge_model: Optional[str] = typer.Option(
         None,
@@ -3685,9 +3700,11 @@ def eval_run(
         raise typer.Exit(code=1) from exc
 
     scorer: Scorer | None = None
-    if output_schema is not None and judge_model is not None:
+    if [output_schema is not None, content_fidelity, judge_model is not None].count(True) > 1:
         typer.echo(
-            "--output-schema and --judge-model are mutually exclusive (one scorer per run).", err=True
+            "--output-schema, --content-fidelity, and --judge-model are mutually exclusive "
+            "(one scorer per run).",
+            err=True,
         )
         raise typer.Exit(code=1)
     if output_schema is not None:
@@ -3696,6 +3713,8 @@ def eval_run(
         except ValueError as exc:
             typer.echo(str(exc), err=True)
             raise typer.Exit(code=1) from exc
+    elif content_fidelity:
+        scorer = ContentFidelityScorer()
     elif judge_model is not None:
         judge_provider = infer_provider_id(judge_backend, judge_base_url)
         judge_route = judge_model if judge_provider == "openrouter" else None
