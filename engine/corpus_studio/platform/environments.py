@@ -205,6 +205,53 @@ def builtin_recipes() -> list[EnvironmentRecipe]:
             ],
         ),
         EnvironmentRecipe(
+            recipe_id="backend-corpus-studio-verified",
+            display_name="Backend: CorpusStudio (verified - pinned + hash-verified worker)",
+            layer=DependencyLayer.backend_worker,
+            description="Pinned, hash-verified CorpusStudio worker for reproducible product training - "
+            "the VERIFIED tier: exact-pinned deps + a pinned worker wheel + generic build provenance, but "
+            "no reviewed research floor, reserved identity, amendment, or matrix cell.",
+            target="corpus_studio",
+            python_requires=">=3.12",
+            default_index_url=PYPI_INDEX_URL,
+            dependency_requirements=[
+                DependencyRequirement(name="pydantic", specifier="==2.13.4", reason="worker contracts"),
+                DependencyRequirement(name="typer", specifier="==0.26.8", reason="worker CLI"),
+                DependencyRequirement(name="orjson", specifier="==3.11.9", reason="engine runtime"),
+                DependencyRequirement(name="torch", specifier="==2.11.0+cu128"),
+                DependencyRequirement(name="transformers", specifier="==5.13.1"),
+                DependencyRequirement(name="peft", specifier="==0.19.1"),
+                DependencyRequirement(name="trl", specifier="==1.8.0"),
+                DependencyRequirement(name="accelerate", specifier="==1.14.0"),
+                DependencyRequirement(name="datasets", specifier="==5.0.0"),
+                DependencyRequirement(name="bitsandbytes", specifier="==0.49.2"),
+                DependencyRequirement(name="safetensors", specifier="==0.8.0"),
+                DependencyRequirement(name="tokenizers", specifier="==0.22.2"),
+            ],
+            cuda_index_urls={"cu128": PYTORCH_INDEX_URLS["cu128"]},
+            requires_cuda=True,
+            min_compute_capability="12.0",
+            supported_os=[OperatingSystem.linux],
+            capability_probes=[
+                "gpu_responsive",
+                "cuda_available",
+                "bf16_matmul",
+                "bnb_4bit_load",
+                "trainer_contract",
+            ],
+            assurance_tier=AssuranceTier.verified,
+            requires_worker_wheel=True,
+            bootstrap_pip_version="26.1.2",
+            verification=RecipeVerification.declared,
+            notes=[
+                "Plan-only until a separately authorized environment creation.",
+                "VERIFIED tier: exact-pinned deps + a pinned, hash-verified worker wheel + generic build "
+                "provenance. Unlike the readiness recipes it carries NO reviewed git floor, reserved "
+                "identity, amendment, or matrix cell (that is SEALED_RESEARCH); it resolves floor-free "
+                "and relies on the standard capability probes, not a sealed workload-verified tuple.",
+            ],
+        ),
+        EnvironmentRecipe(
             recipe_id=READINESS_V2_RECIPE_ID,
             display_name="Backend: CorpusStudio readiness v2 (exact QLoRA tuple)",
             layer=DependencyLayer.backend_worker,

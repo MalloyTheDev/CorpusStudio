@@ -67,11 +67,12 @@ tier itself. Concretely:
 - A run is **SEALED_RESEARCH** only when it is *additionally* bound to the paper's amendment, effective
   matrix, reserved identities, matrix cell, and study-evidence requirements (still only in `research/`).
 
-The **VERIFIED tier now resolves as a distinct plan-time mode** (#492): a `verified` worker-wheel recipe
-is pinned + provenance-admitted but resolves with **no** reviewed git floor, and a floor / source-commit
-handed to it is refused. Two pieces remain **follow-ups**: no *builtin product* recipe ships at the
-VERIFIED tier yet, and the env-CREATE admission gate still *always* requires an embedded floor in the
-wheel, so building + admitting a verified wheel end to end is not yet wired. See "Known gaps" below.
+The **VERIFIED tier is wired end to end** (#492): a `verified` worker-wheel recipe resolves with **no**
+reviewed git floor (a floor / source-commit handed to it is refused), `backend-corpus-studio-verified`
+ships as a built-in VERIFIED product recipe, and the sealed-wheel admission gate admits its
+self-attesting wheel with no reviewed floor to match. The always-embedded-floor guarantee still holds;
+actually creating the env additionally needs the pinned wheel built + a hardware run, like any
+worker-wheel recipe. See the status list below.
 
 ## Product (STANDARD) must never require
 
@@ -136,11 +137,14 @@ remains:
    `sealed_research`) is chosen directly rather than inferred from `requires_worker_wheel`, with a
    validator enforcing tier <-> pinned-wheel consistency; the reviewed git floor keys on
    `sealed_research`, not the worker-wheel mechanism.
-2. **VERIFIED tier - PLAN-PATH DONE (#492).** A `verified` worker-wheel recipe resolves floor-free
-   (pinned + provenance-admitted, no reviewed floor). **Remaining:** no built-in *product* recipe ships
-   at VERIFIED yet, and the env-CREATE admission gate still always requires an embedded floor in the
-   wheel, so building + admitting a verified wheel end to end is not wired. Today `backend-corpus-studio`
-   still uses loose version ranges.
+2. **VERIFIED tier - DONE end to end (#492 plan; recipe + admission wired here).**
+   `backend-corpus-studio-verified` ships as a built-in VERIFIED product recipe: it resolves floor-free
+   (no reviewed floor) and the sealed-wheel admission gate admits its self-attesting
+   (embedded-provenance) wheel with no reviewed floor to match - so a verified env is wired end to end
+   (plan + admission). It relies on the standard capability probes, not a sealed workload-verified tuple.
+   The always-embedded-floor guarantee still holds (a verified wheel is still a properly-built,
+   self-attesting wheel); creating the env additionally needs that wheel built + a hardware run, like any
+   worker-wheel recipe.
 3. **De-research the shared vocabulary - DONE (#493).** The general admission gate was renamed
    `validate_wheel_provenance_for_scientific_admission` -> `..._for_sealed_admission`, and "scientific"
    was scrubbed from the general Environment-Manager / build-provenance comments (sealed environment /

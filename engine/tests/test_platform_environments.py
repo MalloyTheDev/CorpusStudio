@@ -922,16 +922,38 @@ def _verified_recipe(**overrides) -> EnvironmentRecipe:
     return EnvironmentRecipe(**kwargs)
 
 
-def test_builtin_recipe_tiers_are_standard_or_sealed_research():
-    # backend-corpus-studio (loose product) is STANDARD; every worker-wheel readiness recipe is
-    # SEALED_RESEARCH (behavior-preserving - they keep demanding the reviewed floor).
+def test_builtin_recipe_tiers_are_consistent():
+    # backend-corpus-studio (loose product) is STANDARD; backend-corpus-studio-verified is VERIFIED
+    # (pinned wheel, no reviewed floor); every worker-wheel readiness recipe is SEALED_RESEARCH.
     tiers = {r.recipe_id: r.assurance_tier for r in builtin_recipes()}
     assert tiers["backend-corpus-studio"] == AssuranceTier.standard
+    assert tiers["backend-corpus-studio-verified"] == AssuranceTier.verified
+    # A worker wheel iff the tier is not standard (the recipe validator enforces the pairing); every
+    # worker-wheel builtin is either the VERIFIED product recipe or a SEALED_RESEARCH readiness recipe.
     for recipe in builtin_recipes():
-        expected = (
-            AssuranceTier.sealed_research if recipe.requires_worker_wheel else AssuranceTier.standard
-        )
-        assert recipe.assurance_tier == expected, recipe.recipe_id
+        if recipe.requires_worker_wheel:
+            assert recipe.assurance_tier in {
+                AssuranceTier.verified,
+                AssuranceTier.sealed_research,
+            }, recipe.recipe_id
+        else:
+            assert recipe.assurance_tier == AssuranceTier.standard, recipe.recipe_id
+
+
+def test_builtin_verified_recipe_resolves_floor_free():
+    # The shipped VERIFIED product recipe resolves with NO reviewed git floor (that is sealed_research
+    # only) - the plan half of an end-to-end verified run; the sealed-wheel admission gate accepts its
+    # wheel with no expected floor (see test_build_provenance).
+    recipe = get_recipe("backend-corpus-studio-verified")
+    assert recipe is not None
+    assert recipe.assurance_tier == AssuranceTier.verified and recipe.requires_worker_wheel
+    assert recipe.required_execution_probe is None  # verified relies on capability probes, not a tuple
+    resolution = resolve_dependencies(
+        recipe, os_value=OperatingSystem.linux, accelerator_tag="cu128", python_version="3.12"
+    )
+    assert resolution.resolvable is True
+    assert resolution.required_git_ancestor is None
+    assert not any("required-git-ancestor" in r for r in resolution.blocking_reasons)
 
 
 def test_tier_and_worker_wheel_must_agree():
