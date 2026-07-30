@@ -79,7 +79,22 @@ gate.
   #513). This is **already built** and has no prototype screen; it spans Training Studio (run
   management), Environment & Hardware (capability), and Evidence & Experiments (telemetry).
 
-## 5. Using this map
+## 5. Per-area view
+
+The same mapping, grouped by destination area - scan this to see what lands where:
+
+- **Data Studio** - the largest reuse surface: Writing Studio, Examples, Import & Quarantine,
+  Preference Review, Quality, Dataset Debt, Splits (all reuse), plus the dataset half of Versions.
+- **Training Studio** - Training (adapt, un-gated) + the net-new Platform run-lifecycle surface
+  (`PlatformView`).
+- **Evaluation Studio** - Evaluation, Model Arena, Suites (reuse, un-gated).
+- **Behavior Lab** - net-new, gated.
+- **Model & Release Studio** - Artifacts (adapt, re-homed from Train).
+- **Environment & Hardware** - net-new area; seeded by the Platform view's Environment +
+  Proven-capabilities cards and the env-facing parts of Settings.
+- **Evidence & Experiments** - net-new area; seeded by the run/model half of Versions.
+
+## 6. Using this map
 
 - **Porting a screen that exists in Nocturne:** reuse its visual + interaction design, re-home it under
   its product area from the table above, and bind it to the live JSON-Schema contract in
