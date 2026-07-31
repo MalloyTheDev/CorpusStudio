@@ -102,6 +102,34 @@ def test_precheck_is_advisory_only():
     assert all(f.severity in {"info", "warning"} for f in findings)  # never 'block'
 
 
+def test_precheck_surfaces_the_backend_tuple_support():
+    # #485 wired into the pre-check: the proven first-party tuple (pytorch x corpus_studio) draws NO
+    # tuple finding, but a merely config-generation tuple is flagged (info) - proving another tuple
+    # never implies this one.
+    proven = {f.code for f in training_plan_precheck(_training_plan())}
+    assert "backend_tuple_not_workload_verified" not in proven
+    assert "backend_tuple_unresolvable" not in proven
+    unsloth = TrainingPlan(
+        plan_intent_id="i",
+        composition=TrainingPlanComposition(objective_id="o", orchestrator="unsloth"),
+        parameters=_params(backend="unsloth"),
+    )
+    findings = {f.code: f.severity for f in training_plan_precheck(unsloth)}
+    assert findings.get("backend_tuple_not_workload_verified") == "info"
+
+
+def test_precheck_flags_an_unresolvable_backend_tuple():
+    # corpus_studio binds pytorch, not jax -> the framework x orchestrator tuple is unresolvable.
+    mismatch = TrainingPlan(
+        plan_intent_id="i",
+        composition=TrainingPlanComposition(
+            objective_id="o", framework="jax", orchestrator="corpus_studio"
+        ),
+        parameters=_params(),
+    )
+    assert "backend_tuple_unresolvable" in {f.code for f in training_plan_precheck(mismatch)}
+
+
 def test_resolution_attaches_precheck_findings_without_blocking():
     profile, caps = _profile(cc_major=12), _report()
     plan = _training_plan()
