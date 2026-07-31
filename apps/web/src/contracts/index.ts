@@ -20,6 +20,7 @@ export type { ModelDescriptor } from "./ModelDescriptor";
 export type { ObjectiveCompatibilityReport } from "./ObjectiveCompatibilityReport";
 export type { OrchestratorAdapter } from "./OrchestratorAdapter";
 export type { ParameterAccountingReport } from "./ParameterAccountingReport";
+export type { PretrainingDataPolicy } from "./PretrainingDataPolicy";
 export type { ProjectManifest } from "./ProjectManifest";
 export type { PythonRuntime } from "./PythonRuntime";
 export type { ResolvedExecutionConfiguration } from "./ResolvedExecutionConfiguration";

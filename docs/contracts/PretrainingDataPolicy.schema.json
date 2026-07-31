@@ -1,0 +1,136 @@
+{
+  "$defs": {
+    "PretrainingShard": {
+      "additionalProperties": false,
+      "description": "One content-hashed corpus shard in a :class:`PretrainingDataPolicy`: a stable id + location, its\nrow and token counts, its sha256, and the mixture source it belongs to. The token count feeds the\ntoken budget; the sha256 pins the exact bytes so a resumed stream reads the same shard.",
+      "properties": {
+        "content_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Content Sha256",
+          "type": "string"
+        },
+        "location": {
+          "minLength": 1,
+          "title": "Location",
+          "type": "string"
+        },
+        "row_count": {
+          "minimum": 0,
+          "title": "Row Count",
+          "type": "integer"
+        },
+        "shard_id": {
+          "minLength": 1,
+          "title": "Shard Id",
+          "type": "string"
+        },
+        "source": {
+          "default": "",
+          "title": "Source",
+          "type": "string"
+        },
+        "token_count": {
+          "minimum": 0,
+          "title": "Token Count",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "shard_id",
+        "location",
+        "row_count",
+        "token_count",
+        "content_sha256"
+      ],
+      "title": "PretrainingShard",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Additive, dense/MoE-safe pretraining data policy (#487), PARALLEL to the SFT-only\n``TrainingDataPolicy`` - never reuse the SFT contract for a sharded / streamed / mixture-weighted\ncorpus. It declares a content-hashed shard set, streaming, per-source mixture weights, document\nboundaries, pretraining packing, a seeded deterministic global order, and a stop condition (token\nbudget and/or epochs) so a run stops at the budget and never silently truncates. The runtime\nper-rank data cursor + streaming resume is a separate (worker) slice.",
+  "properties": {
+    "contract_version": {
+      "const": "1.0.0",
+      "default": "1.0.0",
+      "title": "Contract Version",
+      "type": "string"
+    },
+    "data_seed": {
+      "minimum": 0,
+      "title": "Data Seed",
+      "type": "integer"
+    },
+    "document_boundaries": {
+      "default": true,
+      "title": "Document Boundaries",
+      "type": "boolean"
+    },
+    "epochs": {
+      "anyOf": [
+        {
+          "minimum": 1,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Epochs"
+    },
+    "global_batch_size": {
+      "minimum": 1,
+      "title": "Global Batch Size",
+      "type": "integer"
+    },
+    "mixture_weights": {
+      "additionalProperties": {
+        "type": "number"
+      },
+      "title": "Mixture Weights",
+      "type": "object"
+    },
+    "packing": {
+      "default": "concat_and_split",
+      "enum": [
+        "none",
+        "concat_and_split",
+        "best_fit"
+      ],
+      "title": "Packing",
+      "type": "string"
+    },
+    "shards": {
+      "items": {
+        "$ref": "#/$defs/PretrainingShard"
+      },
+      "title": "Shards",
+      "type": "array"
+    },
+    "streaming": {
+      "default": true,
+      "title": "Streaming",
+      "type": "boolean"
+    },
+    "token_budget": {
+      "anyOf": [
+        {
+          "minimum": 1,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Token Budget"
+    }
+  },
+  "required": [
+    "shards",
+    "data_seed",
+    "global_batch_size"
+  ],
+  "title": "PretrainingDataPolicy",
+  "type": "object"
+}
