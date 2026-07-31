@@ -4411,6 +4411,7 @@ def training_run_update(
     run_id: str = typer.Option(..., "--run-id", help="Run to update."),
     status: Optional[str] = typer.Option(None, "--status", help="New status."),
     exit_code: Optional[int] = typer.Option(None, "--exit-code"),
+    before_eval_path: Optional[str] = typer.Option(None, "--before-eval-path"),
     after_eval_path: Optional[str] = typer.Option(None, "--after-eval-path"),
     after_eval_model: Optional[str] = typer.Option(None, "--after-eval-model"),
 ):
@@ -4439,6 +4440,8 @@ def training_run_update(
         updates["status"] = status
     if exit_code is not None:
         updates["exit_code"] = exit_code
+    if before_eval_path is not None:
+        updates["before_eval_path"] = before_eval_path
     if after_eval_path is not None:
         updates["after_eval_path"] = after_eval_path
     if after_eval_model is not None:

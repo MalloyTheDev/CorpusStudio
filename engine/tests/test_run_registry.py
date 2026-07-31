@@ -120,6 +120,28 @@ def test_cli_training_run_list_and_update(tmp_path: Path):
     assert payload["exit_code"] == 0
 
 
+def test_cli_update_writes_both_eval_links(tmp_path: Path):
+    # S4b: before_eval_path is READ by the model-card before/after diff and the promote gate, but
+    # training-run-update only wrote the 'after' side - so a diff could never show a baseline. Both
+    # sides now write symmetrically (the 'before' model is the base_model, so no before-eval-model).
+    save_run_record(tmp_path, _record("20260702T180000-a", status="running", pid=1))
+    result = runner.invoke(
+        app,
+        [
+            "training-run-update", str(tmp_path), "--run-id", "20260702T180000-a",
+            "--before-eval-path", "eval/before.json", "--after-eval-path", "eval/after.json",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["before_eval_path"] == "eval/before.json"
+    assert payload["after_eval_path"] == "eval/after.json"
+    # Persisted to the record, not merely echoed.
+    persisted = load_run_record(record_path(tmp_path, "20260702T180000-a"))
+    assert persisted.before_eval_path == "eval/before.json"
+    assert persisted.after_eval_path == "eval/after.json"
+
+
 def test_save_rejects_invalid_run_id(tmp_path: Path):
     # A run_id with a path separator/space would slug-collide with others.
     with pytest.raises(ValueError):
