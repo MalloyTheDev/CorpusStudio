@@ -235,11 +235,16 @@ def training_plan_precheck(training_plan: TrainingPlan) -> list[TrainingPlanComp
     # value is NOT contract-validated (the enum dimensions are; the framework x orchestrator tuple is
     # checked above). A selected value that names no registry entry is a silent no-op today - surface it
     # so a typo is not mistaken for a real, evidence-selected selection. Advisory, like every finding.
-    for field in ("evaluation_profile", "preset"):
+    # The (field, registry) pairs are explicit - the field <-> registry coupling is visible here rather
+    # than routed through a THIN_REGISTRIES lookup that could KeyError if the registry map is refactored.
+    for field, registry in (
+        ("evaluation_profile", evaluation_profile_registry),
+        ("preset", training_preset_registry),
+    ):
         selected = getattr(comp, field)
         if selected is None:
             continue
-        known = {entry.name for entry in THIN_REGISTRIES[field]()}
+        known = {entry.name for entry in registry()}
         if selected not in known:
             findings.append(
                 TrainingPlanCompatibilityFinding(
