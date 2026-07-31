@@ -416,8 +416,8 @@ regeneration drift checks) and Python CodeQL.
 >   gap); a Nocturne -> 7-product-area IA reconciliation seeds the client port (`docs/design/`).
 >
 > **Honest state of the backlog:** the clean, no-design-call control-plane fruit is essentially
-> exhausted. The next genuinely high-value work needs a maintainer decision or hardware auth - do NOT
-> grind further micro-fixes:
+> exhausted. The next genuinely high-value work needs a maintainer decision or hardware auth, not
+> further low-value micro-fixes:
 > 1. **[needs a design steer] Eval-artifact linkage (S4c).** Eval evidence is ALREADY indirectly
 >    reachable (`ArtifactManifest.parameter_accounting_ref` -> `ParameterAccountingReport.evaluation_refs`),
 >    so adding a DIRECT `ArtifactManifest.evaluation_ref` is a direct-vs-indirect design choice, not an
