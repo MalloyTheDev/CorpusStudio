@@ -1,5 +1,14 @@
 # CorpusStudio — Session Handoff
 
+**Last updated:** 2026-07-31 - a broad **control-plane hardening sweep** landed on top of the 2026-07-30
+v9 state: an enforced assurance-tier boundary (standard / verified / sealed_research), a fail-closed
+backend-tuple resolver wired into the TrainingPlan pre-check with the thin framework/orchestrator
+registries now DERIVED from one canonical source, additive dense/MoE-safe pretraining-data planning, a
+content-fidelity eval scorer, and the eval-publish S4b before-eval writer. **The clean, no-design-call
+control-plane fruit is now essentially exhausted** - the ranked §7 next actions need a maintainer design
+steer or hardware authorization, not more micro-fixes. Nothing this session changes the sealed IEEE
+ladder or the measured seq-4096 envelope.
+
 **Last updated:** 2026-07-30 - Training Systems P0d merged (#745) and the v9 PRODUCT lineage validated
 end to end (WBG seq-4096, `NATIVE_TIGHT`, 27/27 = 100% held-out eval, reproducible, zero train/test
 leakage); details in the §7 2026-07-30 update, `docs/HOST_STATE.md`, and `examples/wbg/README.md`.
@@ -387,6 +396,44 @@ regeneration drift checks) and Python CodeQL.
   flagged per role — the reason this migration off F: happened.
 
 ## 7. Immediate next actions (ranked)
+
+> **2026-07-31 update - control-plane hardening sweep (assurance / eval-publish / training-systems).**
+> A broad run of clean, CI-green, self-merged control-plane slices landed on top of the 2026-07-30 state:
+> - **Product/research boundary as an enforced control:** an explicit assurance-tier selector
+>   (standard / verified / sealed_research) with a VERIFIED tier proven end to end, and the shared
+>   Environment Manager naming de-researched (see `docs/PRODUCT_VS_RESEARCH.md`).
+> - **Training-systems composition (#485 / #487):** a fail-closed backend-tuple resolver
+>   (framework x orchestrator, support ladder + security posture) wired into the `TrainingPlan`
+>   pre-check; the thin framework/orchestrator registries now **derive from the canonical backend
+>   registry** (single source of truth - dropped the advertised-but-refused `torchtune`/`megatron`);
+>   the pre-check now surfaces an unknown `evaluation_profile` / `preset` selection (previously a
+>   silent no-op); and an additive, dense/MoE-safe pretraining data policy + deterministic shard order
+>   + control-plane token accounting.
+> - **Eval-publish:** a `content_fidelity` scorer alongside `schema_conformance`, and the **S4b
+>   before-eval writer** (`training-run-update --before-eval-path`) so a baseline eval can finally be
+>   recorded - the model-card before/after diff and the promote gate read it but nothing could write it.
+> - **CI / UI:** the web CI now compiles the Tauri Rust crate (closing the "broken `lib.rs` passes CI"
+>   gap); a Nocturne -> 7-product-area IA reconciliation seeds the client port (`docs/design/`).
+>
+> **Honest state of the backlog:** the clean, no-design-call control-plane fruit is essentially
+> exhausted. The next genuinely high-value work needs a maintainer decision or hardware auth, not
+> further low-value micro-fixes:
+> 1. **[needs a design steer] Eval-artifact linkage (S4c).** Eval evidence is ALREADY indirectly
+>    reachable (`ArtifactManifest.parameter_accounting_ref` -> `ParameterAccountingReport.evaluation_refs`),
+>    so adding a DIRECT `ArtifactManifest.evaluation_ref` is a direct-vs-indirect design choice, not an
+>    obvious gap. `ArtifactManifest` is NOT hash-sealed, so it is safe to add once the shape is chosen.
+> 2. **[needs a design steer] Preset EXPANSION (G7).** `composition.preset` / `objective_id` are
+>    capability-VIEW fields the resolver does not consume (the objective is derived from
+>    `adapter_method`). Making a preset actually expand into curated composition/parameter defaults
+>    defines product behavior, which the training-systems architecture gate reserves for review.
+> 3. **[needs hardware auth] Worker-gated slices.** Trainer checkpoint/resume (the #486 worker half -
+>    the control-plane `admit_resume` / `verify_resumable_into` / `checkpoint-verify` machinery already
+>    exists) and the pretraining per-rank streaming cursor (the #487 worker half) both need a v9 -> v10
+>    wheel rebuild + a measured GPU run.
+> 4. **[largest user-facing value] Web client #513** - wire `platform-run` + the live `RunEvent` stream
+>    into the Tauri client; parts touch CI workflows so they are not self-merge-eligible.
+>
+> The GPU / sealed-research / release / wheel-rebuild gates still require explicit human authorization.
 
 > **2026-07-30 update:** Training Systems P0 shipped through **P0d** (#481/#482/#483/#484 -> merged as
 > #745): `SupportLevel`, `TrainingPlan` composition, FrameworkBackend/OrchestratorAdapter + a wired
