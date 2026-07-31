@@ -8,7 +8,7 @@ reproducible from ``data_seed`` (the single-rank streaming-resume determinism ga
 import pytest
 
 from corpus_studio.platform.contracts import PretrainingDataPolicy, PretrainingShard
-from corpus_studio.platform.pretraining_data import deterministic_shard_order
+from corpus_studio.platform.pretraining_data import deterministic_shard_order, plan_pretraining_data
 
 
 def _shard(i: int, source: str = "web") -> PretrainingShard:
@@ -76,3 +76,31 @@ def test_deterministic_order_changes_with_the_seed():
     assert deterministic_shard_order(_policy(data_seed=1)) != deterministic_shard_order(
         _policy(data_seed=2)
     )
+
+
+def test_plan_accounts_for_tokens_and_the_realized_mixture():
+    policy = PretrainingDataPolicy(
+        shards=(_shard(0, "web"), _shard(1, "web"), _shard(2, "books")),  # 10k each
+        data_seed=1,
+        global_batch_size=4,
+        token_budget=15_000,
+    )
+    plan = plan_pretraining_data(policy)
+    assert plan.total_shard_tokens == 30_000
+    assert plan.per_source_tokens == {"web": 20_000, "books": 10_000}
+    assert plan.realized_mixture == {"web": pytest.approx(2 / 3), "books": pytest.approx(1 / 3)}
+
+
+def test_plan_reports_how_the_token_budget_lands_against_the_corpus():
+    # _policy() is 6 shards x 10k = 60k corpus tokens.
+    under = plan_pretraining_data(_policy(token_budget=15_000))
+    assert under.epochs_for_budget == pytest.approx(0.25) and not under.repeats_corpus
+    over = plan_pretraining_data(_policy(token_budget=120_000))
+    assert over.epochs_for_budget == pytest.approx(2.0) and over.repeats_corpus
+    exact = plan_pretraining_data(_policy(token_budget=60_000))  # budget == corpus: one pass, no repeat
+    assert exact.epochs_for_budget == pytest.approx(1.0) and not exact.repeats_corpus
+
+
+def test_plan_without_a_token_budget_reports_no_epoch_estimate():
+    plan = plan_pretraining_data(_policy(token_budget=None, epochs=3))
+    assert plan.token_budget is None and plan.epochs_for_budget is None and not plan.repeats_corpus

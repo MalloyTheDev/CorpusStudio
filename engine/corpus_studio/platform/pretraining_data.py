@@ -9,8 +9,48 @@ which the resume gate reproduces from ``data_seed``.
 from __future__ import annotations
 
 import hashlib
+from dataclasses import dataclass
 
 from corpus_studio.platform.contracts import PretrainingDataPolicy
+
+
+@dataclass(frozen=True)
+class PretrainingDataPlan:
+    """Control-plane accounting for a :class:`PretrainingDataPolicy` (#487): the corpus token total, the
+    per-source token split + the REALIZED mixture (the actual per-source proportions of the corpus,
+    which a declared ``mixture_weights`` may not match), and how the token budget lands against the
+    corpus (the number of epochs it implies, and whether it repeats the corpus - ``repeats_corpus`` is
+    True only when the budget STRICTLY exceeds the corpus, so a budget equal to the corpus is exactly
+    one pass, not a repeat). The budget is an explicit stop condition, never a silent truncation; this
+    reports how it lands so a run is sized honestly."""
+
+    total_shard_tokens: int
+    per_source_tokens: dict[str, int]
+    realized_mixture: dict[str, float]
+    token_budget: int | None
+    epochs_for_budget: float | None
+    repeats_corpus: bool
+
+
+def plan_pretraining_data(policy: PretrainingDataPolicy) -> PretrainingDataPlan:
+    """Account for a pretraining data policy WITHOUT running it: the total + per-source token counts,
+    the realized corpus mixture, and how ``token_budget`` lands (the epochs it implies; whether it
+    repeats the corpus). Pure + control-plane."""
+    per_source: dict[str, int] = {}
+    for shard in policy.shards:
+        per_source[shard.source] = per_source.get(shard.source, 0) + shard.token_count
+    total = sum(per_source.values())
+    realized = {source: tokens / total for source, tokens in per_source.items()} if total else {}
+    budget = policy.token_budget
+    epochs_for_budget = (budget / total) if (budget is not None and total) else None
+    return PretrainingDataPlan(
+        total_shard_tokens=total,
+        per_source_tokens=per_source,
+        realized_mixture=realized,
+        token_budget=budget,
+        epochs_for_budget=epochs_for_budget,
+        repeats_corpus=bool(budget is not None and total and budget > total),
+    )
 
 
 def deterministic_shard_order(policy: PretrainingDataPolicy) -> tuple[str, ...]:
