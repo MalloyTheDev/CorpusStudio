@@ -140,11 +140,13 @@ def test_framework_and_orchestrator_registries_derive_from_the_backend_registry(
     )
     from corpus_studio.platform.training_plan import framework_registry, orchestrator_registry
 
-    assert {(e.name, e.support_level) for e in framework_registry()} == {
-        (f.framework_id, f.support_level) for f in reference_framework_backends()
+    # Guard the FULL derivation - name, support_level, and the note (mapped from display_name) - so a
+    # change to any derived field in the canonical registry is caught here.
+    assert {(e.name, e.support_level, e.note) for e in framework_registry()} == {
+        (f.framework_id, f.support_level, f.display_name) for f in reference_framework_backends()
     }
-    assert {(e.name, e.support_level) for e in orchestrator_registry()} == {
-        (o.orchestrator_id, o.support_level) for o in reference_orchestrator_adapters()
+    assert {(e.name, e.support_level, e.note) for e in orchestrator_registry()} == {
+        (o.orchestrator_id, o.support_level, o.display_name) for o in reference_orchestrator_adapters()
     }
     # torchtune / megatron are NOT vetted in the backend registry, so they are no longer advertised.
     assert "torchtune" not in {e.name for e in orchestrator_registry()}
