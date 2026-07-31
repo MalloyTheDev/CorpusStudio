@@ -4452,6 +4452,45 @@ def training_run_update(
     typer.echo(saved.model_dump_json(indent=2))
 
 
+@app.command("training-run-resume-prepare")
+def training_run_resume_prepare(
+    project_dir: Path,
+    plan_path: Path = typer.Option(..., "--plan", help="Target RunPlan JSON to resume into."),
+    checkpoint_dir: Path = typer.Option(
+        ..., "--checkpoint-dir", help="Parent checkpoint directory to resume from."
+    ),
+):
+    """Verify a checkpoint is a compatible resume source for the target plan, mint a fresh resumed run,
+    and record its ResumeLineage (status 'prepared'). This never executes training - the worker
+    consuming the resume request is a separate, gated slice. Fails closed on any partial, corrupt, or
+    incompatible checkpoint (non-zero exit; no run record written)."""
+
+    from datetime import datetime, timezone  # noqa: PLC0415
+
+    from corpus_studio.platform.checkpoint import CheckpointError  # noqa: PLC0415
+    from corpus_studio.platform.contracts import RunPlan  # noqa: PLC0415
+    from corpus_studio.training.run_registry import (  # noqa: PLC0415
+        mint_run_id,
+        prepare_resumed_run,
+    )
+
+    try:
+        plan = RunPlan.model_validate_json(plan_path.read_text(encoding="utf-8"))
+    except ValueError as exc:
+        typer.echo(f"invalid RunPlan JSON: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    resumed_run_id = mint_run_id(datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S-%f"), "resume")
+    try:
+        record = prepare_resumed_run(
+            project_dir, plan, checkpoint_dir, resumed_run_id=resumed_run_id, now=_utc_now_iso()
+        )
+    except CheckpointError as exc:
+        typer.echo(f"checkpoint is NOT a compatible resume source ({exc.reason}): {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    typer.echo(record.model_dump_json(indent=2))
+
+
 @app.command("artifact-register")
 def artifact_register(
     project_dir: Path,
