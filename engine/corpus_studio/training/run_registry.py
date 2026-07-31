@@ -17,10 +17,17 @@ import os
 import re
 from collections.abc import Callable
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, Field
 
+# ResumeLineage is a torch-free platform contract; it must be a real (not TYPE_CHECKING) import because
+# it is a pydantic field type resolved at class-definition time.
+from corpus_studio.platform.contracts import ResumeLineage
 from corpus_studio.training.provenance import RunProvenance
+
+if TYPE_CHECKING:
+    from corpus_studio.platform.contracts import RunPlan
 
 RUN_REGISTRY_DIRNAME = "training_runs"
 
@@ -62,6 +69,10 @@ class TrainingRunRecord(BaseModel):
     # Reproducibility manifest (dataset fingerprint / config hash / engine+platform)
     # captured at run start. Tolerant default so older records load as None.
     provenance: RunProvenance | None = None
+    # Exact resume lineage (#440/#486) when this run was prepared as a resume of a parent checkpoint:
+    # the parent run/checkpoint identity + the optimizer step it continues from. Tolerant default so an
+    # ordinary (non-resumed) run loads as None.
+    resume_lineage: ResumeLineage | None = None
     notes: str = ""
 
     @property
@@ -140,6 +151,42 @@ def save_run_record(project_dir: Path | str, record: TrainingRunRecord) -> Path:
 
 def load_run_record(path: Path | str) -> TrainingRunRecord:
     return TrainingRunRecord.model_validate_json(Path(path).read_text(encoding="utf-8"))
+
+
+def prepare_resumed_run(
+    project_dir: Path | str,
+    plan: RunPlan,
+    checkpoint_dir: Path | str,
+    *,
+    resumed_run_id: str,
+    now: str,
+) -> TrainingRunRecord:
+    """Admit a checkpoint as a compatible resume source for ``plan``, then persist a PREPARED run record
+    for a FRESH resumed run carrying the verified :class:`ResumeLineage`.
+
+    This is the control-plane *preparation* half of resume (#440/#486): it verifies + records the
+    resume but never executes it - the worker trainer consuming the resume request is a separate, gated
+    slice. Fails closed via :func:`admit_resume` on any partial / corrupt / incomplete / externally
+    changed / incompatible checkpoint, or if ``resumed_run_id`` reuses the parent's run id; no record is
+    written unless the checkpoint fully admits.
+    """
+
+    # admit_resume is torch-free; imported lazily so importing this storage module stays light.
+    from corpus_studio.platform.checkpoint import admit_resume  # noqa: PLC0415
+
+    lineage = admit_resume(plan, checkpoint_dir, resumed_run_id=resumed_run_id)
+    execution = plan.resolved_execution  # admit_resume already proved this is present.
+    record = TrainingRunRecord(
+        run_id=resumed_run_id,
+        created_at=now,
+        updated_at=now,
+        status=PREPARED,
+        base_model=execution.inputs.model.ref.id if execution is not None else "",
+        resume_lineage=lineage,
+        notes="resume-prepared; worker resume execution is a separate gated slice",
+    )
+    save_run_record(project_dir, record)
+    return record
 
 
 def list_run_records(project_dir: Path | str) -> list[TrainingRunRecord]:

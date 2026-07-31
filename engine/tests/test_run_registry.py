@@ -8,12 +8,15 @@ from corpus_studio.cli import app
 from corpus_studio.training import run_registry
 from corpus_studio.training.run_registry import (
     INTERRUPTED,
+    PREPARED,
+    RUN_REGISTRY_DIRNAME,
     RUNNING,
     SUCCEEDED,
     TrainingRunRecord,
     list_run_records,
     load_run_record,
     mint_run_id,
+    prepare_resumed_run,
     reconcile_running_records,
     record_path,
     save_run_record,
@@ -175,3 +178,92 @@ def test_cli_update_rejects_illegal_transition(tmp_path: Path):
         ["training-run-update", str(tmp_path), "--run-id", "20260702T180000-a", "--status", "running"],
     )
     assert result.exit_code == 1
+
+
+# --- resume preparation (Phase A of the checkpoint/resume plan; #440/#486) -------------------------
+
+def _sealed_resume_source(tmp_path: Path):
+    """A valid sealed checkpoint bound to a demo plan - the reusable checkpoint-test builder + the
+    canonical demo RunPlan. Returns (plan, checkpoint_dir)."""
+
+    from test_platform_checkpoint import _build_sealed_checkpoint  # noqa: PLC0415
+
+    from corpus_studio.platform.runners import demo_training_plan  # noqa: PLC0415
+
+    plan = demo_training_plan(plan_id="demo-ckpt")
+    checkpoint_dir = tmp_path / "c"
+    _build_sealed_checkpoint(checkpoint_dir, plan=plan)
+    return plan, checkpoint_dir
+
+
+def test_prepare_resumed_run_records_lineage_and_mints_a_fresh_id(tmp_path: Path):
+    plan, checkpoint_dir = _sealed_resume_source(tmp_path)
+    project = tmp_path / "proj"
+    record = prepare_resumed_run(
+        project, plan, checkpoint_dir, resumed_run_id="20260731T000000-resume", now="2026-07-31T00:00:00Z"
+    )
+    assert record.status == PREPARED
+    assert record.run_id == "20260731T000000-resume"
+    assert record.resume_lineage is not None
+    # The lineage is the parent's identity + the step the resume continues from (from the sealed state).
+    assert record.resume_lineage.parent_run_id == "run-parent01"
+    assert record.resume_lineage.resumed_from_global_step == 6
+    # Persisted, and the lineage survives the JSON round-trip (a resumed run declares its parent).
+    loaded = load_run_record(record_path(project, record.run_id))
+    assert loaded.resume_lineage == record.resume_lineage
+
+
+def test_prepare_resumed_run_fails_closed_on_an_incompatible_plan(tmp_path: Path):
+    from corpus_studio.platform.checkpoint import CheckpointError  # noqa: PLC0415
+
+    plan, checkpoint_dir = _sealed_resume_source(tmp_path)
+    other = plan.model_copy(update={"plan_hash": "b" * 64})  # a different plan hash is incompatible
+    project = tmp_path / "proj"
+    with pytest.raises(CheckpointError):
+        prepare_resumed_run(project, other, checkpoint_dir, resumed_run_id="20260731T000000-resume", now="t")
+    # A refused resume writes NO record (fail closed leaves no half-prepared run behind).
+    registry = project / RUN_REGISTRY_DIRNAME
+    assert not registry.exists() or not list(registry.glob("*.json"))
+
+
+def test_prepare_resumed_run_refuses_reusing_the_parent_run_id(tmp_path: Path):
+    from corpus_studio.platform.checkpoint import CheckpointError  # noqa: PLC0415
+
+    plan, checkpoint_dir = _sealed_resume_source(tmp_path)
+    with pytest.raises(CheckpointError):
+        # run-parent01 is the checkpoint's source run id; a resume must mint a fresh id, never reuse it.
+        prepare_resumed_run(tmp_path / "proj", plan, checkpoint_dir, resumed_run_id="run-parent01", now="t")
+
+
+def test_cli_resume_prepare_is_reachable_and_records_lineage(tmp_path: Path):
+    plan, checkpoint_dir = _sealed_resume_source(tmp_path)
+    plan_path = tmp_path / "plan.json"
+    plan_path.write_text(plan.model_dump_json(), encoding="utf-8")
+    result = runner.invoke(
+        app,
+        [
+            "training-run-resume-prepare", str(tmp_path / "proj"),
+            "--plan", str(plan_path), "--checkpoint-dir", str(checkpoint_dir),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["status"] == PREPARED
+    assert payload["resume_lineage"]["parent_run_id"] == "run-parent01"
+
+
+def test_cli_resume_prepare_fails_closed_on_a_corrupt_checkpoint(tmp_path: Path):
+    plan, checkpoint_dir = _sealed_resume_source(tmp_path)
+    # Corrupt a sealed member (optimizer.pt is mandatory) so integrity verification refuses it.
+    (checkpoint_dir / "optimizer.pt").write_bytes(b"tampered")
+    plan_path = tmp_path / "plan.json"
+    plan_path.write_text(plan.model_dump_json(), encoding="utf-8")
+    result = runner.invoke(
+        app,
+        [
+            "training-run-resume-prepare", str(tmp_path / "proj"),
+            "--plan", str(plan_path), "--checkpoint-dir", str(checkpoint_dir),
+        ],
+    )
+    assert result.exit_code == 1
+    assert "NOT a compatible resume source" in result.output
