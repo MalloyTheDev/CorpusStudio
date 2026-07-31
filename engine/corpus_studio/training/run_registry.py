@@ -175,13 +175,17 @@ def prepare_resumed_run(
     from corpus_studio.platform.checkpoint import admit_resume  # noqa: PLC0415
 
     lineage = admit_resume(plan, checkpoint_dir, resumed_run_id=resumed_run_id)
-    execution = plan.resolved_execution  # admit_resume already proved this is present.
+    # admit_resume (via bound_identities_from_plan) already fails closed unless resolved_execution is
+    # present, so this asserts the guaranteed invariant (narrowing it for the type checker) rather than
+    # silently writing an empty base_model that would hide a misconfiguration.
+    execution = plan.resolved_execution
+    assert execution is not None
     record = TrainingRunRecord(
         run_id=resumed_run_id,
         created_at=now,
         updated_at=now,
         status=PREPARED,
-        base_model=execution.inputs.model.ref.id if execution is not None else "",
+        base_model=execution.inputs.model.ref.id,
         resume_lineage=lineage,
         notes="resume-prepared; worker resume execution is a separate gated slice",
     )
