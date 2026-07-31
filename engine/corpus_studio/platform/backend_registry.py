@@ -8,6 +8,8 @@ security posture exceeds the run's assurance tier is REFUSED before it can run. 
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from corpus_studio.platform.contracts import (
     BackendSecurityPosture,
     FrameworkBackend,
@@ -131,3 +133,113 @@ def reference_orchestrator_adapters() -> tuple[OrchestratorAdapter, ...]:
             support_level=SupportLevel.config_generation_only,
         ),
     )
+
+
+# --------------------------------------------------------------------------------------------------
+# Capability-tuple resolver (P1, #485): bind a FrameworkBackend x OrchestratorAdapter and resolve its
+# EVIDENCE-SELECTED support - never inferring one tuple's support from another.
+# --------------------------------------------------------------------------------------------------
+
+# The SupportLevel ladder, weakest to strongest. ``refused`` is a terminal fail-closed state, not a
+# rung; a tuple is only as proven as its WEAKEST member.
+_SUPPORT_LADDER: tuple[SupportLevel, ...] = (
+    SupportLevel.declared,
+    SupportLevel.config_generation_only,
+    SupportLevel.installed,
+    SupportLevel.probed,
+    SupportLevel.workload_verified,
+    SupportLevel.production_supported,
+)
+_SUPPORT_RANK: dict[SupportLevel, int] = {level: rank for rank, level in enumerate(_SUPPORT_LADDER)}
+
+
+@dataclass(frozen=True)
+class BackendBindingResolution:
+    """The resolution of one ``FrameworkBackend`` x ``OrchestratorAdapter`` capability tuple (#485).
+
+    ``support_level`` is the WEAKEST of the two members (proving one member - or a sibling tuple - never
+    lifts the other); ``admissible`` is False when a member is unknown / framework-mismatched / REFUSED
+    or the orchestrator's security posture exceeds the tier; ``default_eligible`` additionally requires
+    WORKLOAD_VERIFIED (or higher) evidence - no measured workload is ever a silent default."""
+
+    framework_id: str
+    orchestrator_id: str
+    support_level: SupportLevel
+    admissible: bool
+    default_eligible: bool
+    refusal_reason: str | None = None
+
+
+def _tuple_support_level(
+    framework: FrameworkBackend, orchestrator: OrchestratorAdapter
+) -> SupportLevel:
+    if SupportLevel.refused in (framework.support_level, orchestrator.support_level):
+        return SupportLevel.refused
+    return min(
+        (framework.support_level, orchestrator.support_level),
+        key=lambda level: _SUPPORT_RANK[level],
+    )
+
+
+def resolve_backend_binding(
+    framework_id: str, orchestrator_id: str, *, tier: AssuranceTier
+) -> BackendBindingResolution:
+    """Bind a ``FrameworkBackend`` x ``OrchestratorAdapter`` into a capability tuple and resolve its
+    evidence-selected support, admissibility (the assurance-tier security gate), and
+    default-eligibility.
+
+    Fails closed: an unknown member, a framework mismatch (the orchestrator binds a different
+    framework), a REFUSED member, or a security-posture violation is NOT admissible. Proving one tuple
+    never implies another - each binding is resolved from ITS OWN two members' declared/measured
+    SupportLevel, never inferred from a sibling tuple."""
+    framework = next(
+        (f for f in reference_framework_backends() if f.framework_id == framework_id), None
+    )
+    orchestrator = next(
+        (o for o in reference_orchestrator_adapters() if o.orchestrator_id == orchestrator_id), None
+    )
+    # Structural fail-closed checks -> a refused, inadmissible tuple.
+    if framework is None:
+        structural: str | None = f"unknown framework '{framework_id}'"
+    elif orchestrator is None:
+        structural = f"unknown orchestrator '{orchestrator_id}'"
+    elif orchestrator.framework_ref != framework_id:
+        structural = (
+            f"orchestrator '{orchestrator_id}' binds framework '{orchestrator.framework_ref}', "
+            f"not '{framework_id}'"
+        )
+    else:
+        structural = None
+    if framework is None or orchestrator is None or structural is not None:
+        return BackendBindingResolution(
+            framework_id, orchestrator_id, SupportLevel.refused, False, False, structural
+        )
+    # Both members known + correctly bound: the tuple's evidence (weakest member) + the security gate.
+    support = _tuple_support_level(framework, orchestrator)
+    reason = refuse_backend_security(orchestrator.security_posture, tier=tier)
+    if reason is None and support is SupportLevel.refused:
+        reason = f"a member of {framework_id} x {orchestrator_id} is REFUSED on this stack"
+    admissible = reason is None
+    default_eligible = admissible and (
+        _SUPPORT_RANK[support] >= _SUPPORT_RANK[SupportLevel.workload_verified]
+    )
+    return BackendBindingResolution(
+        framework_id, orchestrator_id, support, admissible, default_eligible, reason
+    )
+
+
+def select_default_binding(*, tier: AssuranceTier) -> BackendBindingResolution | None:
+    """Evidence-select the DEFAULT framework x orchestrator tuple for ``tier``: the admissible binding
+    with the strongest support, but only if that support is WORKLOAD_VERIFIED or higher. No such tuple
+    -> ``None`` (never a guessed default). On the reference stack only pytorch x corpus_studio is
+    workload-verified, so it is the default wherever the tier admits it."""
+    eligible: list[BackendBindingResolution] = []
+    for orchestrator in reference_orchestrator_adapters():
+        binding = resolve_backend_binding(
+            orchestrator.framework_ref, orchestrator.orchestrator_id, tier=tier
+        )
+        if binding.default_eligible:
+            eligible.append(binding)
+    if not eligible:
+        return None
+    return max(eligible, key=lambda binding: _SUPPORT_RANK[binding.support_level])
