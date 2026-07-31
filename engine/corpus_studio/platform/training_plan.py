@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING
 from corpus_studio.platform.backend_registry import (
     reference_orchestrator_adapters,
     refuse_backend_security,
+    resolve_backend_binding,
 )
 from corpus_studio.platform.common import HashRef, Ref
 from corpus_studio.platform.contracts import (
@@ -187,6 +188,32 @@ def training_plan_precheck(training_plan: TrainingPlan) -> list[TrainingPlanComp
                 message=(
                     f"composition orchestrator '{comp.orchestrator}' does not match parameters backend "
                     f"'{params.backend}'; the parameters backend is what runs"
+                ),
+            )
+        )
+    # Evidence-selected backend tuple (#485): surface the framework x orchestrator binding's support as
+    # an ADVISORY hint. Tier-independent (support level + structural admissibility), so resolved at the
+    # permissive standard tier; the authoritative tier SECURITY gate stays in resolve_training_plan.
+    binding = resolve_backend_binding(comp.framework, comp.orchestrator, tier=AssuranceTier.standard)
+    if not binding.admissible:
+        findings.append(
+            TrainingPlanCompatibilityFinding(
+                code="backend_tuple_unresolvable",
+                message=(
+                    f"framework x orchestrator '{comp.framework} x {comp.orchestrator}' is not a "
+                    f"resolvable backend tuple: {binding.refusal_reason}"
+                ),
+            )
+        )
+    elif not binding.default_eligible:
+        findings.append(
+            TrainingPlanCompatibilityFinding(
+                code="backend_tuple_not_workload_verified",
+                severity="info",
+                message=(
+                    f"backend tuple '{comp.framework} x {comp.orchestrator}' is "
+                    f"'{binding.support_level.value}', not workload_verified - proving another tuple "
+                    "never implies this one, so it is not an evidence-selected default"
                 ),
             )
         )
