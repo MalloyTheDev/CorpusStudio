@@ -130,6 +130,28 @@ def test_precheck_flags_an_unresolvable_backend_tuple():
     assert "backend_tuple_unresolvable" in {f.code for f in training_plan_precheck(mismatch)}
 
 
+def test_framework_and_orchestrator_registries_derive_from_the_backend_registry():
+    # Single source of truth (#485): the thin framework/orchestrator registries mirror the canonical
+    # backend registry EXACTLY, so their support levels can never drift from the resolver's admission
+    # gate and an orchestrator the resolver would refuse as unknown is not falsely advertised.
+    from corpus_studio.platform.backend_registry import (
+        reference_framework_backends,
+        reference_orchestrator_adapters,
+    )
+    from corpus_studio.platform.training_plan import framework_registry, orchestrator_registry
+
+    # Guard the FULL derivation - name, support_level, and the note (mapped from display_name) - so a
+    # change to any derived field in the canonical registry is caught here.
+    assert {(e.name, e.support_level, e.note) for e in framework_registry()} == {
+        (f.framework_id, f.support_level, f.display_name) for f in reference_framework_backends()
+    }
+    assert {(e.name, e.support_level, e.note) for e in orchestrator_registry()} == {
+        (o.orchestrator_id, o.support_level, o.display_name) for o in reference_orchestrator_adapters()
+    }
+    # torchtune / megatron are NOT vetted in the backend registry, so they are no longer advertised.
+    assert "torchtune" not in {e.name for e in orchestrator_registry()}
+
+
 def test_resolution_attaches_precheck_findings_without_blocking():
     profile, caps = _profile(cc_major=12), _report()
     plan = _training_plan()
