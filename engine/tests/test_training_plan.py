@@ -118,6 +118,34 @@ def test_precheck_surfaces_the_backend_tuple_support():
     assert findings.get("backend_tuple_not_workload_verified") == "info"
 
 
+def test_precheck_flags_an_unknown_free_string_selection():
+    # #485: evaluation_profile / preset are optional free-string selections that nothing else validates
+    # (the enum dimensions are contract-validated; framework x orchestrator is the tuple check). A KNOWN
+    # selection is silent; an UNKNOWN one is surfaced (warning) so a typo is not a silent no-op - the
+    # exact "selectable but inert" class the preset field was in before this check.
+    known = TrainingPlan(
+        plan_intent_id="i",
+        composition=TrainingPlanComposition(
+            objective_id="o", preset="qlora-qwen-seq4096", evaluation_profile="schema_conformance"
+        ),
+        parameters=_params(),
+    )
+    assert not {f.code for f in training_plan_precheck(known)} & {
+        "preset_unknown",
+        "evaluation_profile_unknown",
+    }
+    typo = TrainingPlan(
+        plan_intent_id="i",
+        composition=TrainingPlanComposition(
+            objective_id="o", preset="qlora-typo", evaluation_profile="made-up"
+        ),
+        parameters=_params(),
+    )
+    findings = {f.code: f.severity for f in training_plan_precheck(typo)}
+    assert findings.get("preset_unknown") == "warning"
+    assert findings.get("evaluation_profile_unknown") == "warning"
+
+
 def test_precheck_flags_an_unresolvable_backend_tuple():
     # corpus_studio binds pytorch, not jax -> the framework x orchestrator tuple is unresolvable.
     mismatch = TrainingPlan(
