@@ -97,6 +97,8 @@ def test_plan_reports_how_the_token_budget_lands_against_the_corpus():
     assert under.epochs_for_budget == pytest.approx(0.25) and not under.repeats_corpus
     over = plan_pretraining_data(_policy(token_budget=120_000))
     assert over.epochs_for_budget == pytest.approx(2.0) and over.repeats_corpus
+    exact = plan_pretraining_data(_policy(token_budget=60_000))  # budget == corpus: one pass, no repeat
+    assert exact.epochs_for_budget == pytest.approx(1.0) and not exact.repeats_corpus
 
 
 def test_plan_without_a_token_budget_reports_no_epoch_estimate():

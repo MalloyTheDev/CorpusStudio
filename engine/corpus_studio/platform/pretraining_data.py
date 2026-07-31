@@ -19,9 +19,10 @@ class PretrainingDataPlan:
     """Control-plane accounting for a :class:`PretrainingDataPolicy` (#487): the corpus token total, the
     per-source token split + the REALIZED mixture (the actual per-source proportions of the corpus,
     which a declared ``mixture_weights`` may not match), and how the token budget lands against the
-    corpus (the number of epochs it implies, and whether it repeats the corpus). The budget is an
-    explicit stop condition, never a silent truncation; this reports how it lands so a run is sized
-    honestly."""
+    corpus (the number of epochs it implies, and whether it repeats the corpus - ``repeats_corpus`` is
+    True only when the budget STRICTLY exceeds the corpus, so a budget equal to the corpus is exactly
+    one pass, not a repeat). The budget is an explicit stop condition, never a silent truncation; this
+    reports how it lands so a run is sized honestly."""
 
     total_shard_tokens: int
     per_source_tokens: dict[str, int]
