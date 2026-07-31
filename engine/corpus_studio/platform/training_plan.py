@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from corpus_studio.platform.backend_registry import (
+    reference_framework_backends,
     reference_orchestrator_adapters,
     refuse_backend_security,
     resolve_backend_binding,
@@ -56,27 +57,25 @@ class RegistryEntry:
     note: str = ""
 
 
-# The thin registries: valid entries per registry dimension, each carrying its SupportLevel (#481).
-# Only the PyTorch + corpus_studio reference path has a measured workload on this host; everything else
-# is declared / config-generation intent until its exact stack is probed and workload-verified.
+# The thin registries carry the valid entries per dimension, each with its SupportLevel (#481). The
+# framework + orchestrator registries DERIVE from the canonical backend registry (a SINGLE source of
+# truth), so their support levels can never drift from the resolver's admission gate and only
+# orchestrators the resolver can actually admit are advertised - a torchtune/megatron entry the resolver
+# would refuse as "not in the backend registry" is no longer falsely listed as available (#485). The
+# other dimensions (topology / update / ...) below stay hand-declared until they gain a backend registry.
 
 
 def framework_registry() -> tuple[RegistryEntry, ...]:
-    return (
-        RegistryEntry("pytorch", SupportLevel.workload_verified, "the reference framework; measured"),
-        RegistryEntry("jax", SupportLevel.declared),
-        RegistryEntry("tf_keras", SupportLevel.declared),
-        RegistryEntry("mlx", SupportLevel.declared),
+    return tuple(
+        RegistryEntry(framework.framework_id, framework.support_level, framework.display_name)
+        for framework in reference_framework_backends()
     )
 
 
 def orchestrator_registry() -> tuple[RegistryEntry, ...]:
-    return (
-        RegistryEntry("corpus_studio", SupportLevel.workload_verified, "first-party TRL/PEFT QLoRA loop"),
-        RegistryEntry("unsloth", SupportLevel.config_generation_only),
-        RegistryEntry("torchtune", SupportLevel.declared),
-        RegistryEntry("axolotl", SupportLevel.config_generation_only),
-        RegistryEntry("megatron", SupportLevel.declared),
+    return tuple(
+        RegistryEntry(adapter.orchestrator_id, adapter.support_level, adapter.display_name)
+        for adapter in reference_orchestrator_adapters()
     )
 
 
