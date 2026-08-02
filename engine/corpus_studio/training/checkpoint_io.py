@@ -441,6 +441,69 @@ def _verify_worker_identities(
 
 
 # --------------------------------------------------------------------------------------------------
+# Hybrid resume: materialize an HF resume_from_checkpoint layout from our sealed format (#486)
+# --------------------------------------------------------------------------------------------------
+def materialize_hf_checkpoint(
+    *,
+    torch_module: Any,
+    sealed_dir: str | Path,
+    hf_dir: str | Path,
+    peft_model: Any,
+) -> Path:
+    """Materialize an HF ``resume_from_checkpoint`` layout from a VERIFIED sealed checkpoint.
+
+    Our sealed ``checkpoint_io`` format is the trust anchor; SFTTrainer's own resume (optimizer /
+    scheduler / RNG / data-cursor skip / step count) is the proven restore engine. This reproduces the
+    exact HF layout from our sealed files so the two compose. Proven bitwise-faithful: resuming from the
+    output is identical to resuming from HF's own checkpoint.
+
+    The sealed checkpoint is fully integrity-verified (:func:`verify_checkpoint_integrity`) BEFORE any
+    file is read, so a tampered / partial / externally-changed checkpoint fails closed and is never
+    materialized or deserialized. Returns the HF checkpoint directory.
+    """
+
+    import shutil  # noqa: PLC0415
+
+    from safetensors.torch import save_file  # noqa: PLC0415
+
+    verify_checkpoint_integrity(sealed_dir)  # fail closed before reading anything
+    source = Path(sealed_dir)
+    dest = Path(hf_dir)
+    dest.mkdir(parents=True, exist_ok=True)
+
+    # optimizer + scheduler are torch state_dicts in both formats - a direct copy.
+    shutil.copy(source / OPTIMIZER_FILE, dest / "optimizer.pt")
+    if (source / SCHEDULER_FILE).exists():
+        shutil.copy(source / SCHEDULER_FILE, dest / "scheduler.pt")
+
+    # RNG: our {torch_cpu, python, numpy, cuda} -> HF's {cpu, python, numpy, cuda}. HF's _load_rng_state
+    # requires the 'numpy' key, which the writer captures via include_numpy=True.
+    our_rng = torch_module.load(str(source / RNG_FILE), weights_only=False)
+    hf_rng: dict[str, Any] = {"python": our_rng["python"]}
+    if "torch_cpu" in our_rng:
+        hf_rng["cpu"] = our_rng["torch_cpu"]
+    if "numpy" in our_rng:
+        hf_rng["numpy"] = our_rng["numpy"]
+    if "cuda" in our_rng:
+        hf_rng["cuda"] = our_rng["cuda"]
+    torch_module.save(hf_rng, str(dest / "rng_state.pth"))
+
+    # Adapter weights -> adapter_model.safetensors + adapter_config.json (from the live PEFT model).
+    adapter_state = torch_module.load(str(source / ADAPTER_FILE), weights_only=False)
+    save_file(
+        {name: tensor.contiguous() for name, tensor in adapter_state.items()},
+        str(dest / "adapter_model.safetensors"),
+    )
+    peft_model.peft_config["default"].save_pretrained(str(dest))
+
+    # HF trainer_state.json: the exact HF TrainerState we sealed at checkpoint time (round-trip
+    # faithful - drives HF's data-cursor skip + step count).
+    if (source / TRAINER_STATE_FILE).exists():
+        shutil.copy(source / TRAINER_STATE_FILE, dest / "trainer_state.json")
+    return dest
+
+
+# --------------------------------------------------------------------------------------------------
 # Cadence + retention + lineage chaining driver
 # --------------------------------------------------------------------------------------------------
 class CheckpointCoordinator:

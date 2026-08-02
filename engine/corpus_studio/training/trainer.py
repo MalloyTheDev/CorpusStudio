@@ -2714,15 +2714,6 @@ def run_training(  # pragma: no cover - optional training-stack integration
             "a checkpoint-enabled run requires sealed checkpoint identities, a source run id, and a "
             "checkpoints root; none may be derived inside the trainer"
         )
-    if resume is not None:
-        # Resume EXECUTION (the hybrid: verify OUR seal -> materialize an HF-layout checkpoint from the
-        # sealed files -> SFTTrainer resume_from_checkpoint) is the next slice. Until it lands, fail
-        # closed rather than silently ignore a dispatched resume and restart training from scratch.
-        raise TrainerError(
-            "checkpoint resume execution is not yet wired into the trainer; a resume was dispatched but "
-            "cannot be honored"
-        )
-
     dataset_progress_bucket = 0
 
     def _dataset_progress(completed: int, total: int) -> None:
@@ -3104,6 +3095,14 @@ def run_training(  # pragma: no cover - optional training-stack integration
             live_model = kwargs.get("model", model)
             if optimizer is None:
                 return
+            # Seal HF's own TrainerState so a resume can round-trip it into the HF-layout checkpoint
+            # (best-effort metadata; a capture fault must not stop the checkpoint).
+            try:
+                import dataclasses  # noqa: PLC0415
+
+                hf_trainer_state: dict[str, Any] | None = dataclasses.asdict(state)
+            except Exception:  # noqa: BLE001
+                hf_trainer_state = None
             try:
                 manifest = checkpoint_coordinator.maybe_checkpoint(
                     global_optimizer_step=int(state.global_step),
@@ -3112,9 +3111,11 @@ def run_training(  # pragma: no cover - optional training-stack integration
                     adapter_state=get_peft_model_state_dict(live_model),
                     optimizer=optimizer,
                     lr_scheduler=kwargs.get("lr_scheduler"),
-                    rng_state=capture_rng_state(torch),
+                    # include_numpy: HF's resume _load_rng_state requires a 'numpy' rng key.
+                    rng_state=capture_rng_state(torch, include_numpy=True),
                     sampler_state={"consumed_optimizer_steps": int(state.global_step)},
                     consumed_microsteps=int(state.global_step) * config.gradient_accumulation_steps,
+                    trainer_state=hf_trainer_state,
                 )
                 if manifest is not None:
                     # Surface every sealed checkpoint in the run event stream so a long run's
@@ -3214,6 +3215,34 @@ def run_training(  # pragma: no cover - optional training-stack integration
         if execution_tracker is not None
         else None
     )
+    # Hybrid resume (#486): verify OUR sealed checkpoint (integrity + the exact pinned identity), then
+    # materialize an HF-layout checkpoint from the sealed files and let SFTTrainer's proven resume
+    # (optimizer / scheduler / RNG / data-cursor skip / step count) consume it. Verify-before-materialize:
+    # a tampered checkpoint fails closed and is never deserialized. Proven bitwise-faithful to HF's own.
+    resume_from_checkpoint: str | None = None
+    if resume is not None:
+        from corpus_studio.platform.checkpoint import (  # noqa: PLC0415
+            verify_checkpoint_integrity,
+            verify_matches_request,
+        )
+        from corpus_studio.training.checkpoint_io import materialize_hf_checkpoint  # noqa: PLC0415
+
+        resume_manifest = verify_checkpoint_integrity(resume.checkpoint_dir)
+        verify_matches_request(resume_manifest, resume)
+        resume_from_checkpoint = str(
+            materialize_hf_checkpoint(
+                torch_module=torch,
+                sealed_dir=resume.checkpoint_dir,
+                hf_dir=Path(config.output_dir).parent / "_resume_hf",
+                peft_model=evidence_model,
+            )
+        )
+        _stage(
+            "resume",
+            f"resuming from checkpoint {resume.checkpoint_id} at optimizer step "
+            f"{resume_manifest.state.global_optimizer_step}",
+        )
+
     # Training frameworks print metrics/tqdm to STDOUT — and transformers can log to stdout during
     # SAVE too — so redirect the whole train+save block to stderr. Only the CLI's final JSON echo then
     # writes to stdout, keeping it the pure JSON result the desktop/WBG parses. Progress reaches stderr.
@@ -3221,7 +3250,7 @@ def run_training(  # pragma: no cover - optional training-stack integration
         torch,
         config,
     ):
-        train_output = trainer.train()
+        train_output = trainer.train(resume_from_checkpoint=resume_from_checkpoint)
 
         steps = int(getattr(trainer.state, "global_step", 0) or 0)
         verify_completed_step_count(config, steps)

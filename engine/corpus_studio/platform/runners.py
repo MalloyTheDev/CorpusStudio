@@ -356,9 +356,27 @@ class TrainingRunner:
         if backend_label in ("corpus_studio", "cpu_toy"):
             from pathlib import Path  # noqa: PLC0415
 
-            # RESUME: hand the first-party trainer the verified checkpoint to continue from. Threaded
-            # independently of the write cadence (a resume may continue with or without further writes).
+            # RESUME: verify the checkpoint is a compatible resume source for THIS plan (the runner holds
+            # the plan; the trainer re-verifies integrity + the exact pin before it materializes), then
+            # hand the request to the first-party trainer. Threaded independently of the write cadence (a
+            # resume may continue with or without further writes). Fail closed on an incompatible resume.
             if ctx.resume is not None:
+                from corpus_studio.platform.checkpoint import (  # noqa: PLC0415
+                    CheckpointError,
+                    load_checkpoint_manifest,
+                    verify_resumable_into,
+                )
+
+                try:
+                    verify_resumable_into(
+                        load_checkpoint_manifest(ctx.resume.checkpoint_dir), ctx.plan
+                    )
+                except CheckpointError as exc:
+                    raise RunnerFailure(
+                        f"resume checkpoint is not a compatible source for this run: {exc}",
+                        taxonomy=FailureTaxonomy.UNSUPPORTED_CONFIGURATION,
+                        stage=StageMarker.process_start,
+                    ) from exc
                 checkpoint_kwargs["resume"] = ctx.resume
             # WRITE: when the sealed policy sets a cadence, hand the plan-derived bound identities + a
             # run-scoped checkpoints root so the CheckpointCoordinator seals a checkpoint at each cadence
