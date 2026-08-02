@@ -870,6 +870,37 @@ def test_training_runner_rejects_unvalidated_disabled_policy_fields(monkeypatch)
     assert called == []
 
 
+def test_training_runner_rejects_an_incompatible_resume(tmp_path, monkeypatch):
+    # #486 resume: the runner holds the plan, so it verifies the checkpoint is a compatible resume SOURCE
+    # (verify_resumable_into) and fails closed BEFORE run_training is reached. A dispatched resume whose
+    # checkpoint binds a different plan than the target run must be refused, not silently run from scratch.
+    from test_platform_checkpoint import _build_sealed_checkpoint  # noqa: PLC0415
+
+    from corpus_studio.platform.contracts import CheckpointResumeRequest  # noqa: PLC0415
+
+    called = []
+    monkeypatch.setattr(
+        "corpus_studio.training.trainer.run_training",
+        lambda *_a, **_k: called.append(True),
+    )
+    plan = demo_training_plan()  # the VALID target run (passes the runner's own plan-hash check)
+    # A checkpoint bound to a DIFFERENT plan (its bound plan_hash differs) is not a compatible source.
+    other = plan.model_copy(update={"plan_hash": "a" * 64})
+    sealed = _build_sealed_checkpoint(tmp_path / "c", plan=other)
+    request = CheckpointResumeRequest(
+        checkpoint_id=sealed.checkpoint_id,
+        checkpoint_manifest_hash=sealed.checkpoint_manifest_hash,
+        checkpoint_dir=str(tmp_path / "c"),
+    )
+    result = execute_run(plan, TrainingRunner(cpu_toy=True), resume=request, clock=_CLOCK)
+
+    assert result.manifest.state == "failed"
+    assert result.manifest.failure is not None
+    assert result.manifest.failure.taxonomy == FailureTaxonomy.UNSUPPORTED_CONFIGURATION
+    assert "not a compatible source" in result.manifest.failure.message
+    assert called == []  # fail closed BEFORE the trainer is invoked
+
+
 @pytest.mark.parametrize(
     "save_strategy, cadence, keep_last, message",
     [
