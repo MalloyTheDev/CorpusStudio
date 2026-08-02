@@ -350,6 +350,24 @@ class TrainingRunner:
             last_stage = marker
             ctx.emit_stage(marker, message)
 
+        # Exact-lineage checkpoint writing (#440/#486): when the sealed policy sets a cadence, hand the
+        # first-party trainer the plan-derived bound identities + a run-scoped checkpoints root so the
+        # CheckpointCoordinator seals a checkpoint at each cadence step. Only the first-party sealed
+        # backend consumes these; a checkpoint-free policy passes nothing (unchanged behavior).
+        checkpoint_kwargs = {}
+        if (
+            backend_label in ("corpus_studio", "cpu_toy")
+            and execution.checkpoint_policy.cadence_optimizer_steps is not None
+        ):
+            from pathlib import Path  # noqa: PLC0415
+
+            from corpus_studio.platform.checkpoint import bound_identities_from_plan  # noqa: PLC0415
+
+            checkpoint_kwargs = {
+                "checkpoint_bound": bound_identities_from_plan(ctx.plan),
+                "source_run_id": ctx.run_id,
+                "checkpoints_root": str(Path(config.output_dir) / "checkpoints"),
+            }
         try:
             with watchdog:
                 result = trainer_fn(
@@ -357,6 +375,7 @@ class TrainingRunner:
                     progress_callback=_progress,
                     stage_callback=_stage,
                     token_callback=_token_counts,
+                    **checkpoint_kwargs,
                 )
         except _CancelTraining:
             raise RunCancelled from None
@@ -613,19 +632,10 @@ class TrainingRunner:
                 stage=StageMarker.env_loaded,
                 remediation="create a derived RunPlan with a new execution hash",
             )
-        if (
-            execution.save_strategy != "no"
-            or execution.checkpoint_policy.cadence_optimizer_steps is not None
-            or execution.checkpoint_policy.keep_last is not None
-        ):
-            raise RunnerFailure(
-                "sealed intermediate checkpoints are unsupported until exact resume compatibility "
-                "and checkpoint lineage are implemented",
-                taxonomy=FailureTaxonomy.UNSUPPORTED_CONFIGURATION,
-                stage=StageMarker.process_start,
-                remediation="regenerate a checkpoint-free RunPlan; do not approve a long run until "
-                "sealed resume support exists",
-            )
+        # Exact-lineage checkpoint WRITING is now supported (the CheckpointCoordinator seals a verifiable
+        # checkpoint at each cadence step; validated on a real cpu_toy SFTTrainer run). The bound
+        # identities + checkpoints root are threaded to the trainer at dispatch above. (Consuming a
+        # checkpoint to RESUME execution is a separate slice; nothing dispatches a resume yet.)
         try:
             # The trainer owns one stable read/hash/capture of the dataset and parses those exact
             # bytes. Revalidating it here would create a redundant full-corpus pass.
