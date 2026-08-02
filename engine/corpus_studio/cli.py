@@ -942,6 +942,19 @@ def platform_plan(
         "weight/gradient/optimizer-state VRAM - the lever for long-sequence runs that are at the "
         "card's memory edge.",
     ),
+    checkpoint_cadence: Optional[int] = typer.Option(
+        None,
+        "--checkpoint-cadence",
+        min=1,
+        help="Seal an exact-lineage checkpoint every N optimizer steps (enables checkpointing). "
+        "Omit for a checkpoint-free run.",
+    ),
+    checkpoint_keep_last: Optional[int] = typer.Option(
+        None,
+        "--checkpoint-keep-last",
+        min=1,
+        help="Keep only the most recent N checkpoints (requires --checkpoint-cadence).",
+    ),
     lora_alpha: int = typer.Option(
         32, "--lora-alpha", min=1, help="LoRA alpha sealed into the plan (convention: 2*r)."
     ),
@@ -1100,6 +1113,8 @@ def platform_plan(
         micro_batch_size=micro_batch_size,
         lora_r=lora_r,
         lora_alpha=lora_alpha,
+        checkpoint_steps=checkpoint_cadence,
+        checkpoint_keep_last=checkpoint_keep_last,
         gradient_accumulation_steps=gradient_accumulation_steps,
         truncation_allowed=allow_truncation,
         chat_template_sha256=chat_template_sha256,

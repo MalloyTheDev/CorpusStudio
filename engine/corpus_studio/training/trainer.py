@@ -309,22 +309,6 @@ class TrainResult(BaseModel):
     execution_evidence: TrainingExecutionEvidence | None = None
 
 
-def _require_checkpoint_free_execution(config: TrainRunConfig) -> None:
-    """Refuse every intermediate-checkpoint spelling on the in-process SFTTrainer path, including
-    unvalidated model copies. The SFTTrainer body stays checkpoint-free; exact-lineage checkpoint
-    writing/resume runs through :mod:`corpus_studio.training.checkpoint_io` (the reviewed engine proven
-    by the real-torch fresh-process equivalence test), which a long run binds on first authorization."""
-
-    if (
-        config.save_strategy != "no"
-        or config.save_steps is not None
-        or config.save_total_limit is not None
-    ):
-        raise TrainerError(
-            "intermediate checkpoints on the SFTTrainer path are unsupported; exact-lineage "
-            "checkpointing runs through corpus_studio.training.checkpoint_io"
-        )
-
 
 @dataclass(frozen=True)
 class CheckpointExecutionPolicy:

@@ -803,12 +803,17 @@ def test_max_steps_override_is_refused_without_calling_the_trainer(monkeypatch):
     assert "config" not in capture
 
 
-def test_training_runner_refuses_legacy_sealed_step_checkpoint_plan(monkeypatch):
-    called = []
-    monkeypatch.setattr(
-        "corpus_studio.training.trainer.run_training",
-        lambda *_args, **_kwargs: called.append(True),
-    )
+def test_training_runner_threads_checkpoint_identities_for_a_step_checkpoint_plan(monkeypatch):
+    # #486: the runner no longer refuses a checkpoint plan - it builds the plan-derived bound identities
+    # + a run-scoped checkpoints root and threads them to the first-party trainer so the
+    # CheckpointCoordinator can write. Capture the threaded kwargs (then halt) to prove the wiring.
+    captured: dict = {}
+
+    def _capture(*_args, **kwargs):
+        captured.update(kwargs)
+        raise RuntimeError("stop after capturing the threaded checkpoint kwargs")
+
+    monkeypatch.setattr("corpus_studio.training.trainer.run_training", _capture)
     plan = demo_training_plan()
     execution_body = plan.resolved_execution.model_dump(mode="json")
     execution_body["configuration_hash"] = "0" * 64
@@ -823,17 +828,17 @@ def test_training_runner_refuses_legacy_sealed_step_checkpoint_plan(monkeypatch)
     body["resolved_execution"] = execution.model_dump(mode="json")
     body["checkpoint_policy"] = execution.checkpoint_policy.model_dump(mode="json")
 
-    result = execute_run(_reseal(body), TrainingRunner(cpu_toy=True), clock=_CLOCK)
+    execute_run(_reseal(body), TrainingRunner(cpu_toy=True), clock=_CLOCK)
 
-    assert result.manifest.state == "failed"
-    assert result.manifest.failure is not None
-    assert result.manifest.failure.taxonomy == FailureTaxonomy.UNSUPPORTED_CONFIGURATION
-    assert result.manifest.failure.stage == StageMarker.process_start
-    assert "resume compatibility" in result.manifest.failure.message
-    assert called == []
+    assert captured.get("checkpoint_bound") is not None
+    assert captured.get("source_run_id")
+    assert "checkpoints" in str(captured.get("checkpoints_root"))
 
 
 def test_training_runner_rejects_unvalidated_disabled_policy_fields(monkeypatch):
+    # A disabled (save_strategy="no") policy that still carries retention is inconsistent. In production
+    # such a plan fails JSON validation; a tampered one (model_copy bypasses it) is rejected as
+    # not-executable when the trainer config is derived, before run_training is ever reached.
     called = []
     monkeypatch.setattr(
         "corpus_studio.training.trainer.run_training",
@@ -861,7 +866,7 @@ def test_training_runner_rejects_unvalidated_disabled_policy_fields(monkeypatch)
     assert result.manifest.state == "failed"
     assert result.manifest.failure is not None
     assert result.manifest.failure.taxonomy == FailureTaxonomy.UNSUPPORTED_CONFIGURATION
-    assert "resume compatibility" in result.manifest.failure.message
+    assert "not executable" in result.manifest.failure.message
     assert called == []
 
 

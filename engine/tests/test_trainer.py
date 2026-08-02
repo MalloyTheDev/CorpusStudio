@@ -485,7 +485,7 @@ def test_build_kwargs_disables_intermediate_checkpoints_by_default():
     assert "save_total_limit" not in kwargs
 
 
-def test_legacy_step_checkpoint_config_parses_but_cannot_execute():
+def test_step_checkpoint_config_builds_a_checkpoint_free_sft_config():
     cfg = TrainRunConfig(
         base_model="m",
         dataset_path="d",
@@ -493,22 +493,21 @@ def test_legacy_step_checkpoint_config_parses_but_cannot_execute():
         save_steps=200,
         save_total_limit=1,
     )
-    # The in-process SFTTrainer body stays checkpoint-free; exact-lineage checkpointing runs through
-    # corpus_studio.training.checkpoint_io, so the SFTTrainer guard refuses an intermediate save here.
-    with pytest.raises(TrainerError, match="checkpoint_io"):
-        build_training_kwargs(cfg)
-    # The execution guard runs before dataset access or any heavy training-stack import.
-    with pytest.raises(TrainerError, match="checkpoint_io"):
+    # #486: the SFTConfig is ALWAYS HF-checkpoint-free - the CheckpointCoordinator owns exact-lineage
+    # checkpoint writing, so SFTTrainer's own save never fires (no double-write).
+    assert build_training_kwargs(cfg)["save_strategy"] == "no"
+    # A checkpoint-enabled run that reaches the trainer WITHOUT the runner-threaded sealed identities
+    # fails closed before any dataset access or heavy import (an unreachable control is not a control).
+    with pytest.raises(TrainerError, match="sealed checkpoint identities"):
         run_training(cfg)
 
 
-def test_checkpoint_execution_guard_rejects_unvalidated_model_copy():
-    config = TrainRunConfig(base_model="m", dataset_path="d").model_copy(
-        update={"save_steps": 1}
-    )
-    with pytest.raises(TrainerError, match="checkpoint_io"):
-        build_training_kwargs(config)
-    with pytest.raises(TrainerError, match="checkpoint_io"):
+def test_inconsistent_checkpoint_config_fails_closed():
+    # save_steps with save_strategy="no" (e.g. smuggled in via model_copy) is an inconsistent
+    # disabled-but-cadenced policy; the policy resolver in run_training rejects it before any heavy work.
+    config = TrainRunConfig(base_model="m", dataset_path="d").model_copy(update={"save_steps": 1})
+    assert build_training_kwargs(config)["save_strategy"] == "no"  # SFTConfig stays checkpoint-free
+    with pytest.raises(TrainerError, match="disabled checkpointing"):
         run_training(config)
 
 

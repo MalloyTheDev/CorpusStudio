@@ -363,10 +363,13 @@ class TrainingRunner:
 
             from corpus_studio.platform.checkpoint import bound_identities_from_plan  # noqa: PLC0415
 
+            # output_dir is .../runs/<run_id>/artifacts/adapter; put checkpoints at the run-scoped
+            # .../runs/<run_id>/checkpoints - a sibling of artifacts, never INSIDE the adapter export
+            # tree (whose validator rejects stray subdirectories).
             checkpoint_kwargs = {
                 "checkpoint_bound": bound_identities_from_plan(ctx.plan),
                 "source_run_id": ctx.run_id,
-                "checkpoints_root": str(Path(config.output_dir) / "checkpoints"),
+                "checkpoints_root": str(Path(config.output_dir).parent.parent / "checkpoints"),
             }
         try:
             with watchdog:
