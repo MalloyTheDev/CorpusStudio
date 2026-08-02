@@ -3095,7 +3095,7 @@ def run_training(  # pragma: no cover - optional training-stack integration
             if optimizer is None:
                 return
             try:
-                checkpoint_coordinator.maybe_checkpoint(
+                manifest = checkpoint_coordinator.maybe_checkpoint(
                     global_optimizer_step=int(state.global_step),
                     epoch=float(getattr(state, "epoch", 0.0) or 0.0),
                     gradient_accumulation_steps=config.gradient_accumulation_steps,
@@ -3106,7 +3106,21 @@ def run_training(  # pragma: no cover - optional training-stack integration
                     sampler_state={"consumed_optimizer_steps": int(state.global_step)},
                     consumed_microsteps=int(state.global_step) * config.gradient_accumulation_steps,
                 )
+                if manifest is not None:
+                    # Surface every sealed checkpoint in the run event stream so a long run's
+                    # resumability status is observable, not just inferable from disk.
+                    _stage(
+                        "checkpoint",
+                        f"sealed checkpoint {manifest.checkpoint_id} at optimizer step "
+                        f"{int(state.global_step)}",
+                    )
             except Exception as exc:  # noqa: BLE001 - a checkpoint write must never break training.
+                # Surface the resumability loss in BOTH the run event stream AND captured stderr; never
+                # raise into the loop (a checkpoint fault must not alter the training trajectory).
+                _stage(
+                    "checkpoint_warning",
+                    f"checkpoint write at optimizer step {int(state.global_step)} failed: {exc}",
+                )
                 print(
                     f"[WARNING] checkpoint write at step {int(state.global_step)} failed: {exc}",
                     file=sys.stderr,
