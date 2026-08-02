@@ -485,7 +485,15 @@ def materialize_hf_checkpoint(
     if "numpy" in our_rng:
         hf_rng["numpy"] = our_rng["numpy"]
     if "cuda" in our_rng:
-        hf_rng["cuda"] = our_rng["cuda"]
+        # HF's single-process resume expects the CUDA rng as ONE ByteTensor (torch.cuda.get_rng_state);
+        # our capture stores get_rng_state_all() (a per-device list). Unwrap the single-device case (the
+        # product's 1-GPU host) so HF restores it; keep the list for a genuine multi-device capture (HF's
+        # distributed set_rng_state_all path). Without this, HF logs "expected ByteTensor, got list" and
+        # silently skips the CUDA rng restore.
+        cuda_state = our_rng["cuda"]
+        if isinstance(cuda_state, list) and len(cuda_state) == 1:
+            cuda_state = cuda_state[0]
+        hf_rng["cuda"] = cuda_state
     torch_module.save(hf_rng, str(dest / "rng_state.pth"))
 
     # Adapter weights -> adapter_model.safetensors + adapter_config.json (from the live PEFT model).
