@@ -80,18 +80,41 @@ This makes the *whole* resume flow real and tested end-to-end **except** the tra
 
 ### Phase B — Worker trainer-loop wiring (GATED: worker bytes → v10 wheel)
 
-Authored now, but **merge + wheel build require your authorization** (worker-closure + wheel-rebuild
-gates). This is a *port* of already-proven wiring, not new design.
+Merge + wheel build require authorization (worker-closure + wheel-rebuild gates).
 
-- **B1 — wire `trainer.run_training`.** Mirror `tests/_checkpoint_reference.py`: build a
-  `CheckpointCoordinator` from `execution.checkpoint_policy`; after each optimizer step call
-  `maybe_checkpoint(...)` capturing RNG (`capture_rng_state`) + sampler/dataloader cursor +
-  `trainer_state`; at startup, if `dispatch.resume` is present, call `restore_checkpoint(...)` **before**
-  the loop and continue from `resumed_from_global_step + 1`.
-- **B2 — lift the `runners.py:592-601` refusal** now that the trainer honors cadence/resume.
-- **B3 — v10 PRODUCT wheel + env re-seal.** `trainer.py` + `runners.py` are worker-execution code, so
+> **Correction after reading the real trainer (2026-07-31):** this is **not** a mechanical port of the
+> hand-rolled reference. `trainer.run_training` wraps **TRL `SFTTrainer`** (constructed at
+> `trainer.py:3068`, `.train()` at `:3110`), which owns optimizer creation, the step loop, the data
+> cursor, and RNG timing. The reference proves the *algorithm* on a hand-rolled loop; wiring it into
+> `SFTTrainer` is a real integration with three concrete decisions that only a torch/GPU run can
+> validate - so this phase is developed **against a real run when the window opens**, not authored blind.
+
+- **B1 — checkpoint WRITING via a `TrainerCallback`.** Add a callback (mirroring the existing
+  `_ProgressCallback` at `trainer.py:2979`) whose `on_step_end` calls
+  `CheckpointCoordinator.maybe_checkpoint(...)` with `get_peft_model_state_dict(model)` as the adapter
+  state, the callback's `optimizer`/`lr_scheduler`, `capture_rng_state(torch)`, and the data cursor.
+  Wrinkle: the coordinator's `bound` identities come from `bound_identities_from_plan(RunPlan)`, but
+  `run_training` only has the flattened `TrainRunConfig` - so the worker must also receive (or
+  reconstruct) the `RunPlan`, plus fill the worker-only bound fields (worker-wheel / formatter /
+  chat-template sha).
+- **B2 — RESUME injection.** `SFTTrainer.train()` builds its own optimizer unless the constructor is
+  given `optimizers=(optimizer, lr_scheduler)`. The defensible approach: `restore_checkpoint(...)` the
+  adapter onto the model **before** constructing the trainer, then pass the restored
+  `optimizers=(...)`; the data-cursor skip and RNG timing still need validation against a real
+  `SFTTrainer` run. **Open decision (needs a steer + a run):** use our sealed `checkpoint_io` format
+  with `optimizers=` injection (reuses the built+tested I/O) **vs** seal HF-native checkpoints and use
+  `trainer.train(resume_from_checkpoint=...)` (reuses HF's proven step-skip, but our I/O becomes a seal
+  wrapper). Recommendation: the former (it keeps the CPU-bitwise-proven `checkpoint_io` as the trust
+  anchor), pending the first real run.
+- **B3 — lift the two guards** (`runners.py:592-601` **and** `trainer._require_checkpoint_free_execution`
+  at `:2683`) once B1/B2 land, plus the deferred `platform-plan --checkpoint-cadence/--keep-last` flag.
+- **B4 — v10 PRODUCT wheel + env re-seal.** `trainer.py` + `runners.py` are worker-execution code, so
   their bytes changing forces a fresh sealed wheel (v9 PRODUCT → **v10**) and a re-sealed managed
   environment (new lock/id). The **v8 sealed-research lineage is untouched** — this is the product chain.
+
+The already-tested control-plane scaffolding for this phase is real: `resolve_checkpoint_execution_policy`
+(`trainer.py:339`) already classifies the sealed policy into an enabled/cadence/keep-last decision, and
+`train_config_from_resolved` already threads `save_steps`/`save_total_limit` from the checkpoint policy.
 
 ### Phase C — Measured GPU evidence + SupportLevel promotion (GATED: GPU auth)
 
@@ -123,29 +146,35 @@ gates). This is a *port* of already-proven wiring, not new design.
 
 ## 5. What I can start now vs what needs you
 
-- **NOW (on your go):** Phase A control-plane PRs — cadence flag, resume orchestration, lineage record,
-  fake-worker tests. Clean, CI-green, self-mergeable. This is the bulk of the *product* surface.
-- **GATED (your authorization):** Phase B merge + the v10 wheel build/env re-seal; Phase C GPU run and
-  the SupportLevel promotion. I can author Phase B's diff for review at any time; it just cannot merge or
-  build a wheel without your sign-off.
+- **DONE:** Phase A (resume-preparation orchestration + lineage record + fake-worker tests) shipped in
+  PR #771. The `platform-plan --checkpoint-cadence` flag was deferred to Phase B (it advertises an
+  unrunnable option until the trainer honors cadence).
+- **GATED (your authorization):** Phase B (the `SFTTrainer` wiring) + the v10 wheel build/env re-seal;
+  Phase C GPU run + the SupportLevel promotion. **Revised recommendation:** because the `SFTTrainer`
+  integration (§3 Phase B) is not a mechanical port and cannot be validated in the torch-free lane, Phase
+  B is best **built against a real run when the hardware window opens** rather than authored blind - a
+  blind draft would be intricate, unexecutable, and likely rewritten against the first real run. The
+  design above is deliberately concrete so that build is de-risked and fast.
 
 ## 6. Risks + mitigations
 
 | Risk | Mitigation |
 |---|---|
 | GPU reductions are non-deterministic — bitwise resume is not guaranteed on GPU | Phase C proves **state restoration + loss continuity**, not bitwise; the bitwise claim stays CPU-scoped (as the integration test already documents) |
-| The real data pipeline's sampler/packing cursor differs from the reference | B1 captures the *actual* sampler/dataloader cursor via the coordinator's `sampler_state`; A4/C1 assert the restored cursor resumes at the exact next sample |
+| **`SFTTrainer` owns the optimizer/loop/data** — the reference's hand-rolled resume does not transfer directly | B2 injects the restored optimizer via the constructor `optimizers=(...)` and restores adapter weights before `.train()`; the data-cursor skip + RNG timing are validated against a real `SFTTrainer` run before the capability is claimed (build B against a run, not blind) |
+| The real data pipeline's sampler/packing cursor differs from the reference | B1 captures the *actual* sampler/dataloader cursor via the coordinator's `sampler_state`; C1 asserts the restored cursor resumes at the exact next sample |
 | `keep_last` pruning races a reader | Coordinator only removes directories it wrote and always keeps the freshest `keep_last` (≥1) |
-| Wheel/env churn from worker edits | Batch B1+B2 into one v10 lineage bump; never rebuild per-edit |
+| Wheel/env churn from worker edits | Batch B1–B4 into one v10 lineage bump; never rebuild per-edit |
 | Scope creep into MoE / full-param checkpointing | Explicitly out of this slice; dense `adapter_only` first, MoE roles additive later (G8) |
 
 ## 7. Sequencing summary
 
 ```
-Phase A (control plane, now)      Phase B (worker, gated)         Phase C (GPU, gated)
---------------------------        -----------------------         --------------------
-A1 platform-plan cadence          B1 wire trainer.run_training    C1 GPU checkpoint→resume smoke
-A2 platform-resume orchestration  B2 lift runners refusal         C2 promote SupportLevel
-A3 ResumeLineage on run record    B3 v10 wheel + env re-seal      C3 record evidence
-A4 fake-worker + unit tests       (author now, merge on auth)     (on GPU auth)
+Phase A (control plane, DONE #771)   Phase B (worker SFTTrainer, gated)   Phase C (GPU, gated)
+----------------------------------   ----------------------------------   --------------------
+A. resume-prepare orchestration      B1 checkpoint-writing callback       C1 GPU checkpoint->resume smoke
+   admit_resume -> fresh run ->       B2 resume injection (optimizers=)    C2 promote SupportLevel
+   PREPARED record w/ lineage         B3 lift both guards + cadence flag   C3 record evidence
+   + reachable CLI + tests            B4 v10 wheel + env re-seal
+(cadence flag deferred -> B3)         (built against a real run, on auth)  (on GPU auth)
 ```
