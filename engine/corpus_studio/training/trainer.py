@@ -37,6 +37,7 @@ from corpus_studio.importers.jsonl_importer import read_jsonl, read_jsonl_bytes
 from corpus_studio.platform.contracts import (
     AdapterExportStateEvidence,
     CheckpointBoundIdentities,
+    CheckpointResumeRequest,
     GradientCoverageEvidence,
     OptimizerStepLossEvidence,
     TrainableStateChangeEvidence,
@@ -2688,6 +2689,7 @@ def run_training(  # pragma: no cover - optional training-stack integration
     checkpoint_bound: CheckpointBoundIdentities | None = None,
     source_run_id: str | None = None,
     checkpoints_root: str | None = None,
+    resume: CheckpointResumeRequest | None = None,
 ) -> TrainResult:
     """Run the training. Lazy-imports the heavy stack; verified via the CPU toy path (a real GPU QLoRA
     can only be user-smoke-tested). Raises :class:`TrainerError` if the runtime can't run the request.
@@ -2711,6 +2713,14 @@ def run_training(  # pragma: no cover - optional training-stack integration
         raise TrainerError(
             "a checkpoint-enabled run requires sealed checkpoint identities, a source run id, and a "
             "checkpoints root; none may be derived inside the trainer"
+        )
+    if resume is not None:
+        # Resume EXECUTION (the hybrid: verify OUR seal -> materialize an HF-layout checkpoint from the
+        # sealed files -> SFTTrainer resume_from_checkpoint) is the next slice. Until it lands, fail
+        # closed rather than silently ignore a dispatched resume and restart training from scratch.
+        raise TrainerError(
+            "checkpoint resume execution is not yet wired into the trainer; a resume was dispatched but "
+            "cannot be honored"
         )
 
     dataset_progress_bucket = 0

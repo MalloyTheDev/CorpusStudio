@@ -32,6 +32,7 @@ from corpus_studio.platform.artifacts import build_artifact_manifest, write_arti
 from corpus_studio.platform.common import HashRef, MemoryMetrics, Ref, new_uuid7_id
 from corpus_studio.platform.contracts import (
     ArtifactManifest,
+    CheckpointResumeRequest,
     EventMetrics,
     FailureRecord,
     FitClassification,
@@ -176,12 +177,16 @@ class RunContext:
         sink: RunEventSink,
         cancel: CancelToken,
         clock: Callable[[], str] = _now_iso,
+        resume: "CheckpointResumeRequest | None" = None,
     ) -> None:
         self.plan = plan
         self.run_id = run_id
         self._sink = sink
         self._cancel = cancel
         self._clock = clock
+        # The exact checkpoint to resume from, if this run was dispatched as a resume (#486). The runner
+        # verifies it and hands it to the first-party trainer; None is an ordinary fresh run.
+        self.resume = resume
         self._seq = 0
         # A runner may set the MEASURED fit (from the watchdog's observed peak) — the post-run
         # reconciliation of the calibrator's *predicted* fit. The supervisor records it on the manifest.
@@ -491,6 +496,7 @@ def execute_run(
     clock: Callable[[], str] = _now_iso,
     telemetry: TelemetryControl | None = None,
     warmup_steps: int = 2,
+    resume: CheckpointResumeRequest | None = None,
 ) -> SupervisedRun:
     """Execute ``plan`` through ``runner``, collecting the ``RunEvent`` stream and returning the
     terminal :class:`RunManifest`. Terminal classification is total: :class:`RunCancelled` →
@@ -547,7 +553,7 @@ def execute_run(
                 if label not in sink_errors:
                     sink_errors.append(label)
 
-    ctx = RunContext(plan, rid, _collect, cancel, clock)
+    ctx = RunContext(plan, rid, _collect, cancel, clock, resume=resume)
     started = clock()
     plan_ref = Ref(id=plan.plan_id, hash=HashRef(value=plan.plan_hash))
 

@@ -22,7 +22,7 @@ import re
 import sys
 import time
 from collections.abc import Callable, Sequence
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from pydantic import ValidationError
 
@@ -350,27 +350,32 @@ class TrainingRunner:
             last_stage = marker
             ctx.emit_stage(marker, message)
 
-        # Exact-lineage checkpoint writing (#440/#486): when the sealed policy sets a cadence, hand the
-        # first-party trainer the plan-derived bound identities + a run-scoped checkpoints root so the
-        # CheckpointCoordinator seals a checkpoint at each cadence step. Only the first-party sealed
-        # backend consumes these; a checkpoint-free policy passes nothing (unchanged behavior).
-        checkpoint_kwargs = {}
-        if (
-            backend_label in ("corpus_studio", "cpu_toy")
-            and execution.checkpoint_policy.cadence_optimizer_steps is not None
-        ):
+        # Exact-lineage checkpoint writing + resume (#440/#486). Only the first-party sealed backend
+        # consumes these; a plain fresh run passes nothing (unchanged behavior).
+        checkpoint_kwargs: dict[str, Any] = {}
+        if backend_label in ("corpus_studio", "cpu_toy"):
             from pathlib import Path  # noqa: PLC0415
 
-            from corpus_studio.platform.checkpoint import bound_identities_from_plan  # noqa: PLC0415
+            # RESUME: hand the first-party trainer the verified checkpoint to continue from. Threaded
+            # independently of the write cadence (a resume may continue with or without further writes).
+            if ctx.resume is not None:
+                checkpoint_kwargs["resume"] = ctx.resume
+            # WRITE: when the sealed policy sets a cadence, hand the plan-derived bound identities + a
+            # run-scoped checkpoints root so the CheckpointCoordinator seals a checkpoint at each cadence
+            # step. output_dir is .../runs/<run_id>/artifacts/adapter; checkpoints go to the run-scoped
+            # .../runs/<run_id>/checkpoints - a sibling of artifacts, never INSIDE the adapter export tree.
+            if execution.checkpoint_policy.cadence_optimizer_steps is not None:
+                from corpus_studio.platform.checkpoint import (  # noqa: PLC0415
+                    bound_identities_from_plan,
+                )
 
-            # output_dir is .../runs/<run_id>/artifacts/adapter; put checkpoints at the run-scoped
-            # .../runs/<run_id>/checkpoints - a sibling of artifacts, never INSIDE the adapter export
-            # tree (whose validator rejects stray subdirectories).
-            checkpoint_kwargs = {
-                "checkpoint_bound": bound_identities_from_plan(ctx.plan),
-                "source_run_id": ctx.run_id,
-                "checkpoints_root": str(Path(config.output_dir).parent.parent / "checkpoints"),
-            }
+                checkpoint_kwargs.update(
+                    {
+                        "checkpoint_bound": bound_identities_from_plan(ctx.plan),
+                        "source_run_id": ctx.run_id,
+                        "checkpoints_root": str(Path(config.output_dir).parent.parent / "checkpoints"),
+                    }
+                )
         try:
             with watchdog:
                 result = trainer_fn(

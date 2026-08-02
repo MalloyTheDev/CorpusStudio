@@ -240,6 +240,8 @@ def run_worker(
         sink=lambda event: _send(
             "event", event, correlation_id=correlation_id, out=stream
         ),
+        # A resume dispatch carries the exact checkpoint to continue from (#486); a fresh run has None.
+        resume=parsed.resume,
     )
     manifest = result.manifest
     outcome = (
