@@ -551,6 +551,7 @@ class CheckpointCoordinator:
         clock: Callable[[], str],
         cadence_optimizer_steps: int | None,
         keep_last: int | None = None,
+        resume_parent: tuple[str, str] | None = None,
     ) -> None:
         if cadence_optimizer_steps is not None and cadence_optimizer_steps < 1:
             raise CheckpointError(
@@ -567,6 +568,9 @@ class CheckpointCoordinator:
         self._cadence = cadence_optimizer_steps
         self._keep_last = keep_last
         self._last: CheckpointManifest | None = None
+        # (checkpoint_id, manifest_hash) of the checkpoint this run RESUMED from - the first child
+        # checkpoint chains to it so the hash lineage is not severed at the resume boundary.
+        self._resume_parent = resume_parent
         self._written: list[Path] = []
 
     @property
@@ -606,7 +610,7 @@ class CheckpointCoordinator:
         parent = (
             (self._last.checkpoint_id, self._last.checkpoint_manifest_hash)
             if self._last is not None
-            else None
+            else self._resume_parent
         )
         manifest = save_checkpoint(
             torch_module=self._torch,

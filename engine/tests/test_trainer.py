@@ -897,11 +897,13 @@ def test_model_load_kwargs_support_4bit_8bit_and_reject_unimplemented_quantizati
             self.kwargs = kwargs
 
     torch = _FakeTorch()
-    # 8-bit selects bitsandbytes LLM.int8() (load_in_8bit) - no 4-bit-only params.
+    # 8-bit selects bitsandbytes LLM.int8() (load_in_8bit) - no 4-bit-only params - and pins the
+    # non-quantized modules to the requested compute dtype so they do not silently run at fp32.
     int8 = build_model_load_kwargs(
-        _sealed_config(quantization_mode="int8"), torch, quantize=True,
+        _sealed_config(quantization_mode="int8", dequantization_dtype="bf16"), torch, quantize=True,
         bitsandbytes_config_cls=FakeBitsAndBytesConfig)
     assert int8["quantization_config"].kwargs == {"load_in_8bit": True}
+    assert int8["torch_dtype"] is torch.bfloat16
     # 4-bit fp4 is also accepted (load_in_4bit + the fp4 quant type).
     fp4 = build_model_load_kwargs(
         _sealed_config(dequantization_dtype="bf16", quantization_mode="fp4"), torch, quantize=True,

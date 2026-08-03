@@ -818,8 +818,14 @@ def build_model_load_kwargs(
             raise TrainerError("quantized execution requires BitsAndBytesConfig")
         quantization_mode = config.quantization_mode or "nf4"
         if quantization_mode == "int8":
-            # 8-bit (bitsandbytes LLM.int8()): a lighter-quantized frozen base than 4-bit.
+            # 8-bit (bitsandbytes LLM.int8()): a lighter-quantized frozen base than 4-bit. Pin the
+            # non-quantized modules (embeddings, norms, lm_head) to the requested compute dtype so they
+            # do not silently run at the model-default fp32 while the config declares a lower precision -
+            # mirrors the 4-bit path's bnb_4bit_compute_dtype.
             kwargs["quantization_config"] = bitsandbytes_config_cls(load_in_8bit=True)
+            kwargs["torch_dtype"] = _torch_dtype(
+                torch_module, config.dequantization_dtype or config.weight_storage_dtype or "bf16"
+            )
         elif quantization_mode in ("nf4", "fp4"):
             kwargs["quantization_config"] = bitsandbytes_config_cls(
                 load_in_4bit=True,
@@ -2342,6 +2348,13 @@ def build_training_kwargs(config: TrainRunConfig) -> dict[str, Any]:
         "logging_steps": config.logging_steps,
         "logging_nan_inf_filter": config.logging_nan_inf_filter,
         # Always HF-checkpoint-free; the CheckpointCoordinator owns exact-lineage checkpoint writing.
+        # NOTE (Phase-C seal reconciliation, Codex #D): the sealed `save_strategy` currently means the
+        # run's checkpoint POLICY ("steps" = the coordinator seals at a step cadence), while THIS is HF's
+        # own saver toggle - correctly "no" so HF and the coordinator never double-write. The two share a
+        # name but describe different layers. Reconciling them so the seal records the EFFECTIVE HF saver
+        # value (always "no") with the cadence living solely in `checkpoint_policy` is a planner/contract
+        # change carried by the Phase-C sealed-checkpoint slice; only the sealed path (which pins nf4) is
+        # affected, and it does not resume today.
         "save_strategy": "no",
         "report_to": config.report_to,
         "dataset_text_field": config.dataset_text_field,
@@ -3111,6 +3124,11 @@ def run_training(  # pragma: no cover - optional training-stack integration
             clock=lambda: datetime.now(timezone.utc).isoformat(),
             cadence_optimizer_steps=checkpoint_policy.cadence_optimizer_steps,
             keep_last=checkpoint_policy.keep_last,
+            # A resumed run's first checkpoint chains to the checkpoint it continued from, so the hash
+            # lineage crosses the resume boundary instead of restarting an orphan chain.
+            resume_parent=(
+                (resume.checkpoint_id, resume.checkpoint_manifest_hash) if resume is not None else None
+            ),
         )
 
     class _CheckpointCallback(TrainerCallback):  # type: ignore[misc]
@@ -3118,7 +3136,18 @@ def run_training(  # pragma: no cover - optional training-stack integration
         training: a checkpoint-write fault degrades to no checkpoint (logged to stderr) rather than
         raising into the loop, so it can never alter the trajectory."""
 
+        def __init__(self) -> None:
+            # Exact cumulative microbatch count: HF fires on_substep_end for every non-boundary
+            # microbatch and on_step_end for the optimizer-step microbatch, so counting both is exact
+            # even when an epoch ends on a PARTIAL accumulation window - `global_step * grad_accum`
+            # overstates the consumed cursor there.
+            self._consumed_microsteps = 0
+
+        def on_substep_end(self, args: Any, state: Any, control: Any, **kwargs: Any) -> None:
+            self._consumed_microsteps += 1
+
         def on_step_end(self, args: Any, state: Any, control: Any, **kwargs: Any) -> None:
+            self._consumed_microsteps += 1  # the optimizer-step microbatch (no on_substep_end fires)
             if checkpoint_coordinator is None:
                 return
             optimizer = kwargs.get("optimizer")
@@ -3144,7 +3173,7 @@ def run_training(  # pragma: no cover - optional training-stack integration
                     # include_numpy: HF's resume _load_rng_state requires a 'numpy' rng key.
                     rng_state=capture_rng_state(torch, include_numpy=True),
                     sampler_state={"consumed_optimizer_steps": int(state.global_step)},
-                    consumed_microsteps=int(state.global_step) * config.gradient_accumulation_steps,
+                    consumed_microsteps=self._consumed_microsteps,
                     trainer_state=hf_trainer_state,
                 )
                 if manifest is not None:

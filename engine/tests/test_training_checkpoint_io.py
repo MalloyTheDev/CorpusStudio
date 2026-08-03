@@ -463,6 +463,25 @@ def test_written_checkpoints_reports_surviving_run_scoped_dirs(tmp_path: Path) -
     assert all(p.is_dir() for p in survivors)  # every reported dir exists under checkpoints_root
 
 
+def test_resume_parent_chains_the_first_child_checkpoint(tmp_path: Path) -> None:
+    # A resumed run's coordinator is seeded with the checkpoint it continued from, so the FIRST new
+    # checkpoint chains to that parent (the hash lineage crosses the resume boundary) instead of sealing
+    # an orphan; later checkpoints chain within the child run as usual.
+    parent = ("run-parent01-ckpt-step-00000010", "b" * 64)
+    clock = iter(f"2026-07-15T00:00:{i:02d}+00:00" for i in range(60))
+    coord = cio.CheckpointCoordinator(
+        torch_module=_Torch(), checkpoints_root=tmp_path / "checkpoints", source_run_id="run-child01",
+        bound=_bound(), clock=lambda: next(clock), cadence_optimizer_steps=1, resume_parent=parent,
+    )
+    first = _tick(coord, 1)
+    assert first is not None
+    assert first.parent_checkpoint_id == parent[0]
+    assert first.parent_checkpoint_hash == parent[1]
+    second = _tick(coord, 2)
+    assert second is not None
+    assert second.parent_checkpoint_id == first.checkpoint_id  # chains within the child after the first
+
+
 def test_materialize_rejects_a_checkpoint_missing_its_scheduler(tmp_path: Path) -> None:
     # _save writes no lr_scheduler, so the sealed checkpoint has no scheduler.pt. A faithful hybrid HF
     # resume cannot continue the LR schedule without it, so materialize fails closed (never hands

@@ -37,6 +37,7 @@ from corpus_studio.platform.contracts import (
     FailureRecord,
     FitClassification,
     OptimizerStepLossEvidence,
+    ResumeLineage,
     RunEvent,
     RunManifest,
     RunPlan,
@@ -511,10 +512,50 @@ def execute_run(
     is written atomically to ``<out_dir>/runs/<run_id>/RunManifest.json``. Events are appended to the
     returned list and, if ``sink`` is given, forwarded to it live."""
     rid = _sanitize_id(run_id or new_uuid7_id("run"))
+    # Resume admission (#486): a resumed run MUST mint a fresh id, never the parent's - otherwise it
+    # opens the PARENT's run-scoped record/artifact paths below and clobbers them. Read the parent
+    # checkpoint's identity up front so the fresh-id check + the recorded lineage are enforced even for a
+    # direct/protocol caller that reached this boundary without going through admit_resume. Integrity +
+    # compatibility stay the runner's/trainer's authority; here we only read identity for the check.
+    resume_lineage: ResumeLineage | None = None
+    resume_error: Exception | None = None
+    reuses_parent_id = False
+    if resume is not None:
+        from corpus_studio.platform.checkpoint import (  # noqa: PLC0415
+            CheckpointError,
+            load_checkpoint_manifest,
+        )
+
+        try:
+            parent_manifest = load_checkpoint_manifest(resume.checkpoint_dir)
+        except CheckpointError as exc:
+            resume_error = exc
+        else:
+            if rid == parent_manifest.source_run_id:
+                reuses_parent_id = True
+                resume_error = CheckpointError(
+                    "a resumed run must mint a fresh run id, not reuse the parent source run id "
+                    f"{parent_manifest.source_run_id!r}",
+                    reason="ambiguous",
+                )
+            else:
+                resume_lineage = ResumeLineage(
+                    parent_run_id=parent_manifest.source_run_id,
+                    parent_checkpoint_id=parent_manifest.checkpoint_id,
+                    parent_checkpoint_hash=parent_manifest.checkpoint_manifest_hash,
+                    resumed_from_global_step=parent_manifest.state.global_optimizer_step,
+                )
     cancel = cancel or CancelToken()
     events: list[RunEvent] = []
     sink_errors: list[str] = []
-    record_dir = run_record_directory(out_dir, rid) if out_dir is not None else None
+    # Never open the record dir when the fresh-id check failed: that dir IS the parent's, and opening it
+    # (mkdir + events "w") would truncate the parent's record. A different resume error still uses the
+    # fresh rid, so its failed manifest can be written safely.
+    record_dir = (
+        run_record_directory(out_dir, rid)
+        if out_dir is not None and not reuses_parent_id
+        else None
+    )
     events_handle: Any = None
     if record_dir is not None:
         record_dir.mkdir(parents=True, exist_ok=True)
@@ -570,6 +611,14 @@ def execute_run(
     training_success_evidence: TrainingSuccessEvidence | None = None
 
     try:
+        if resume_error is not None:
+            # A resume that failed admission above (unreadable parent manifest, or a fresh-id violation)
+            # fails closed here as an unsupported configuration - before any runner or dir work.
+            raise RunnerFailure(
+                f"resume is not admissible: {resume_error}",
+                taxonomy=FailureTaxonomy.UNSUPPORTED_CONFIGURATION,
+                stage=StageMarker.process_start,
+            ) from resume_error
         # Defense in depth: callers can reach this public library boundary without going through the
         # CLI or protocol worker. Never let a mutated plan reach a runner under its old seal.
         from corpus_studio.platform.planner import verify_run_plan_hash  # noqa: PLC0415
@@ -724,6 +773,9 @@ def execute_run(
         ),
         artifact_ids=artifact_ids,
         failure=failure,
+        # A resumed run records the exact parent run + checkpoint it continued from - never a silent
+        # reuse of the parent identity. Present only when this execution resumed from a checkpoint.
+        resume_lineage=resume_lineage if state == "succeeded" else None,
         final_fit=ctx.final_fit,  # the MEASURED fit, when a runner captured one (via the watchdog)
         training_success_evidence=(
             training_success_evidence if state == "succeeded" else None

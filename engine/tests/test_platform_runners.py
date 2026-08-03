@@ -937,6 +937,61 @@ def test_trainer_side_resume_verification_failure_is_classified_as_a_checkpoint_
     assert "failed verification" in result.manifest.failure.message
 
 
+def test_resume_reusing_the_parent_run_id_is_refused(tmp_path, monkeypatch):
+    # A resumed run MUST mint a fresh id. If a caller supplies run_id == the checkpoint's source_run_id,
+    # execute_run refuses it up front (before opening the parent's record/artifact paths, so they are
+    # never clobbered) and never invokes the trainer.
+    from test_platform_checkpoint import _build_sealed_checkpoint  # noqa: PLC0415
+
+    from corpus_studio.platform.contracts import CheckpointResumeRequest  # noqa: PLC0415
+
+    called = []
+    monkeypatch.setattr(
+        "corpus_studio.training.trainer.run_training", lambda *_a, **_k: called.append(True)
+    )
+    plan = demo_training_plan()
+    sealed = _build_sealed_checkpoint(tmp_path / "c", plan=plan)  # source_run_id == "run-parent01"
+    request = CheckpointResumeRequest(
+        checkpoint_id=sealed.checkpoint_id,
+        checkpoint_manifest_hash=sealed.checkpoint_manifest_hash,
+        checkpoint_dir=str(tmp_path / "c"),
+    )
+    result = execute_run(
+        plan, TrainingRunner(cpu_toy=True), run_id="run-parent01", resume=request, clock=_CLOCK
+    )
+    assert result.manifest.state == "failed"
+    assert result.manifest.failure is not None
+    assert result.manifest.failure.taxonomy == FailureTaxonomy.UNSUPPORTED_CONFIGURATION
+    assert "fresh run id" in result.manifest.failure.message
+    assert called == []  # fail closed before the trainer runs
+
+
+def test_successful_resume_records_the_parent_lineage_on_the_manifest(tmp_path, monkeypatch):
+    # A run that successfully resumes records the exact parent run + checkpoint + continued-from step on
+    # its terminal manifest - never a silent reuse of the parent identity (#486 provenance).
+    from test_platform_checkpoint import _build_sealed_checkpoint  # noqa: PLC0415
+
+    from corpus_studio.platform.contracts import CheckpointResumeRequest  # noqa: PLC0415
+
+    plan = demo_training_plan()
+    sealed = _build_sealed_checkpoint(tmp_path / "c", plan=plan)
+    request = CheckpointResumeRequest(
+        checkpoint_id=sealed.checkpoint_id,
+        checkpoint_manifest_hash=sealed.checkpoint_manifest_hash,
+        checkpoint_dir=str(tmp_path / "c"),
+    )
+
+    # The demo plan seals a 2-step schedule; the success stand-in absorbs the threaded resume kwarg.
+    monkeypatch.setattr("corpus_studio.training.trainer.run_training", _fake_run_training(2))
+    result = execute_run(plan, TrainingRunner(cpu_toy=True), resume=request, clock=_CLOCK)
+    assert result.manifest.state == "succeeded"
+    lineage = result.manifest.resume_lineage
+    assert lineage is not None
+    assert lineage.parent_run_id == sealed.source_run_id
+    assert lineage.parent_checkpoint_id == sealed.checkpoint_id
+    assert lineage.parent_checkpoint_hash == sealed.checkpoint_manifest_hash
+
+
 @pytest.mark.parametrize(
     "save_strategy, cadence, keep_last, message",
     [
