@@ -816,16 +816,21 @@ def build_model_load_kwargs(
         if bitsandbytes_config_cls is None:
             raise TrainerError("quantized execution requires BitsAndBytesConfig")
         quantization_mode = config.quantization_mode or "nf4"
-        if quantization_mode != "nf4":
-            raise TrainerError(
-                f"the first-party resolved executor does not implement {quantization_mode!r} weights"
+        if quantization_mode == "int8":
+            # 8-bit (bitsandbytes LLM.int8()): a lighter-quantized frozen base than 4-bit.
+            kwargs["quantization_config"] = bitsandbytes_config_cls(load_in_8bit=True)
+        elif quantization_mode in ("nf4", "fp4"):
+            kwargs["quantization_config"] = bitsandbytes_config_cls(
+                load_in_4bit=True,
+                bnb_4bit_quant_type=quantization_mode,
+                bnb_4bit_compute_dtype=_torch_dtype(torch_module, config.dequantization_dtype),
+                bnb_4bit_use_double_quant=config.bnb_4bit_use_double_quant,
             )
-        kwargs["quantization_config"] = bitsandbytes_config_cls(
-            load_in_4bit=True,
-            bnb_4bit_quant_type=quantization_mode,
-            bnb_4bit_compute_dtype=_torch_dtype(torch_module, config.dequantization_dtype),
-            bnb_4bit_use_double_quant=config.bnb_4bit_use_double_quant,
-        )
+        else:
+            raise TrainerError(
+                f"the first-party executor implements 4-bit (nf4/fp4) and 8-bit (int8) quantized "
+                f"weights, not {quantization_mode!r}"
+            )
     else:
         kwargs["torch_dtype"] = _torch_dtype(
             torch_module,
@@ -1786,14 +1791,20 @@ def verify_model_state_execution(
             f"trainable master-weight dtype deviation: observed {trainable_dtypes}, "
             f"expected {master_dtype}"
         )
-    if quantize:
+    if quantize and (config.quantization_mode or "nf4") == "int8":
+        # 8-bit (bitsandbytes LLM.int8()): verify the frozen base actually loaded as Linear8bitLt.
+        from bitsandbytes.nn import Linear8bitLt  # noqa: PLC0415
+
+        if not any(isinstance(module, Linear8bitLt) for module in model.modules()):
+            raise TrainerError("int8 execution loaded no Linear8bitLt modules")
+    elif quantize:
         if linear4bit_type is None:
             from bitsandbytes.nn import Linear4bit as BnbLinear4bit  # noqa: PLC0415
 
             linear4bit_type = BnbLinear4bit
         linear4bit = find_linear4bit_modules(model, linear4bit_type)
         if not linear4bit:
-            raise TrainerError("sealed NF4 execution loaded no Linear4bit modules")
+            raise TrainerError("4-bit execution loaded no Linear4bit modules")
         quant_types = {
             getattr(
                 getattr(getattr(module, "weight", None), "quant_state", None),
@@ -1803,7 +1814,7 @@ def verify_model_state_execution(
             or getattr(getattr(module, "weight", None), "quant_type", None)
             for module in linear4bit
         }
-        expected_quantization = config.quantization_mode
+        expected_quantization = config.quantization_mode or "nf4"
         if quant_types != {expected_quantization}:
             raise TrainerError(
                 f"quantized storage deviation: observed {quant_types}, "
@@ -2616,8 +2627,11 @@ def _prepare_training_texts(
 def resolve_run_plan(config: TrainRunConfig, report: Any) -> dict[str, Any]:
     """Decide device + quantization from the runtime report, or raise a clean :class:`TrainerError`.
 
-    CPU toy → CPU, no quantization (needs only ``cpu_toy_ready``). Real run → CUDA + 4-bit
-    (needs the full ``ready`` set: deps + GPU + bitsandbytes)."""
+    Quantization is precision-driven: ``quantization_mode == "none"`` (16-/32-bit LoRA on an
+    unquantized base) does not quantize, so it needs neither bitsandbytes nor the full ``ready`` set;
+    a quantized mode (nf4/fp4/int8) does. CPU toy → CPU, no quantization (needs only
+    ``cpu_toy_ready``). Real quantized run → CUDA + the full ``ready`` set (deps + GPU + bitsandbytes);
+    real unquantized run → CUDA + the CPU-toy dep set + a GPU (bitsandbytes not required)."""
     if config.cpu_toy:
         if not report.cpu_toy_ready:
             raise TrainerEnvironmentError(
@@ -2626,13 +2640,21 @@ def resolve_run_plan(config: TrainRunConfig, report: Any) -> dict[str, Any]:
             )
         return {"device": "cpu", "quantize": False}
 
-    if not report.ready:
+    quantize = config.quantization_mode != "none"
+    if quantize:
+        if not report.ready:
+            raise TrainerEnvironmentError(
+                "A quantized (4-bit/8-bit) GPU run needs the full [train] runtime + a CUDA GPU + "
+                f"bitsandbytes. Run 'corpus-studio train-check' to see what's missing. {INSTALL_HINT} "
+                "(or pass --cpu-toy to smoke-test the pipeline on CPU)."
+            )
+    elif not (report.cpu_toy_ready and report.gpu.available):
         raise TrainerEnvironmentError(
-            "A real QLoRA run needs the full [train] runtime + a CUDA GPU + bitsandbytes. "
-            f"Run 'corpus-studio train-check' to see what's missing. {INSTALL_HINT} "
-            "(or pass --cpu-toy to smoke-test the pipeline on CPU)."
+            "An unquantized (16-bit/32-bit) GPU run needs torch + transformers + peft + trl + "
+            "datasets + accelerate and a CUDA GPU. Run 'corpus-studio train-check' to see what's "
+            f"missing. {INSTALL_HINT} (or pass --cpu-toy to smoke-test the pipeline on CPU)."
         )
-    return {"device": "cuda", "quantize": True}
+    return {"device": "cuda", "quantize": quantize}
 
 
 # Blackwell (RTX 50-series) is sm_120 → compute-capability major 12. The fused FLASH SDPA backward
@@ -2944,6 +2966,13 @@ def run_training(  # pragma: no cover - optional training-stack integration
             use_gradient_checkpointing=config.gradient_checkpointing,
         )
         _stage("quantized", "prepared for 4-bit k-bit training")
+    elif config.gradient_checkpointing:
+        # Unquantized (16-/32-bit) LoRA: prepare_model_for_kbit_training does not run, so enable
+        # gradient checkpointing directly and make the frozen base pass gradients into the adapter
+        # (without enable_input_require_grads the checkpointed base yields no adapter gradient).
+        model.gradient_checkpointing_enable()
+        model.enable_input_require_grads()
+        _stage("unquantized", "enabled gradient checkpointing on the unquantized base")
     model = get_peft_model(model, LoraConfig(**build_lora_kwargs(config)))
     gradient_tracker = enforce_trainable_precision(model, torch, config)
     verify_model_state_execution(model, torch, config, quantize=quantize)
