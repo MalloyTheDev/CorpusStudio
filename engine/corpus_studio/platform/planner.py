@@ -825,6 +825,30 @@ def build_run_plan(
     capabilities + dataset + user constraints. Raises :class:`PlannerError` when the host can't honor
     the request (not ready; cpu-toy-only without ``allow_cpu_toy``; an unsupported constraint)."""
     _require_enum(constraints.task_type, TaskType, "task_type")
+    # Fail-closed execution-variant admission (#484 wired): refuse at planning any task whose execution
+    # shape the first-party harness cannot execute - only the dense-QLoRA-SFT shape is workload_verified;
+    # pretraining/MoE are declared-only and every other objective has no built execution path yet. Never
+    # falls back to dense_qlora_sft. The per-variant executable seal + worker land with each variant (S2+).
+    from corpus_studio.platform.execution_variants import (  # noqa: PLC0415
+        ExecutionVariantRefused,
+        admit_task_execution_variant,
+        reference_execution_variants,
+    )
+
+    # A MoE model routes to the declared-only 'moe' execution shape (refused), never a dense shape:
+    # detect it from the sealed parameter accounting's expert/router scopes when one is provided.
+    plan_targets_moe = parameter_accounting is not None and any(
+        observation.scope.kind.value in {"expert_group", "expert_set", "router"}
+        for observation in parameter_accounting.observations
+    )
+    try:
+        admit_task_execution_variant(
+            TaskType(constraints.task_type),
+            is_moe=plan_targets_moe,
+            declared_variants=reference_execution_variants(),
+        )
+    except ExecutionVariantRefused as exc:
+        raise PlannerError(str(exc)) from exc
     _require_enum(constraints.export_format, ExportFormat, "export_format")
     _require_enum(constraints.optim, Optimizer, "optimizer")
     _require_enum(constraints.allocator_policy, AllocatorPolicy, "allocator_policy")
