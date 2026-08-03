@@ -613,14 +613,16 @@ def test_platform_run_resume_from_requires_a_training_runner():
     assert "training run" in result.output
 
 
-def test_platform_run_resume_from_a_bad_checkpoint_fails_closed(tmp_path):
-    # --resume-from pointing at a directory with no readable checkpoint manifest is refused up front.
+def test_platform_run_resume_from_a_sealed_plan_is_gated_to_phase_c(tmp_path):
+    # Every platform-run plan is sealed, and a sealed-configuration resume is not yet supported (it lands
+    # with the Phase-C sealed-resume slice), so --resume-from fails early with the reason - not a
+    # confusing deep refusal after the run is dispatched.
     result = runner.invoke(
         app,
         ["platform-run", "--demo", "--runner", "cpu_toy", "--resume-from", str(tmp_path / "nope")],
     )
     assert result.exit_code == 2
-    assert "Invalid resume checkpoint" in result.output
+    assert "not yet supported" in result.output
 
 
 def test_platform_run_help_exposes_the_bounded_preflight_deadline():

@@ -531,7 +531,10 @@ def execute_run(
 
         try:
             parent_manifest = load_checkpoint_manifest(resume.checkpoint_dir)
-        except CheckpointError as exc:
+        except (CheckpointError, OSError) as exc:
+            # A manifest that verifies then vanishes (removed / permissions / I/O) between checks raises
+            # OSError, not CheckpointError; both defer to a failed manifest rather than an unclassified
+            # crash before the terminal classifier runs.
             resume_error = exc
         else:
             if rid == parent_manifest.source_run_id:

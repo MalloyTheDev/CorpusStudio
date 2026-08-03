@@ -3311,14 +3311,22 @@ def run_training(  # pragma: no cover - optional training-stack integration
         resume_manifest = verify_checkpoint_integrity(resume.checkpoint_dir)
         verify_matches_request(resume_manifest, resume)
         materialized_resume_dir = Path(config.output_dir).parent / "_resume_hf"
-        resume_from_checkpoint = str(
-            materialize_hf_checkpoint(
-                torch_module=torch,
-                sealed_dir=resume.checkpoint_dir,
-                hf_dir=materialized_resume_dir,
-                peft_model=evidence_model,
+        try:
+            resume_from_checkpoint = str(
+                materialize_hf_checkpoint(
+                    torch_module=torch,
+                    sealed_dir=resume.checkpoint_dir,
+                    hf_dir=materialized_resume_dir,
+                    peft_model=evidence_model,
+                )
             )
-        )
+        except Exception:
+            # materialize_hf_checkpoint may create _resume_hf and copy the (large) optimizer state before
+            # rejecting an incomplete checkpoint (e.g. a missing scheduler). Do not leave that partial
+            # translation behind on the persistent run dir.
+            shutil.rmtree(materialized_resume_dir, ignore_errors=True)
+            materialized_resume_dir = None
+            raise
         _stage(
             "resume",
             f"resuming from checkpoint {resume.checkpoint_id} at optimizer step "

@@ -304,7 +304,23 @@ def execute_run_subprocess(
         raise ValueError("heartbeat_interval_s must be positive")
     rid = _sanitize_id(run_id or new_uuid7_id("run"))
     out_dir_str = str(out_dir) if out_dir is not None else None
-    record_dir = run_record_directory(out_dir_str, rid) if out_dir_str is not None else None
+    # A resumed run must mint a fresh id. If a direct/protocol caller reuses the parent's id, do NOT open
+    # the parent's record dir here (the mkdir + events "w" below would truncate it) - the child-side
+    # execute_run() then fails the resume admission. The CLI always mints fresh ids, so this only guards
+    # a library/protocol caller.
+    skip_parent_record = False
+    if resume is not None and out_dir_str is not None:
+        from corpus_studio.platform.checkpoint import load_checkpoint_manifest  # noqa: PLC0415
+
+        try:
+            skip_parent_record = rid == load_checkpoint_manifest(resume.checkpoint_dir).source_run_id
+        except Exception:  # noqa: BLE001 - a bad manifest is the child's to classify, not ours here.
+            skip_parent_record = False
+    record_dir = (
+        run_record_directory(out_dir_str, rid)
+        if out_dir_str is not None and not skip_parent_record
+        else None
+    )
     started = clock()
 
     # Refuse a broken seal at the public parent boundary, before a worker sees identities or input.
