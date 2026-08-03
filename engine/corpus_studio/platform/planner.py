@@ -841,10 +841,18 @@ def build_run_plan(
         observation.scope.kind.value in {"expert_group", "expert_set", "router"}
         for observation in parameter_accounting.observations
     )
+    # A preference request resolves by its specific objective, not the task alone (DPO/IPO/KTO/ORPO
+    # differ): the only built preference shape is QLoRA-DPO, so a preference task maps to the dpo_qlora
+    # objective. It is declared at contract_validated (< workload_verified), so admission REFUSES it at
+    # execution until the DPO worker lands - a preference plan is now admitted-as-known-but-refused.
+    admission_objective_id = (
+        "dpo_qlora" if constraints.task_type == TaskType.preference.value else None
+    )
     try:
         admit_task_execution_variant(
             TaskType(constraints.task_type),
             is_moe=plan_targets_moe,
+            objective_id=admission_objective_id,
             declared_variants=reference_execution_variants(),
         )
     except ExecutionVariantRefused as exc:

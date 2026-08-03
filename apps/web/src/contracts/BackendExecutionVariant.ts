@@ -17,7 +17,7 @@ export type ExecutionVariantSupport = "declared" | "contract_validated" | "worke
  * the others are contract-expressible modes that are NOT executable until separately implemented,
  * measured, and admitted. The set is deliberately small - only variants justified by current scope.
  */
-export type ExecutionVariantKind = "dense_qlora_sft" | "dense_full_finetune" | "pretraining" | "moe";
+export type ExecutionVariantKind = "dense_qlora_sft" | "dense_full_finetune" | "pretraining" | "moe" | "preference_dpo";
 
 /**
  * A control-plane CAPABILITY DESCRIPTOR: a backend's support for one execution variant of the

@@ -74,6 +74,15 @@ _VARIANT_ENVELOPE: dict[ExecutionVariantKind, VariantEnvelope] = {
         allows_full_parameter=True,
         allows_multiple_datasets=True,
     ),
+    # Offline DPO (S2b-2): QLoRA preference optimization - a CAUSAL_LM PEFT adapter over a frozen
+    # reference model, one preference-pair dataset (no rollout / no reward model).
+    ExecutionVariantKind.preference_dpo: VariantEnvelope(
+        task_type=_CAUSAL_LM,
+        requires_causal_lm=True,
+        requires_peft_adapter=True,
+        allows_full_parameter=False,
+        allows_multiple_datasets=False,
+    ),
 }
 
 # Derived from the enum's definition order (ascending support), so it cannot drift from the ladder:
@@ -112,6 +121,11 @@ def reference_execution_variants() -> tuple[BackendExecutionVariant, ...]:
             backend_id="corpus_studio",
             variant_kind=ExecutionVariantKind.moe,
             support=ExecutionVariantSupport.declared,
+        ),
+        BackendExecutionVariant(
+            backend_id="corpus_studio",
+            variant_kind=ExecutionVariantKind.preference_dpo,
+            support=ExecutionVariantSupport.contract_validated,
         ),
     )
 
@@ -152,16 +166,28 @@ _TASK_TO_VARIANT_KIND: dict[TaskType, ExecutionVariantKind] = {
     TaskType.pretraining: ExecutionVariantKind.pretraining,
 }
 
+# A preference task is NOT co-linear with one shape: DPO / IPO / KTO / ORPO are distinct objectives, and
+# only the QLoRA-DPO objective has a built (PEFT) execution shape. So the preference bridge is keyed on
+# the SPECIFIC objective, not the task - a task-level 'preference -> DPO' mapping would mis-claim the
+# others. An unrecognized or absent preference objective maps to no shape and is refused fail-closed.
+_PREFERENCE_OBJECTIVE_TO_VARIANT: dict[str, ExecutionVariantKind] = {
+    "dpo_qlora": ExecutionVariantKind.preference_dpo,
+}
+
 
 def execution_variant_kind_for_task(
-    task_type: TaskType, *, is_moe: bool = False
+    task_type: TaskType, *, is_moe: bool = False, objective_id: str | None = None
 ) -> ExecutionVariantKind | None:
-    """The execution-variant SHAPE for a (task, topology) request, or ``None`` when no built shape maps.
-    Shape is objective x topology, so a MoE model routes to the ``moe`` shape (declared-only) REGARDLESS
-    of task - never to a dense shape; a dense model maps by task (sft -> dense_qlora_sft,
-    pretraining -> pretraining; other objectives have no built path yet). ``None`` -> refuse fail-closed."""
+    """The execution-variant SHAPE for a (task, objective, topology) request, or ``None`` when no built
+    shape maps. Shape is objective x topology, so a MoE model routes to the ``moe`` shape (declared-only)
+    REGARDLESS of task - never to a dense shape. A dense model maps by task (sft -> dense_qlora_sft,
+    pretraining -> pretraining). A PREFERENCE task maps by its specific ``objective_id`` (only the
+    QLoRA-DPO objective has a built shape; DPO/IPO/KTO/ORPO are NOT interchangeable), so a bare
+    preference task without a recognized objective maps to nothing. ``None`` -> refuse fail-closed."""
     if is_moe:
         return ExecutionVariantKind.moe
+    if task_type == TaskType.preference:
+        return _PREFERENCE_OBJECTIVE_TO_VARIANT.get(objective_id) if objective_id else None
     return _TASK_TO_VARIANT_KIND.get(task_type)
 
 
@@ -169,20 +195,25 @@ def admit_task_execution_variant(
     task_type: TaskType,
     *,
     is_moe: bool = False,
+    objective_id: str | None = None,
     declared_variants: tuple[BackendExecutionVariant, ...],
     required_support: ExecutionVariantSupport = ExecutionVariantSupport.workload_verified,
 ) -> BackendExecutionVariant:
-    """Resolve a requested ``task_type`` + topology to its execution-variant shape and admit it
-    fail-closed against the backend's ``declared_variants``. Returns the admitted variant, or raises
-    :class:`ExecutionVariantRefused` when the (task, topology) maps to no executable shape, the backend
-    does not declare that shape, or the declared support is below ``required_support``. A MoE model is
-    routed to the declared-only ``moe`` shape, so it is refused here - never admitted as dense. Never
+    """Resolve a requested ``task_type`` + objective + topology to its execution-variant shape and admit
+    it fail-closed against the backend's ``declared_variants``. Returns the admitted variant, or raises
+    :class:`ExecutionVariantRefused` when the (task, objective, topology) maps to no executable shape,
+    the backend does not declare that shape, or the declared support is below ``required_support``. A MoE
+    model is routed to the declared-only ``moe`` shape, so it is refused here - never admitted as dense.
+    A preference task resolves by its specific ``objective_id`` (only QLoRA-DPO has a built shape). Never
     falls back."""
-    kind = execution_variant_kind_for_task(task_type, is_moe=is_moe)
+    kind = execution_variant_kind_for_task(task_type, is_moe=is_moe, objective_id=objective_id)
     if kind is None:
+        request = f"task '{task_type.value}'"
+        if objective_id:
+            request += f" objective '{objective_id}'"
         raise ExecutionVariantRefused(
-            f"task '{task_type.value}' maps to no executable execution variant - the first-party harness "
-            f"implements the dense-QLoRA-SFT shape (pretraining/MoE are declared-only); refused"
+            f"{request} maps to no executable execution variant - the first-party harness implements the "
+            f"dense-QLoRA-SFT shape (pretraining/MoE/preference are declared-only or unbuilt); refused"
         )
     declared = next((item for item in declared_variants if item.variant_kind == kind), None)
     if declared is None:

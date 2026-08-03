@@ -415,8 +415,10 @@ def test_planner_admits_the_dense_qlora_sft_task_and_refuses_unexecutable_varian
     # pretraining maps to a declared-only shape -> refused below workload_verified.
     with pytest.raises(PlannerError, match="below the required 'workload_verified'"):
         _plan(_profile(cc_major=8), _report(), task_type="pretraining")
-    # preference maps to no executable shape at all -> refused.
-    with pytest.raises(PlannerError, match="no executable execution variant"):
+    # preference maps to its objective-specific shape (QLoRA-DPO's preference_dpo), which is declared at
+    # contract_validated -> admitted-as-known but refused at execution (below workload_verified), NOT
+    # "no variant" - the objective-aware bridge recognizes the shape but the worker has not landed.
+    with pytest.raises(PlannerError, match="'preference_dpo' is 'contract_validated'"):
         _plan(_profile(cc_major=8), _report(), task_type="preference")
 
 
