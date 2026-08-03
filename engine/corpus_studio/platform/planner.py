@@ -835,9 +835,17 @@ def build_run_plan(
         reference_execution_variants,
     )
 
+    # A MoE model routes to the declared-only 'moe' execution shape (refused), never a dense shape:
+    # detect it from the sealed parameter accounting's expert/router scopes when one is provided.
+    plan_targets_moe = parameter_accounting is not None and any(
+        observation.scope.kind.value in {"expert_group", "expert_set", "router"}
+        for observation in parameter_accounting.observations
+    )
     try:
         admit_task_execution_variant(
-            TaskType(constraints.task_type), declared_variants=reference_execution_variants()
+            TaskType(constraints.task_type),
+            is_moe=plan_targets_moe,
+            declared_variants=reference_execution_variants(),
         )
     except ExecutionVariantRefused as exc:
         raise PlannerError(str(exc)) from exc

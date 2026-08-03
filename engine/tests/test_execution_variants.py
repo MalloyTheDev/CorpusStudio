@@ -256,3 +256,13 @@ def test_task_maps_to_an_execution_variant_shape_and_admits_fail_closed():
     assert execution_variant_kind_for_task(TaskType.preference) is None
     with pytest.raises(ExecutionVariantRefused, match="no executable execution variant"):
         admit_task_execution_variant(TaskType.preference, declared_variants=declared)
+
+
+def test_moe_topology_routes_to_the_declared_only_shape_regardless_of_task():
+    # Shape is objective x TOPOLOGY: a MoE model routes to the moe shape even for an sft task, and moe is
+    # declared-only -> refused fail-closed. It is never misclassified as the workload_verified dense
+    # shape (the sealed registry marks MoE declared-only).
+    declared = reference_execution_variants()
+    assert execution_variant_kind_for_task(TaskType.sft, is_moe=True) == ExecutionVariantKind.moe
+    with pytest.raises(ExecutionVariantRefused, match="below the required 'workload_verified'"):
+        admit_task_execution_variant(TaskType.sft, is_moe=True, declared_variants=declared)

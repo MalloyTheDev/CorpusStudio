@@ -153,24 +153,32 @@ _TASK_TO_VARIANT_KIND: dict[TaskType, ExecutionVariantKind] = {
 }
 
 
-def execution_variant_kind_for_task(task_type: TaskType) -> ExecutionVariantKind | None:
-    """The execution-variant shape the first-party harness maps a requested ``task_type`` to, or ``None``
-    when the task has no mapped executable shape yet (preference / reward / distillation / grpo / ... are
-    declared objectives with no built execution path). ``None`` -> the caller refuses fail-closed."""
+def execution_variant_kind_for_task(
+    task_type: TaskType, *, is_moe: bool = False
+) -> ExecutionVariantKind | None:
+    """The execution-variant SHAPE for a (task, topology) request, or ``None`` when no built shape maps.
+    Shape is objective x topology, so a MoE model routes to the ``moe`` shape (declared-only) REGARDLESS
+    of task - never to a dense shape; a dense model maps by task (sft -> dense_qlora_sft,
+    pretraining -> pretraining; other objectives have no built path yet). ``None`` -> refuse fail-closed."""
+    if is_moe:
+        return ExecutionVariantKind.moe
     return _TASK_TO_VARIANT_KIND.get(task_type)
 
 
 def admit_task_execution_variant(
     task_type: TaskType,
     *,
+    is_moe: bool = False,
     declared_variants: tuple[BackendExecutionVariant, ...],
     required_support: ExecutionVariantSupport = ExecutionVariantSupport.workload_verified,
 ) -> BackendExecutionVariant:
-    """Resolve a requested ``task_type`` to its execution-variant shape and admit it fail-closed against
-    the backend's ``declared_variants``. Returns the admitted variant, or raises
-    :class:`ExecutionVariantRefused` when the task maps to no executable shape, the backend does not
-    declare that shape, or the declared support is below ``required_support``. Never falls back."""
-    kind = execution_variant_kind_for_task(task_type)
+    """Resolve a requested ``task_type`` + topology to its execution-variant shape and admit it
+    fail-closed against the backend's ``declared_variants``. Returns the admitted variant, or raises
+    :class:`ExecutionVariantRefused` when the (task, topology) maps to no executable shape, the backend
+    does not declare that shape, or the declared support is below ``required_support``. A MoE model is
+    routed to the declared-only ``moe`` shape, so it is refused here - never admitted as dense. Never
+    falls back."""
+    kind = execution_variant_kind_for_task(task_type, is_moe=is_moe)
     if kind is None:
         raise ExecutionVariantRefused(
             f"task '{task_type.value}' maps to no executable execution variant - the first-party harness "
