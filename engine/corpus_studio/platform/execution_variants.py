@@ -74,6 +74,15 @@ _VARIANT_ENVELOPE: dict[ExecutionVariantKind, VariantEnvelope] = {
         allows_full_parameter=True,
         allows_multiple_datasets=True,
     ),
+    # Offline DPO (S2): a QLoRA preference-optimization shape - a CAUSAL_LM PEFT adapter over a frozen
+    # reference model, one preference-pair dataset. No rollout / no reward model (that is the RL slice).
+    ExecutionVariantKind.preference_dpo: VariantEnvelope(
+        task_type=_CAUSAL_LM,
+        requires_causal_lm=True,
+        requires_peft_adapter=True,
+        allows_full_parameter=False,
+        allows_multiple_datasets=False,
+    ),
 }
 
 # Derived from the enum's definition order (ascending support), so it cannot drift from the ladder:
@@ -113,6 +122,11 @@ def reference_execution_variants() -> tuple[BackendExecutionVariant, ...]:
             variant_kind=ExecutionVariantKind.moe,
             support=ExecutionVariantSupport.declared,
         ),
+        BackendExecutionVariant(
+            backend_id="corpus_studio",
+            variant_kind=ExecutionVariantKind.preference_dpo,
+            support=ExecutionVariantSupport.contract_validated,
+        ),
     )
 
 
@@ -150,6 +164,7 @@ def admit_execution_variant(
 _TASK_TO_VARIANT_KIND: dict[TaskType, ExecutionVariantKind] = {
     TaskType.sft: ExecutionVariantKind.dense_qlora_sft,
     TaskType.pretraining: ExecutionVariantKind.pretraining,
+    TaskType.preference: ExecutionVariantKind.preference_dpo,
 }
 
 

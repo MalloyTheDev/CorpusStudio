@@ -769,6 +769,7 @@ class ExecutionVariantKind(str, Enum):
     dense_full_finetune = "dense_full_finetune"
     pretraining = "pretraining"
     moe = "moe"
+    preference_dpo = "preference_dpo"
 
 
 class ExecutionVariantSupport(str, Enum):

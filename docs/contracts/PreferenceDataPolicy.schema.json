@@ -1,0 +1,77 @@
+{
+  "additionalProperties": false,
+  "description": "Additive, dense/MoE-safe preference-pair data policy (S2 / DPO), PARALLEL to the SFT-only\n``TrainingDataPolicy`` - never reuse the SFT contract for preference pairs. It pins the exact\nchosen/rejected pair schema + formatter + chat template + the DPO prompt/response length budget, so a\npreference run formats every pair identically and refuses (never silently truncates) an over-length\nprompt or response. The reference model + DPO loss hyperparameters live on the DPO execution seal\n(a separate worker slice), not here - this is only the data contract.",
+  "properties": {
+    "chat_template_sha256": {
+      "anyOf": [
+        {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Chat Template Sha256"
+    },
+    "contract_version": {
+      "const": "1.0.0",
+      "default": "1.0.0",
+      "title": "Contract Version",
+      "type": "string"
+    },
+    "data_seed": {
+      "default": 42,
+      "minimum": 0,
+      "title": "Data Seed",
+      "type": "integer"
+    },
+    "formatter_id": {
+      "minLength": 1,
+      "title": "Formatter Id",
+      "type": "string"
+    },
+    "formatter_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Formatter Sha256",
+      "type": "string"
+    },
+    "max_length": {
+      "minimum": 1,
+      "title": "Max Length",
+      "type": "integer"
+    },
+    "max_prompt_length": {
+      "minimum": 1,
+      "title": "Max Prompt Length",
+      "type": "integer"
+    },
+    "pair_schema": {
+      "default": "chosen_rejected",
+      "enum": [
+        "chosen_rejected",
+        "preference_pair"
+      ],
+      "title": "Pair Schema",
+      "type": "string"
+    },
+    "truncation_policy": {
+      "default": "refuse",
+      "enum": [
+        "refuse",
+        "allow"
+      ],
+      "title": "Truncation Policy",
+      "type": "string"
+    }
+  },
+  "required": [
+    "formatter_id",
+    "formatter_sha256",
+    "max_prompt_length",
+    "max_length"
+  ],
+  "title": "PreferenceDataPolicy",
+  "type": "object"
+}

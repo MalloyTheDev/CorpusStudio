@@ -3658,6 +3658,33 @@ class PretrainingDataPolicy(ContractModel):
         return self
 
 
+class PreferenceDataPolicy(ContractModel):
+    """Additive, dense/MoE-safe preference-pair data policy (S2 / DPO), PARALLEL to the SFT-only
+    ``TrainingDataPolicy`` - never reuse the SFT contract for preference pairs. It pins the exact
+    chosen/rejected pair schema + formatter + chat template + the DPO prompt/response length budget, so a
+    preference run formats every pair identically and refuses (never silently truncates) an over-length
+    prompt or response. The reference model + DPO loss hyperparameters live on the DPO execution seal
+    (a separate worker slice), not here - this is only the data contract."""
+
+    contract_version: CONTRACT_VERSION_LITERAL = "1.0.0"
+    pair_schema: Literal["chosen_rejected", "preference_pair"] = "chosen_rejected"
+    formatter_id: str = Field(min_length=1)
+    formatter_sha256: str = Field(pattern=SHA256_PATTERN)
+    chat_template_sha256: str | None = Field(default=None, pattern=SHA256_PATTERN)
+    max_prompt_length: int = Field(ge=1)
+    max_length: int = Field(ge=1)
+    truncation_policy: Literal["refuse", "allow"] = "refuse"
+    data_seed: int = Field(default=42, ge=0)
+
+    @model_validator(mode="after")
+    def _validate_policy(self) -> PreferenceDataPolicy:
+        if self.max_prompt_length >= self.max_length:
+            raise ValueError(
+                "max_prompt_length must be below max_length so the chosen/rejected response has room"
+            )
+        return self
+
+
 class TrainerInterfacePolicy(ContractModel):
     """Version- and field-exact adapter to the installed TRL/Transformers surface."""
 

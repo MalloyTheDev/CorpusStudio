@@ -35,6 +35,7 @@ from .contracts import (
     ObjectiveCompatibilityReport,
     OrchestratorAdapter,
     ParameterAccountingReport,
+    PreferenceDataPolicy,
     PretrainingDataPolicy,
     ProjectManifest,
     PythonRuntime,
@@ -92,6 +93,7 @@ ROOT_CONTRACTS: dict[str, type[ContractModel]] = {
     "OrchestratorAdapter": OrchestratorAdapter,
     "BackendExecutionVariant": BackendExecutionVariant,
     "PretrainingDataPolicy": PretrainingDataPolicy,
+    "PreferenceDataPolicy": PreferenceDataPolicy,
 }
 
 

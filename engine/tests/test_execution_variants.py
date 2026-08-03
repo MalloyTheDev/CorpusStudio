@@ -252,10 +252,15 @@ def test_task_maps_to_an_execution_variant_shape_and_admits_fail_closed():
     assert execution_variant_kind_for_task(TaskType.pretraining) == ExecutionVariantKind.pretraining
     with pytest.raises(ExecutionVariantRefused, match="below the required"):
         admit_task_execution_variant(TaskType.pretraining, declared_variants=declared)
-    # preference -> NO executable shape yet: refused.
-    assert execution_variant_kind_for_task(TaskType.preference) is None
-    with pytest.raises(ExecutionVariantRefused, match="no executable execution variant"):
+    # preference -> the preference_dpo shape (contract_validated, S2): a KNOWN variant now, but still
+    # refused at execution (below workload_verified) - no longer "no executable variant".
+    assert execution_variant_kind_for_task(TaskType.preference) == ExecutionVariantKind.preference_dpo
+    with pytest.raises(ExecutionVariantRefused, match="below the required 'workload_verified'"):
         admit_task_execution_variant(TaskType.preference, declared_variants=declared)
+    # a task with genuinely no mapped shape still refuses as "no executable variant".
+    assert execution_variant_kind_for_task(TaskType.reward) is None
+    with pytest.raises(ExecutionVariantRefused, match="no executable execution variant"):
+        admit_task_execution_variant(TaskType.reward, declared_variants=declared)
 
 
 def test_moe_topology_routes_to_the_declared_only_shape_regardless_of_task():

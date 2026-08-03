@@ -415,9 +415,12 @@ def test_planner_admits_the_dense_qlora_sft_task_and_refuses_unexecutable_varian
     # pretraining maps to a declared-only shape -> refused below workload_verified.
     with pytest.raises(PlannerError, match="below the required 'workload_verified'"):
         _plan(_profile(cc_major=8), _report(), task_type="pretraining")
-    # preference maps to no executable shape at all -> refused.
-    with pytest.raises(PlannerError, match="no executable execution variant"):
+    # preference now maps to the preference_dpo shape (contract_validated, S2) -> admitted as a KNOWN
+    # variant but refused below workload_verified; reward still maps to no shape -> refused as none.
+    with pytest.raises(PlannerError, match="below the required 'workload_verified'"):
         _plan(_profile(cc_major=8), _report(), task_type="preference")
+    with pytest.raises(PlannerError, match="no executable execution variant"):
+        _plan(_profile(cc_major=8), _report(), task_type="reward")
 
 
 def test_native_windows_blackwell_host_forces_math_bf16_nf4_qlora():
