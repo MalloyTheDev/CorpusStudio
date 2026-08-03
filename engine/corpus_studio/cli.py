@@ -544,6 +544,12 @@ def platform_run(
         "--telemetry-interval-ms",
         help="[--telemetry] Requested sampler cadence in milliseconds (observed cadence is measured).",
     ),
+    resume_from: Optional[Path] = typer.Option(
+        None,
+        "--resume-from",
+        help="Resume from a sealed checkpoint directory: restore its exact lineage and continue "
+        "training in a fresh run. A tampered or incompatible checkpoint fails closed.",
+    ),
 ):
     """Execute a RunPlan through the headless run supervisor: stream RunEvents to stderr and produce
     a RunManifest on stdout. 'echo' is a dependency-light no-op that proves the supervisor without a
@@ -594,6 +600,27 @@ def platform_run(
         except ExecutionConfigurationError as exc:
             typer.echo(str(exc), err=True)
             raise typer.Exit(2) from exc
+
+    resume_request = None
+    if resume_from is not None:
+        if runner_name not in ("cpu_toy", "training"):
+            typer.echo(
+                "--resume-from applies only to a training run (--runner cpu_toy|training).", err=True
+            )
+            raise typer.Exit(2)
+        from corpus_studio.platform.checkpoint import CheckpointError, load_checkpoint_manifest
+        from corpus_studio.platform.contracts import CheckpointResumeRequest
+
+        try:
+            resume_manifest = load_checkpoint_manifest(resume_from)
+        except (CheckpointError, OSError, ValueError) as exc:
+            typer.echo(f"Invalid resume checkpoint: {exc}", err=True)
+            raise typer.Exit(2) from exc
+        resume_request = CheckpointResumeRequest(
+            checkpoint_id=resume_manifest.checkpoint_id,
+            checkpoint_manifest_hash=resume_manifest.checkpoint_manifest_hash,
+            checkpoint_dir=str(resume_from),
+        )
 
     managed_worker_argv = None
     telemetry_identity_overlay = None
@@ -703,6 +730,7 @@ def platform_run(
                 out_dir=out_dir,
                 worker_argv=managed_worker_argv,
                 telemetry=sampler,
+                resume=resume_request,
             )
         else:
             if runner_name == "echo":
@@ -712,7 +740,12 @@ def platform_run(
 
                 runner = TrainingRunner(cpu_toy=(runner_name == "cpu_toy"), max_steps=max_steps)
             result = execute_run(
-                plan, runner, run_id=run_identity, out_dir=out_dir, telemetry=sampler
+                plan,
+                runner,
+                run_id=run_identity,
+                out_dir=out_dir,
+                telemetry=sampler,
+                resume=resume_request,
             )
     finally:
         managed_lease.close()

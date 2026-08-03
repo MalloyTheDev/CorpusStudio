@@ -29,6 +29,7 @@ from typing import Any, Protocol
 
 from corpus_studio.platform.contracts import (
     ArtifactManifest,
+    CheckpointResumeRequest,
     FailureRecord,
     FitClassification,
     HeartbeatBody,
@@ -117,15 +118,25 @@ def _default_worker_argv(plan: RunPlan, runner_name: str) -> list[str]:
     ]
 
 
-def _dispatch_line(plan: RunPlan, run_id: str, heartbeat_interval_s: int) -> str:
+def _dispatch_line(
+    plan: RunPlan,
+    run_id: str,
+    heartbeat_interval_s: int,
+    resume: CheckpointResumeRequest | None = None,
+) -> str:
     """The single ``run_dispatch`` WorkerMessage JSON the parent writes to the child's stdin."""
+    body: dict[str, Any] = {
+        "run_id": run_id,
+        "plan": plan.model_dump(mode="json"),
+        "heartbeat_interval_seconds": heartbeat_interval_s,
+    }
+    # A resume dispatch carries the exact checkpoint the child must restore before continuing; a fresh
+    # run omits it. The worker refuses it unless the restored bytes reproduce the sealed manifest hash.
+    if resume is not None:
+        body["resume"] = resume.model_dump(mode="json")
     envelope = build_worker_message(
         "run_dispatch",
-        {
-            "run_id": run_id,
-            "plan": plan.model_dump(mode="json"),
-            "heartbeat_interval_seconds": heartbeat_interval_s,
-        },
+        body,
         message_id=f"c-{run_id}",
         direction="core_to_worker",
     )
@@ -268,6 +279,7 @@ def execute_run_subprocess(
     telemetry: TelemetryControl | None = None,
     warmup_steps: int = 2,
     capture_stderr: bool | None = None,
+    resume: CheckpointResumeRequest | None = None,
 ) -> SupervisedRun:
     """Run ``plan`` in a supervised child process and return its :class:`SupervisedRun`.
 
@@ -567,7 +579,7 @@ def execute_run_subprocess(
                     _validate_hello(message.type, parse_worker_body(message), plan)
                     if message.correlation_id is not None:
                         raise WorkerProtocolError("hello must not carry a correlation_id")
-                    _write_dispatch(proc, plan, rid, heartbeat_interval_s)
+                    _write_dispatch(proc, plan, rid, heartbeat_interval_s, resume)
                     dispatched = True
                     _reset_progress_deadline()
                     continue
@@ -805,13 +817,19 @@ def _reader(proc: subprocess.Popen[str], lines: queue.Queue[tuple[str, str | Non
         lines.put(("eof", None))
 
 
-def _write_dispatch(proc: subprocess.Popen[str], plan: RunPlan, rid: str, hb: int) -> None:
+def _write_dispatch(
+    proc: subprocess.Popen[str],
+    plan: RunPlan,
+    rid: str,
+    hb: int,
+    resume: CheckpointResumeRequest | None = None,
+) -> None:
     """Send the run_dispatch to the child's stdin, then close it. Guarded: a fast-crashing child may
     already be gone, so the write/close can raise — the eof/exit path then classifies it, no orphan."""
     if proc.stdin is None:  # pragma: no cover - stdin is always PIPE here
         return
     try:
-        proc.stdin.write(_dispatch_line(plan, rid, hb) + "\n")
+        proc.stdin.write(_dispatch_line(plan, rid, hb, resume) + "\n")
         proc.stdin.flush()
     except (BrokenPipeError, OSError):
         pass

@@ -606,6 +606,23 @@ def test_platform_run_refuses_a_tampered_plan_hash(tmp_path):
     assert "plan_hash does not match" in result.output
 
 
+def test_platform_run_resume_from_requires_a_training_runner():
+    # --resume-from only applies to a training run; with the echo/demo runner it fails closed.
+    result = runner.invoke(app, ["platform-run", "--demo", "--resume-from", "/tmp/whatever"])
+    assert result.exit_code == 2
+    assert "training run" in result.output
+
+
+def test_platform_run_resume_from_a_bad_checkpoint_fails_closed(tmp_path):
+    # --resume-from pointing at a directory with no readable checkpoint manifest is refused up front.
+    result = runner.invoke(
+        app,
+        ["platform-run", "--demo", "--runner", "cpu_toy", "--resume-from", str(tmp_path / "nope")],
+    )
+    assert result.exit_code == 2
+    assert "Invalid resume checkpoint" in result.output
+
+
 def test_platform_run_help_exposes_the_bounded_preflight_deadline():
     from typer.main import get_command
 
