@@ -3903,6 +3903,222 @@ class ResolvedExecutionConfiguration(ContractModel):
         return self
 
 
+class ReferenceModelBinding(ContractModel):
+    """The frozen reference policy an offline DPO run scores its trainable policy against.
+
+    ``frozen_base`` is the standard QLoRA-DPO path: the reference IS the same quantized base with the
+    trainable adapter disabled, so TRL computes reference log-probs by turning the PEFT adapter off and
+    no second model is loaded. ``prior_adapter`` instead pins an explicit, previously-trained adapter as
+    the reference. ``precompute_ref_log_probs`` caches the reference log-probs once (a memory/throughput
+    trade the worker honors verbatim)."""
+
+    mode: Literal["frozen_base", "prior_adapter"] = "frozen_base"
+    adapter_ref: Ref | None = None
+    precompute_ref_log_probs: bool = False
+
+    @model_validator(mode="after")
+    def _validate_reference(self) -> ReferenceModelBinding:
+        if self.mode == "prior_adapter":
+            if self.adapter_ref is None or not _is_pinned_ref(self.adapter_ref):
+                raise ValueError("a prior-adapter reference must pin the reference adapter by hash")
+        elif self.adapter_ref is not None:
+            raise ValueError("a frozen-base reference reuses the base and takes no adapter ref")
+        return self
+
+
+class PreferenceOptimizationSpec(ContractModel):
+    """The offline preference-optimization loss (TRL ``DPOConfig``): the KL strength ``beta``, the
+    ``loss_type`` variant, conservative ``label_smoothing`` for noisy preferences, and the frozen
+    reference binding. Kept off :class:`PreferenceDataPolicy` (which is only the data contract) so the
+    data policy stays reusable by a non-DPO preference method later."""
+
+    objective: Literal["dpo"] = "dpo"
+    beta: float = Field(default=0.1, gt=0)
+    loss_type: Literal["sigmoid", "hinge", "ipo"] = "sigmoid"
+    label_smoothing: float = Field(default=0.0, ge=0, lt=0.5)
+    reference_model: ReferenceModelBinding
+
+
+class ResolvedPreferenceExecutionConfiguration(ContractModel):
+    """The hash-sealed configuration for an offline preference-optimization (DPO) run - the sibling of
+    :class:`ResolvedExecutionConfiguration` for the ``preference_dpo`` execution variant.
+
+    The dense-QLoRA-SFT seal is byte-locked two ways (its own ``configuration_hash`` AND a committed
+    semantic golden over its full field set), so DPO's execution semantics live on THIS separate
+    contract, never as new fields on the SFT config. It reuses every shared execution sub-spec
+    (placement / precision / attention / adapter / optimizer / sequence / batching / checkpoint /
+    schedule / trainer interface) and adds only what DPO needs: a :class:`PreferenceDataPolicy` (never
+    the SFT ``TrainingDataPolicy``) and a :class:`PreferenceOptimizationSpec` (beta / loss / reference).
+
+    NOT yet consumed by a worker: the ``DPOTrainer`` branch, a workload-verified 4B run, and the
+    milestone wheel that promotes ``preference_dpo`` to ``workload_verified`` are a separate, gated
+    slice. This contract only makes a DPO run EXPRESSIBLE and hash-sealable so the architecture is
+    reviewable before any worker byte changes."""
+
+    contract_version: CONTRACT_VERSION_LITERAL = "1.0.0"
+    configuration_id: str = Field(pattern=_ID)
+    configuration_hash: str = Field(pattern=SHA256_PATTERN)
+    backend_ref: Ref
+    environment_ref: Ref
+    environment_binding: Literal["profile_snapshot", "managed_lock"]
+    capability_report_ref: Ref
+    inputs: ExecutionInputs
+    objective_ref: Ref
+    runtime_mode: Literal["training", "cpu_toy"]
+    precision: PrecisionExecutionPolicy
+    attention: AttentionExecutionPolicy
+    device_map: list[DeviceMapEntry] = Field(min_length=1)
+    adapter: AdapterSpec
+    optimizer: OptimizerSpec
+    sequence: SequenceSpec
+    batching: BatchingSpec
+    checkpoint_policy: CheckpointPolicy
+    schedule: TrainingSchedule
+    data: PreferenceDataPolicy
+    preference: PreferenceOptimizationSpec
+    trainer_interface: TrainerInterfacePolicy
+    export_format: ExportFormat
+    trust_remote_code: Literal[False] = False
+    use_safetensors: Literal[True] = True
+    bnb_4bit_use_double_quant: bool
+    adapter_task_type: Literal["CAUSAL_LM"] = "CAUSAL_LM"
+    save_strategy: Literal["no", "steps"] = "steps"
+    gradient_checkpointing: bool = True
+    output_dir: str = Field(min_length=1)
+    output_layout: Literal["run_scoped_v1"] = "run_scoped_v1"
+    seed: int = Field(default=42, ge=0)
+    data_seed: int = Field(default=42, ge=0)
+
+    @model_validator(mode="after")
+    def _validate_preference_configuration(self) -> ResolvedPreferenceExecutionConfiguration:
+        # Shared safety invariants are enforced independently here rather than by refactoring the
+        # byte-locked SFT validator - the two seals stay decoupled so a change to one can never perturb
+        # the other's hash.
+        for label, ref in (
+            ("backend_ref", self.backend_ref),
+            ("environment_ref", self.environment_ref),
+            ("capability_report_ref", self.capability_report_ref),
+            ("objective_ref", self.objective_ref),
+        ):
+            if not _is_pinned_ref(ref):
+                raise ValueError(f"resolved preference execution {label} must be hash-pinned")
+        environment_hash = self.environment_ref.hash
+        assert environment_hash is not None and environment_hash.value is not None
+        if (
+            self.environment_binding == "profile_snapshot"
+            and self.environment_ref.id != environment_hash.value
+        ):
+            raise ValueError("profile-snapshot environment identity must be its content hash")
+        if (
+            self.environment_binding == "managed_lock"
+            and self.environment_ref.id == environment_hash.value
+        ):
+            raise ValueError("managed-lock environment identity must name the managed environment")
+        keys = [item.module for item in self.device_map]
+        if keys != sorted(set(keys)) or "" not in keys:
+            raise ValueError("device_map must be sorted, unique, and bind the root module")
+        if self.runtime_mode == "cpu_toy" and self.device_map != [
+            DeviceMapEntry(module="", device="cpu")
+        ]:
+            raise ValueError("cpu_toy execution must bind the entire model to CPU")
+        # QLoRA-DPO is the target: the reference is the frozen base with the PEFT adapter disabled, so a
+        # LoRA-family adapter is mandatory and full-parameter DPO is refused.
+        if self.adapter.method not in {
+            AdapterMethod.lora,
+            AdapterMethod.qlora,
+            AdapterMethod.dora,
+        }:
+            raise ValueError("preference optimization requires a LoRA-family (PEFT) adapter")
+        if any(
+            value is None
+            for value in (
+                self.adapter.lora_r,
+                self.adapter.lora_alpha,
+                self.adapter.lora_dropout,
+                self.adapter.target_modules,
+                self.adapter.bias,
+            )
+        ):
+            raise ValueError("LoRA-family execution must seal every adapter default")
+        if self.precision.master_weight_dtype is None:
+            raise ValueError("LoRA-family execution must seal the trainable master-weight dtype")
+        if (
+            self.precision.quantized_storage_format == QuantizationMode.none
+            and self.precision.weight_storage_dtype != self.precision.forward_compute_dtype
+        ):
+            raise ValueError(
+                "the first-party unquantized trainer requires weight and forward dtypes to match"
+            )
+        if (
+            self.precision.quantized_storage_format != QuantizationMode.none
+            and self.precision.dequantization_dtype != self.precision.forward_compute_dtype
+        ):
+            raise ValueError(
+                "the first-party quantized trainer requires dequantization and forward dtypes to match"
+            )
+        if self.batching.fallback_grad_accumulation_steps is None:
+            raise ValueError("the first-party trainer requires exact gradient accumulation")
+        expected_token_target = (
+            self.sequence.max_sequence_len
+            * self.batching.micro_batch_size
+            * self.batching.fallback_grad_accumulation_steps
+        )
+        if self.batching.supervised_token_accumulation_target != expected_token_target:
+            raise ValueError(
+                "the fixed-microbatch trainer requires its advisory token target to be derived exactly"
+            )
+        if self.sequence.buckets:
+            raise ValueError("the first-party trainer does not implement sequence buckets")
+        # DPO renders discrete prompt+chosen / prompt+rejected pairs; it never packs sequences.
+        if self.sequence.packing:
+            raise ValueError("preference optimization does not pack sequences")
+        # The sealed DPO length budget must fit the sealed sequence window (PreferenceDataPolicy already
+        # guarantees max_prompt_length < max_length).
+        if self.data.max_length > self.sequence.max_sequence_len:
+            raise ValueError("data.max_length must fit within the sealed sequence length")
+        if any(
+            value is None
+            for value in (
+                self.optimizer.weight_decay,
+                self.optimizer.lr_scheduler,
+                self.optimizer.warmup_ratio,
+            )
+        ):
+            raise ValueError("the first-party trainer requires all optimizer defaults")
+        if self.checkpoint_policy.cadence_seconds is not None:
+            raise ValueError("the first-party trainer does not implement time-based checkpoints")
+        if self.checkpoint_policy.reload_verify:
+            raise ValueError(
+                "the first-party trainer does not implement checkpoint reload verification"
+            )
+        if self.checkpoint_policy.impl != CheckpointImpl.adapter_only:
+            raise ValueError("the first-party trainer implements adapter-only checkpoints")
+        if self.save_strategy == "steps":
+            if self.checkpoint_policy.cadence_optimizer_steps is None:
+                raise ValueError("step checkpointing requires an optimizer-step cadence")
+        elif (
+            self.checkpoint_policy.cadence_optimizer_steps is not None
+            or self.checkpoint_policy.keep_last is not None
+        ):
+            raise ValueError("disabled checkpointing cannot carry cadence or retention settings")
+        quantized = self.precision.quantized_storage_format != QuantizationMode.none
+        if not quantized and self.bnb_4bit_use_double_quant:
+            raise ValueError("double quantization is invalid for unquantized execution")
+        if self.export_format != ExportFormat.adapter_peft:
+            raise ValueError("the first-party resolved executor emits PEFT adapters only")
+        external_package = self.attention.flash_attention_package
+        if external_package is not None:
+            exact_packages = {
+                (item.name.lower(), item.version)
+                for item in self.trainer_interface.package_versions
+            }
+            if (external_package.name.lower(), external_package.version) not in exact_packages:
+                raise ValueError(
+                    "external FlashAttention must be included in exact trainer package versions"
+                )
+        return self
+
+
 class EvalSchedule(ContractModel):
     before_run: bool = True
     after_run: bool = True
