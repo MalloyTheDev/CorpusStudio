@@ -3142,6 +3142,10 @@ def run_training(  # pragma: no cover - optional training-stack integration
             # even when an epoch ends on a PARTIAL accumulation window - `global_step * grad_accum`
             # overstates the consumed cursor there.
             self._consumed_microsteps = 0
+            # The message of the first LOST checkpoint write, if any. A checkpoint-enabled run that
+            # dropped a required cadence write is not admissible as resumable (checked after training);
+            # kept here rather than raised so the write fault never alters the training trajectory.
+            self._write_failed: str | None = None
 
         def on_substep_end(self, args: Any, state: Any, control: Any, **kwargs: Any) -> None:
             self._consumed_microsteps += 1
@@ -3186,7 +3190,10 @@ def run_training(  # pragma: no cover - optional training-stack integration
                     )
             except Exception as exc:  # noqa: BLE001 - a checkpoint write must never break training.
                 # Surface the resumability loss in BOTH the run event stream AND captured stderr; never
-                # raise into the loop (a checkpoint fault must not alter the training trajectory).
+                # raise into the loop (a checkpoint fault must not alter the training trajectory). The
+                # lost write is remembered so terminal admission can fail a run that promised checkpoints.
+                if self._write_failed is None:
+                    self._write_failed = f"step {int(state.global_step)}: {exc}"
                 _stage(
                     "checkpoint_warning",
                     f"checkpoint write at optimizer step {int(state.global_step)} failed: {exc}",
@@ -3200,8 +3207,10 @@ def run_training(  # pragma: no cover - optional training-stack integration
     import inspect  # noqa: PLC0415
 
     callbacks: list[Any] = [_ProgressCallback()]
+    checkpoint_callback: Any = None
     if checkpoint_coordinator is not None:
-        callbacks.append(_CheckpointCallback())
+        checkpoint_callback = _CheckpointCallback()
+        callbacks.append(checkpoint_callback)
     trainer_kwargs: dict[str, Any] = {
         "model": model,
         "args": sft_config,
@@ -3335,6 +3344,18 @@ def run_training(  # pragma: no cover - optional training-stack integration
 
         steps = int(getattr(trainer.state, "global_step", 0) or 0)
         verify_completed_step_count(config, steps)
+        # A checkpoint-enabled run that LOST a required cadence write is not a clean success: the plan
+        # promised sealed checkpoints at this cadence and one was not published, so the run is not
+        # resumable as promised. Training itself completed (the callback never raised into the loop); the
+        # RUN fails terminal admission with a checkpoint taxonomy.
+        if checkpoint_callback is not None and checkpoint_callback._write_failed is not None:
+            raise TrainingEvidenceError(
+                "a required checkpoint write was lost during training "
+                f"({checkpoint_callback._write_failed}); the run is not admissible as resumable at the "
+                "sealed cadence",
+                taxonomy=FailureTaxonomy.CHECKPOINT_FAILURE,
+                stage=StageMarker.checkpoint,
+            )
         execution_evidence = None
         if execution_tracker is not None:
             if (

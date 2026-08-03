@@ -835,6 +835,32 @@ def test_training_runner_threads_checkpoint_identities_for_a_step_checkpoint_pla
     assert "checkpoints" in str(captured.get("checkpoints_root"))
 
 
+def test_checkpoint_enabled_run_admits_its_inventory_onto_the_manifest(monkeypatch):
+    # #486: a checkpoint-ENABLED plan whose trainer wrote checkpoints must be ADMITTED - the
+    # disabled-policy rejection only fires when checkpointing is off - and the run-scoped checkpoint
+    # inventory is surfaced on the terminal manifest instead of being silently dropped.
+    monkeypatch.setattr(
+        "corpus_studio.training.trainer.run_training", _fake_run_training(2, checkpoints=True)
+    )
+    plan = demo_training_plan()
+    execution_body = plan.resolved_execution.model_dump(mode="json")
+    execution_body["configuration_hash"] = "0" * 64
+    execution_body["save_strategy"] = "steps"
+    execution_body["checkpoint_policy"]["cadence_optimizer_steps"] = 1
+    execution_body["checkpoint_policy"]["keep_last"] = 1
+    execution = P.ResolvedExecutionConfiguration.model_validate(execution_body)
+    execution = execution.model_copy(
+        update={"configuration_hash": execution_configuration_hash_for(execution)}
+    )
+    body = plan.model_dump(mode="json")
+    body["resolved_execution"] = execution.model_dump(mode="json")
+    body["checkpoint_policy"] = execution.checkpoint_policy.model_dump(mode="json")
+
+    result = execute_run(_reseal(body), TrainingRunner(cpu_toy=True), clock=_CLOCK)
+    assert result.manifest.state == "succeeded"
+    assert result.manifest.checkpoints  # the inventory is recorded, not silently dropped
+
+
 def test_training_runner_rejects_unvalidated_disabled_policy_fields(monkeypatch):
     # A disabled (save_strategy="no") policy that still carries retention is inconsistent. In production
     # such a plan fails JSON validation; a tampered one (model_copy bypasses it) is rejected as

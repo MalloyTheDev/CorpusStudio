@@ -197,6 +197,9 @@ class RunContext:
         # only layer that may create TrainingSuccessEvidence or a proven native fit.
         self.measured_peak: MemoryMetrics | None = None
         self.training_execution_evidence: TrainingExecutionEvidence | None = None
+        # Run-scoped sealed checkpoints the trainer wrote (a checkpoint-enabled plan's inventory),
+        # surfaced onto the terminal manifest so a resumable run's checkpoints are recorded.
+        self.checkpoints: list[str] = []
 
     @property
     def cancelled(self) -> bool:
@@ -773,6 +776,7 @@ def execute_run(
         ),
         artifact_ids=artifact_ids,
         failure=failure,
+        checkpoints=ctx.checkpoints,
         # A resumed run records the exact parent run + checkpoint it continued from - never a silent
         # reuse of the parent identity. Present only when this execution resumed from a checkpoint.
         resume_lineage=resume_lineage if state == "succeeded" else None,

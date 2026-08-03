@@ -486,13 +486,21 @@ class TrainingRunner:
                     "step or a stall, likely a WDDM spill) — see the stderr watchdog note."
                 )
 
-        if result.checkpoints:
+        checkpointing_enabled = (
+            execution is not None
+            and execution.checkpoint_policy.cadence_optimizer_steps is not None
+        )
+        if result.checkpoints and not checkpointing_enabled:
+            # Checkpoints from a run whose sealed policy DISABLED saving is a first-party-worker bug.
             raise RunnerFailure(
                 "trainer produced intermediate checkpoints despite the sealed disabled save policy",
                 taxonomy=FailureTaxonomy.CHECKPOINT_FAILURE,
                 stage=StageMarker.export,
                 remediation="preserve the failed-run evidence and repair the first-party worker",
             )
+        # A checkpoint-enabled plan's inventory is expected; surface it on the terminal manifest so a
+        # long run's resumable checkpoints are recorded, not silently dropped.
+        ctx.checkpoints = list(result.checkpoints)
         try:
             verify_run_scoped_output_path(
                 execution,
