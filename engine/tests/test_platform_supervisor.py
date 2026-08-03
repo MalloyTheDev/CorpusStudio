@@ -225,6 +225,20 @@ def test_log_and_warning_events_are_emitted():
     assert warning.message == "running on CPU"
 
 
+def test_checkpoint_written_event_is_typed_and_stage_tagged():
+    class _CheckpointingRunner(EchoRunner):
+        name = "echo"
+
+        def run(self, ctx: RunContext):
+            ctx.emit_checkpoint_written("sealed checkpoint run-x-ckpt-step-00000004 at optimizer step 4")
+            return []
+
+    result = execute_run(demo_run_plan(), _CheckpointingRunner(), clock=_CLOCK)
+    event = next(e for e in result.events if e.event_type == "checkpoint_written")
+    assert event.stage is not None and event.stage.value == "checkpoint"
+    assert "sealed checkpoint" in (event.message or "")
+
+
 def test_default_clock_stamps_a_real_timestamp():
     # No clock override → exercises the real _now_iso default.
     result = execute_run(demo_run_plan(), EchoRunner(steps=1))

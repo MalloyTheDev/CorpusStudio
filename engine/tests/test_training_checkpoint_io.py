@@ -453,6 +453,33 @@ def test_coordinator_rejects_bad_cadence_and_keep_last(tmp_path: Path) -> None:
         _coordinator(tmp_path, cadence=1, keep_last=0)
 
 
+def test_written_checkpoints_reports_surviving_run_scoped_dirs(tmp_path: Path) -> None:
+    # The run manifest's checkpoint inventory comes from here, not a glob of the adapter output dir.
+    coord = _coordinator(tmp_path, cadence=1, keep_last=2)
+    for step in range(1, 6):
+        _tick(coord, step)
+    survivors = coord.written_checkpoints
+    assert [p.name for p in survivors] == ["step-00000004", "step-00000005"]  # pruned, freshest last
+    assert all(p.is_dir() for p in survivors)  # every reported dir exists under checkpoints_root
+
+
+def test_materialize_rejects_a_checkpoint_missing_its_scheduler(tmp_path: Path) -> None:
+    # _save writes no lr_scheduler, so the sealed checkpoint has no scheduler.pt. A faithful hybrid HF
+    # resume cannot continue the LR schedule without it, so materialize fails closed (never hands
+    # SFTTrainer a silently-degraded resume). The scheduler check precedes any adapter/safetensors work,
+    # so a stub peft_model is never reached.
+    torch, _kwargs, _manifest = _save(tmp_path)
+    with pytest.raises(ck.CheckpointError) as exc:
+        cio.materialize_hf_checkpoint(
+            torch_module=torch,
+            sealed_dir=tmp_path / "step-000006",
+            hf_dir=tmp_path / "_resume_hf",
+            peft_model=object(),
+        )
+    assert exc.value.reason == "incomplete"
+    assert "scheduler" in str(exc.value)
+
+
 # --------------------------------------------------------------------------------------------------
 # Sealed policy resolution (checkpoint-free stays unchanged; checkpoint-enabled requires a cadence)
 # --------------------------------------------------------------------------------------------------

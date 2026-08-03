@@ -27,6 +27,7 @@ import json
 import math
 from numbers import Real
 import re
+import shutil
 import sys
 from pathlib import Path
 from typing import Any, Callable, Literal, cast
@@ -3249,7 +3250,20 @@ def run_training(  # pragma: no cover - optional training-stack integration
     # (optimizer / scheduler / RNG / data-cursor skip / step count) consume it. Verify-before-materialize:
     # a tampered checkpoint fails closed and is never deserialized. Proven bitwise-faithful to HF's own.
     resume_from_checkpoint: str | None = None
+    materialized_resume_dir: Path | None = None
     if resume is not None:
+        if config.execution_configuration_hash is not None:
+            # Sealed-configuration resume is refused (fail closed) until the Phase-C sealed-resume
+            # slice: the execution-evidence tracker requires on_step_end values to begin at 1 and it
+            # captures the pre-training snapshot BEFORE the checkpoint adapter is restored, so a resumed
+            # sealed run would either raise a spurious OPTIMIZER_FAILURE or count the restored parent
+            # weights as this run's own changes. The exploratory resume path (no execution seal) is
+            # unaffected and fully supported.
+            raise TrainerError(
+                "sealed-configuration resume is not yet supported: the execution-evidence tracker "
+                "does not offset for a resumed-from step. Resume an exploratory plan, or wait for the "
+                "Phase-C sealed-resume slice."
+            )
         from corpus_studio.platform.checkpoint import (  # noqa: PLC0415
             verify_checkpoint_integrity,
             verify_matches_request,
@@ -3258,11 +3272,12 @@ def run_training(  # pragma: no cover - optional training-stack integration
 
         resume_manifest = verify_checkpoint_integrity(resume.checkpoint_dir)
         verify_matches_request(resume_manifest, resume)
+        materialized_resume_dir = Path(config.output_dir).parent / "_resume_hf"
         resume_from_checkpoint = str(
             materialize_hf_checkpoint(
                 torch_module=torch,
                 sealed_dir=resume.checkpoint_dir,
-                hf_dir=Path(config.output_dir).parent / "_resume_hf",
+                hf_dir=materialized_resume_dir,
                 peft_model=evidence_model,
             )
         )
@@ -3279,7 +3294,15 @@ def run_training(  # pragma: no cover - optional training-stack integration
         torch,
         config,
     ):
-        train_output = trainer.train(resume_from_checkpoint=resume_from_checkpoint)
+        try:
+            train_output = trainer.train(resume_from_checkpoint=resume_from_checkpoint)
+        finally:
+            # The materialized HF checkpoint is only needed to seed SFTTrainer's restore; remove it once
+            # train() has consumed it (success or failure) so the persistent run dir does not accumulate
+            # a full translated checkpoint - the CheckpointCoordinator does not track it, so keep_last
+            # cannot prune it.
+            if materialized_resume_dir is not None:
+                shutil.rmtree(materialized_resume_dir, ignore_errors=True)
 
         steps = int(getattr(trainer.state, "global_step", 0) or 0)
         verify_completed_step_count(config, steps)
@@ -3316,7 +3339,14 @@ def run_training(  # pragma: no cover - optional training-stack integration
         try:
             trainer.save_model(str(output_dir))  # saves the LoRA adapter
             tokenizer.save_pretrained(str(output_dir))
-            checkpoints = _list_checkpoints(output_dir)
+            # Cadence checkpoints are written under the run-scoped checkpoints_root by the coordinator,
+            # not the adapter output dir; take the inventory from it so the run manifest records the
+            # checkpoints that were actually sealed (a glob of output_dir would report none).
+            checkpoints = (
+                [str(p) for p in checkpoint_coordinator.written_checkpoints]
+                if checkpoint_coordinator is not None
+                else _list_checkpoints(output_dir)
+            )
         except Exception as exc:  # noqa: BLE001 - normalize framework/filesystem export failures.
             raise TrainingEvidenceError(
                 f"final adapter serialization failed: {exc}",

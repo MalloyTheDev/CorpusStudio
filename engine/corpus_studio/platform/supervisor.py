@@ -236,6 +236,11 @@ class RunContext:
     def emit_warning(self, message: str) -> RunEvent:
         return self._event("warning", message=message)
 
+    def emit_checkpoint_written(self, message: str) -> RunEvent:
+        # A sealed checkpoint is its own event type so a consumer can track resumability without
+        # pattern-matching stage messages; stage=checkpoint keeps it filterable either way.
+        return self._event("checkpoint_written", stage=StageMarker.checkpoint, message=message)
+
     def emit_artifact(self, artifact: ProducedArtifact) -> RunEvent:
         return self._event(
             "artifact_produced",

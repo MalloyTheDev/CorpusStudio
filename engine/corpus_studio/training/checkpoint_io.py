@@ -464,17 +464,23 @@ def materialize_hf_checkpoint(
 
     import shutil  # noqa: PLC0415
 
-    from safetensors.torch import save_file  # noqa: PLC0415
-
     verify_checkpoint_integrity(sealed_dir)  # fail closed before reading anything
     source = Path(sealed_dir)
     dest = Path(hf_dir)
     dest.mkdir(parents=True, exist_ok=True)
 
-    # optimizer + scheduler are torch state_dicts in both formats - a direct copy.
+    # optimizer + scheduler are torch state_dicts in both formats - a direct copy. Both the scheduler
+    # and the trainer_state below are REQUIRED for a faithful hybrid resume: without scheduler.pt HF
+    # continues with a fresh LR schedule, so a checkpoint missing it is rejected (fail closed) rather
+    # than handed to SFTTrainer as a silently-degraded resume that breaks the exact-lineage guarantee.
     shutil.copy(source / OPTIMIZER_FILE, dest / "optimizer.pt")
-    if (source / SCHEDULER_FILE).exists():
-        shutil.copy(source / SCHEDULER_FILE, dest / "scheduler.pt")
+    if not (source / SCHEDULER_FILE).exists():
+        raise CheckpointError(
+            "checkpoint has no scheduler state; the hybrid HF resume cannot continue the LR schedule "
+            "faithfully without it",
+            reason="incomplete",
+        )
+    shutil.copy(source / SCHEDULER_FILE, dest / "scheduler.pt")
 
     # RNG: our {torch_cpu, python, numpy, cuda} -> HF's {cpu, python, numpy, cuda}. HF's _load_rng_state
     # requires the 'numpy' key, which the writer captures via include_numpy=True.
@@ -485,18 +491,24 @@ def materialize_hf_checkpoint(
     if "numpy" in our_rng:
         hf_rng["numpy"] = our_rng["numpy"]
     if "cuda" in our_rng:
-        # HF's single-process resume expects the CUDA rng as ONE ByteTensor (torch.cuda.get_rng_state);
-        # our capture stores get_rng_state_all() (a per-device list). Unwrap the single-device case (the
-        # product's 1-GPU host) so HF restores it; keep the list for a genuine multi-device capture (HF's
-        # distributed set_rng_state_all path). Without this, HF logs "expected ByteTensor, got list" and
-        # silently skips the CUDA rng restore.
+        # HF's single-process resume expects the CUDA rng as ONE ByteTensor (torch.cuda.set_rng_state);
+        # our capture stores get_rng_state_all() (a per-visible-device list). This runner seals
+        # world_size=1, so select the entry for the device the model actually lives on rather than
+        # assuming a length-1 list - a host with >1 visible CUDA device would otherwise hand HF a
+        # multi-element list, which it logs as "expected ByteTensor, got list" and silently skips.
         cuda_state = our_rng["cuda"]
-        if isinstance(cuda_state, list) and len(cuda_state) == 1:
-            cuda_state = cuda_state[0]
+        if isinstance(cuda_state, list):
+            device_index = next(
+                (p.device.index for p in peft_model.parameters() if p.device.type == "cuda"),
+                0,
+            )
+            cuda_state = cuda_state[device_index] if device_index < len(cuda_state) else cuda_state[0]
         hf_rng["cuda"] = cuda_state
     torch_module.save(hf_rng, str(dest / "rng_state.pth"))
 
     # Adapter weights -> adapter_model.safetensors + adapter_config.json (from the live PEFT model).
+    from safetensors.torch import save_file  # noqa: PLC0415
+
     adapter_state = torch_module.load(str(source / ADAPTER_FILE), weights_only=False)
     save_file(
         {name: tensor.contiguous() for name, tensor in adapter_state.items()},
@@ -505,9 +517,15 @@ def materialize_hf_checkpoint(
     peft_model.peft_config["default"].save_pretrained(str(dest))
 
     # HF trainer_state.json: the exact HF TrainerState we sealed at checkpoint time (round-trip
-    # faithful - drives HF's data-cursor skip + step count).
-    if (source / TRAINER_STATE_FILE).exists():
-        shutil.copy(source / TRAINER_STATE_FILE, dest / "trainer_state.json")
+    # faithful - drives HF's data-cursor skip + step count). REQUIRED: without it HF restarts at step 0,
+    # silently discarding the resumed-from progress, so a checkpoint missing it fails closed.
+    if not (source / TRAINER_STATE_FILE).exists():
+        raise CheckpointError(
+            "checkpoint has no trainer_state; the hybrid HF resume would restart at step 0 and lose "
+            "the resumed-from optimizer step + data cursor",
+            reason="incomplete",
+        )
+    shutil.copy(source / TRAINER_STATE_FILE, dest / "trainer_state.json")
     return dest
 
 
@@ -617,6 +635,15 @@ class CheckpointCoordinator:
         self._written.append(final_dir)
         self._prune()
         return manifest
+
+    @property
+    def written_checkpoints(self) -> list[Path]:
+        """The sealed checkpoint directories this coordinator wrote and did not prune (freshest last).
+
+        The run-scoped checkpoints live under ``checkpoints_root``, not the adapter output dir, so the
+        run manifest's checkpoint inventory must come from here - a plain glob of the adapter dir finds
+        none of them."""
+        return list(self._written)
 
     def _prune(self) -> None:
         """Remove this run's own oldest checkpoints beyond ``keep_last``. Only directories this

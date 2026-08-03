@@ -339,6 +339,17 @@ class TrainingRunner:
             # the subprocess supervisor's silence timer. Real progress, not a liveness heartbeat.
             watchdog.beat()
             nonlocal last_stage
+            if name == "checkpoint":
+                # A sealed checkpoint write -> the typed checkpoint_written event, not a generic stage,
+                # so a consumer tracking resumability need not pattern-match stage messages.
+                last_stage = StageMarker.checkpoint
+                ctx.emit_checkpoint_written(message)
+                return
+            if name == "checkpoint_warning":
+                # A best-effort checkpoint write failed (training continues) -> a real warning event,
+                # not an "unrecognized progress stage" log that reads like a trainer typo.
+                ctx.emit_warning(message)
+                return
             marker, intentional_note = _classify_progress_name(name)
             if marker is None:
                 # Not a typed stage -> emit a LOG. A known intentional sub-stage note (precision_verified)
@@ -352,6 +363,8 @@ class TrainingRunner:
 
         # Exact-lineage checkpoint writing + resume (#440/#486). Only the first-party sealed backend
         # consumes these; a plain fresh run passes nothing (unchanged behavior).
+        from corpus_studio.platform.checkpoint import CheckpointError  # noqa: PLC0415
+
         checkpoint_kwargs: dict[str, Any] = {}
         if backend_label in ("corpus_studio", "cpu_toy"):
             from pathlib import Path  # noqa: PLC0415
@@ -362,7 +375,6 @@ class TrainingRunner:
             # resume may continue with or without further writes). Fail closed on an incompatible resume.
             if ctx.resume is not None:
                 from corpus_studio.platform.checkpoint import (  # noqa: PLC0415
-                    CheckpointError,
                     load_checkpoint_manifest,
                     verify_resumable_into,
                 )
@@ -435,6 +447,16 @@ class TrainingRunner:
                 taxonomy=FailureTaxonomy.UNSUPPORTED_CONFIGURATION,
                 stage=last_stage,
                 remediation="preserve the failed run and inspect the sealed execution contract",
+            ) from exc
+        except CheckpointError as exc:
+            # The trainer re-verifies the resume checkpoint (integrity + the exact pin) before it
+            # materializes; a failure there means a tampered/incompatible source, not a generic runtime
+            # fault. Classify it so the terminal manifest names the checkpoint failure (CheckpointError
+            # is a ValueError, so without this it would fall through to the generic classifier as FAIL).
+            raise RunnerFailure(
+                f"resume checkpoint failed verification: {exc}",
+                taxonomy=FailureTaxonomy.UNSUPPORTED_CONFIGURATION,
+                stage=StageMarker.process_start,
             ) from exc
         except Exception as exc:  # noqa: BLE001 — classify the runtime failure, don't leak it as FAIL
             taxonomy, remediation = classify_training_error(exc)

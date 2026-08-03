@@ -901,6 +901,42 @@ def test_training_runner_rejects_an_incompatible_resume(tmp_path, monkeypatch):
     assert called == []  # fail closed BEFORE the trainer is invoked
 
 
+def test_trainer_side_resume_verification_failure_is_classified_as_a_checkpoint_failure(
+    tmp_path, monkeypatch
+):
+    # The runner's own pre-check passes (a compatible source), but the TRAINER re-verifies the checkpoint
+    # (integrity + the exact pin) before it materializes and raises CheckpointError. CheckpointError is a
+    # ValueError, not a TrainerError, so without an explicit handler it would fall through the generic
+    # classifier as FAIL; the runner names it an UNSUPPORTED_CONFIGURATION checkpoint failure instead.
+    from test_platform_checkpoint import _build_sealed_checkpoint  # noqa: PLC0415
+
+    from corpus_studio.platform.checkpoint import CheckpointError  # noqa: PLC0415
+    from corpus_studio.platform.contracts import CheckpointResumeRequest  # noqa: PLC0415
+
+    plan = demo_training_plan()
+    sealed = _build_sealed_checkpoint(tmp_path / "c", plan=plan)  # a COMPATIBLE source
+    request = CheckpointResumeRequest(
+        checkpoint_id=sealed.checkpoint_id,
+        checkpoint_manifest_hash=sealed.checkpoint_manifest_hash,
+        checkpoint_dir=str(tmp_path / "c"),
+    )
+
+    def _raise_checkpoint_error(*_a, **_k):
+        raise CheckpointError(
+            "restored bytes do not reproduce the sealed manifest hash", reason="hash_mismatch"
+        )
+
+    monkeypatch.setattr(
+        "corpus_studio.training.trainer.run_training", _raise_checkpoint_error
+    )
+    result = execute_run(plan, TrainingRunner(cpu_toy=True), resume=request, clock=_CLOCK)
+
+    assert result.manifest.state == "failed"
+    assert result.manifest.failure is not None
+    assert result.manifest.failure.taxonomy == FailureTaxonomy.UNSUPPORTED_CONFIGURATION
+    assert "failed verification" in result.manifest.failure.message
+
+
 @pytest.mark.parametrize(
     "save_strategy, cadence, keep_last, message",
     [
@@ -1058,6 +1094,37 @@ def test_runner_streams_setup_stage_events_from_the_trainer(monkeypatch):
     assert "model_loaded" in stages
     assert "adapter_attached" in stages
     assert "optimizer_created" in stages
+
+
+def test_runner_emits_typed_checkpoint_and_warning_events(monkeypatch):
+    # A sealed checkpoint write -> the typed checkpoint_written event; a best-effort checkpoint FAILURE
+    # -> a warning event. Neither is downgraded to an "unrecognized progress stage" log, so a consumer
+    # can track resumability without pattern-matching stage messages (#486 observability).
+    def _trainer(config, *, progress_callback=None, stage_callback=None, **_kw):
+        if stage_callback is not None:
+            stage_callback("checkpoint", "sealed checkpoint run-x-ckpt-step-00000004 at optimizer step 4")
+            stage_callback("checkpoint_warning", "checkpoint write at optimizer step 6 failed: disk full")
+        if progress_callback is not None:
+            progress_callback(1, 1, 0.5)
+        adapter_path = _write_fake_adapter(config.output_dir)
+        return TrainResult(
+            output_dir=config.output_dir,
+            adapter_path=adapter_path,
+            base_model=config.base_model,
+            cpu_toy=True,
+            steps=1,
+            execution_evidence=_execution_evidence(1, {1: 0.5}),
+        )
+
+    monkeypatch.setattr("corpus_studio.training.trainer.run_training", _trainer)
+    result = execute_run(demo_training_plan(), TrainingRunner(cpu_toy=True), clock=_CLOCK)
+    types = [e.event_type for e in result.events]
+    assert "checkpoint_written" in types
+    ckpt = next(e for e in result.events if e.event_type == "checkpoint_written")
+    assert ckpt.stage is not None and ckpt.stage.value == "checkpoint"
+    warning = next(e for e in result.events if e.event_type == "warning")
+    assert "failed" in (warning.message or "")
+    assert not any("unrecognized progress stage" in (e.message or "") for e in result.events)
 
 
 def test_runner_records_the_measured_fit_from_the_watchdog(monkeypatch):
