@@ -148,6 +148,10 @@
     {
       "contract": "PretrainingDataPolicy",
       "file": "PretrainingDataPolicy.schema.json"
+    },
+    {
+      "contract": "PreferenceDataPolicy",
+      "file": "PreferenceDataPolicy.schema.json"
     }
   ]
 }

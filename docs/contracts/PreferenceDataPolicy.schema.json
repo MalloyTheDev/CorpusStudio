@@ -1,0 +1,95 @@
+{
+  "additionalProperties": false,
+  "description": "Additive, dense/MoE-safe preference-pair data policy (S2 / DPO), PARALLEL to the SFT-only\n``TrainingDataPolicy`` - never reuse the SFT contract for preference pairs. It seals the RESOLVED\ndataset schema identity - ``schema_id`` + ``schema_version`` + ``schema_sha256`` (the content digest\nof the resolved schema) - so a consumer fails closed on a row-layout change even when a project-local\nschema shadows the builtin and edits fields without bumping the version; plus the pair render layout,\nformatter + chat template, and the DPO prompt/response length budget - so a preference run formats\nevery pair identically and refuses (never silently truncates) an over-length prompt or response. The\nreference model + DPO loss hyperparameters live on the DPO execution seal (a separate worker slice),\nnot here - this is only the data contract.",
+  "properties": {
+    "chat_template_sha256": {
+      "anyOf": [
+        {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Chat Template Sha256"
+    },
+    "contract_version": {
+      "const": "1.0.0",
+      "default": "1.0.0",
+      "title": "Contract Version",
+      "type": "string"
+    },
+    "data_seed": {
+      "default": 42,
+      "minimum": 0,
+      "title": "Data Seed",
+      "type": "integer"
+    },
+    "formatter_id": {
+      "minLength": 1,
+      "title": "Formatter Id",
+      "type": "string"
+    },
+    "formatter_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Formatter Sha256",
+      "type": "string"
+    },
+    "max_length": {
+      "minimum": 1,
+      "title": "Max Length",
+      "type": "integer"
+    },
+    "max_prompt_length": {
+      "minimum": 1,
+      "title": "Max Prompt Length",
+      "type": "integer"
+    },
+    "pair_schema": {
+      "default": "chosen_rejected",
+      "enum": [
+        "chosen_rejected",
+        "preference_pair"
+      ],
+      "title": "Pair Schema",
+      "type": "string"
+    },
+    "schema_id": {
+      "minLength": 1,
+      "title": "Schema Id",
+      "type": "string"
+    },
+    "schema_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Schema Sha256",
+      "type": "string"
+    },
+    "schema_version": {
+      "minLength": 1,
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "truncation_policy": {
+      "default": "refuse",
+      "enum": [
+        "refuse",
+        "allow"
+      ],
+      "title": "Truncation Policy",
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema_id",
+    "schema_version",
+    "schema_sha256",
+    "formatter_id",
+    "formatter_sha256",
+    "max_prompt_length",
+    "max_length"
+  ],
+  "title": "PreferenceDataPolicy",
+  "type": "object"
+}
