@@ -608,18 +608,9 @@ def platform_run(
                 "--resume-from applies only to a training run (--runner cpu_toy|training).", err=True
             )
             raise typer.Exit(2)
-        if plan.resolved_execution is not None:
-            # Every shipping platform-run plan is sealed, and a sealed-configuration resume is not yet
-            # supported: the execution-evidence tracker does not offset for a resumed-from step (it lands
-            # with the Phase-C sealed-resume slice). Fail early with the reason rather than dispatch a run
-            # the trainer would refuse deep in setup; the sealed checkpoint stays valid and resumable
-            # once that ships.
-            typer.echo(
-                "Resume of a sealed platform-run plan is not yet supported (it lands with the Phase-C "
-                "sealed-resume slice); the sealed checkpoint remains valid and resumable once it ships.",
-                err=True,
-            )
-            raise typer.Exit(2)
+        # Sealed-configuration resume is now supported: the execution-evidence tracker offsets for the
+        # resumed-from step and a resumed run records its lineage, validated end to end on a sealed 7B
+        # checkpoint->resume through the v10 worker wheel (Phase C). A resume needs a v10+ worker.
         from corpus_studio.platform.checkpoint import CheckpointError, load_checkpoint_manifest
         from corpus_studio.platform.contracts import CheckpointResumeRequest
 

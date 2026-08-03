@@ -454,7 +454,15 @@ must not be claimed from this state alone:
   IEEE cell) has since trained 7B QLoRA at seq 4096 on this host and measured native-Linux workload
   VRAM (peak ~11.77 GB @ seq 4096; envelope math<=2048 / flash<=3072 / flash+liger+paged=4096 - see
   `docs/CURRENT_STATE.md`, `examples/wbg/README.md`). NOTE (2026-07-30): the **product** lineage reproduced this end to end on a freshly created `backend-corpus-studio-flash-liger-paged-v9-product` environment (`HARDWARE_VERIFIED`) built from the sealed v9 **product** wheel (sha `45bdd989`, source `7ae4ea6`) - the after-r8 WBG run measured **`NATIVE_TIGHT`** (peak ~11.4 GB, zero spill) and passed its held-out completeness eval. The full recipe, training metrics, and eval numbers are canonical in `examples/wbg/README.md` (run `run-019fb083`, evidence under `runs/wbg-after-seq4096-v9product/`). Both are exploratory evidence, not a sealed
-  research result, and does not retire the paper's immutable ladder.
+  research result, and does not retire the paper's immutable ladder. NOTE (2026-08-03): the
+  checkpoint/resume worker path (execution-evidence step offset + resumed-run attribution + fresh-id
+  lineage) was reproducibly built into the **v10 PRODUCT wheel** (`corpus_studio_engine-1.3.0`, sha
+  `2f792a37...`, source `9c32b4d`, ancestor-bound to `origin/main`); a **v10 env**
+  (`backend-corpus-studio-flash-liger-paged-v10-product`, `HARDWARE_VERIFIED`, lock `970c85f5...`, v9's
+  exact torch stack + the v10 wheel) was sealed from it; and a **sealed 7B (Qwen2.5-7B nf4)
+  checkpoint->resume ran on the v10 wheel's own bytes** - a FRESH resume process from a step-2 checkpoint
+  reproduced the uninterrupted loss trajectory bit-for-bit (step3 2.4404, step4 2.2823; evidence
+  `resumed_from_step=2`, `step_losses=[3,4]`). Exploratory/product evidence, NOT a sealed IEEE cell.
 - **DeepSpeed / FSDP / CPU / NVMe offload** — no offload backend is implemented; only the dense
   `backend-corpus-studio` reference exists.
 - **Real offload fit, PCIe/NVMe throughput, sustained-write endurance** — the NVMe has not been
