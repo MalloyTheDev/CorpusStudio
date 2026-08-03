@@ -2150,6 +2150,74 @@ def test_training_execution_tracker_binds_optimizer_steps_and_finite_losses():
     assert [item.optimizer_step for item in evidence.step_losses] == [1, 2]
 
 
+def _resumable_tracker(torch, adapter_parameter, resumed_from_step):  # noqa: ANN001
+    optimizer = type(
+        "Optimizer",
+        (),
+        {
+            "param_groups": [{"params": [adapter_parameter]}],
+            "state": {},
+            "step": lambda self: None,
+            "zero_grad": lambda self: None,
+        },
+    )()
+    gradients = GradientObservationTracker(["adapter.a"])
+    gradients.eligible_parameter_ids = {"adapter.a": id(adapter_parameter)}
+    gradients.observe("adapter.a")
+    tracker = TrainingExecutionTracker(
+        config=_sealed_config(max_steps=6),
+        torch_module=torch,
+        gradients=gradients,
+        progress_callback=None,
+        stage_callback=None,
+        resumed_from_step=resumed_from_step,
+    )
+    return tracker, optimizer
+
+
+def test_execution_tracker_offsets_a_resumed_run_from_the_checkpoint_step():
+    # A sealed resumed run continues HF's global_step from the restored checkpoint, so the tracker's
+    # step-sequence + loss coverage count from resumed_from_step+1 - not 1. Resume from step 4, run the
+    # two new steps (5, 6) to a max_steps=6 schedule.
+    torch = _FakeTorch()
+    adapter_parameter = _ByteTensor(b"before")
+    tracker, optimizer = _resumable_tracker(torch, adapter_parameter, resumed_from_step=4)
+    tracker.on_train_begin(optimizer)
+    tracker.on_step_end(5, optimizer)
+    tracker.on_log(5, 6, {"loss": 0.4})
+    tracker.on_step_end(6, optimizer)
+    tracker.on_log(6, 6, {"loss": 0.3})
+    model = _trainable_model([("adapter.a", adapter_parameter)])
+    before = capture_trainable_state(model, torch)
+    before_export = capture_adapter_export_state(
+        {"adapter.lora_A.weight": adapter_parameter}, torch, stage=StageMarker.adapter_attached
+    )
+    adapter_parameter.payload = b"after!"
+    after_export = capture_adapter_export_state(
+        {"adapter.lora_A.weight": adapter_parameter}, torch, stage=StageMarker.optimizer_step
+    )
+    evidence = tracker.finalize(
+        steps=6,
+        before=before,
+        before_export=before_export,
+        after_export=after_export,
+        adapter_config_semantic_sha256="f" * 64,
+        model=model,
+    )
+    assert [item.optimizer_step for item in evidence.step_losses] == [5, 6]
+    assert evidence.completed_optimizer_steps == 6
+
+
+def test_execution_tracker_rejects_a_resumed_step_below_the_offset():
+    # The first observed step must be resumed_from_step+1; reporting the resumed-from step itself (an
+    # off-by-one) is a sequence deviation, not a silently-accepted duplicate.
+    torch = _FakeTorch()
+    tracker, optimizer = _resumable_tracker(torch, _ByteTensor(b"before"), resumed_from_step=4)
+    tracker.on_train_begin(optimizer)
+    with pytest.raises(TrainingEvidenceError, match="sequence deviation"):
+        tracker.on_step_end(4, optimizer)  # should be 5
+
+
 def test_training_execution_finalize_rejects_train_time_parameter_replacement():
     torch = _FakeTorch()
     original = _ByteTensor(b"before")

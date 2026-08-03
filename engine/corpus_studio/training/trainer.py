@@ -1985,6 +1985,7 @@ class TrainingExecutionTracker:
         gradients: GradientObservationTracker,
         progress_callback: ProgressCallback | None,
         stage_callback: StageCallback | None,
+        resumed_from_step: int = 0,
     ) -> None:
         self.config = config
         self.torch_module = torch_module
@@ -1995,6 +1996,10 @@ class TrainingExecutionTracker:
         self.optimizer_parameter_ids: tuple[int, ...] = ()
         self.completed_steps: list[int] = []
         self.losses: dict[int, float] = {}
+        # A resumed run's first NEW optimizer step is ``resumed_from_step + 1`` (HF continues its
+        # global_step from the restored checkpoint), so the step-sequence + loss-coverage checks count
+        # from there. 0 for a from-scratch run leaves the original ``begin at 1`` behaviour unchanged.
+        self.resumed_from_step = resumed_from_step
 
     def _bound_optimizer_parameter_ids(
         self,
@@ -2087,7 +2092,7 @@ class TrainingExecutionTracker:
                 taxonomy=FailureTaxonomy.OPTIMIZER_FAILURE,
                 stage=StageMarker.optimizer_step,
             )
-        expected = len(self.completed_steps) + 1
+        expected = self.resumed_from_step + len(self.completed_steps) + 1
         if step != expected:
             raise TrainingEvidenceError(
                 f"optimizer-step sequence deviation: expected {expected}, observed {step}",
@@ -2148,7 +2153,7 @@ class TrainingExecutionTracker:
                 taxonomy=FailureTaxonomy.OPTIMIZER_FAILURE,
                 stage=StageMarker.optimizer_created,
             )
-        expected = list(range(1, steps + 1))
+        expected = list(range(self.resumed_from_step + 1, steps + 1))
         if self.completed_steps != expected:
             raise TrainingEvidenceError(
                 "completed optimizer-step evidence does not match trainer global_step",
@@ -2184,6 +2189,7 @@ class TrainingExecutionTracker:
             gradient_coverage=self.gradients.evidence(),
             optimizer_created=True,
             completed_optimizer_steps=steps,
+            resumed_from_step=self.resumed_from_step,
             step_losses=[
                 OptimizerStepLossEvidence(optimizer_step=step, loss=self.losses[step])
                 for step in expected
@@ -3290,18 +3296,6 @@ def run_training(  # pragma: no cover - optional training-stack integration
     resume_from_checkpoint: str | None = None
     materialized_resume_dir: Path | None = None
     if resume is not None:
-        if config.execution_configuration_hash is not None:
-            # Sealed-configuration resume is refused (fail closed) until the Phase-C sealed-resume
-            # slice: the execution-evidence tracker requires on_step_end values to begin at 1 and it
-            # captures the pre-training snapshot BEFORE the checkpoint adapter is restored, so a resumed
-            # sealed run would either raise a spurious OPTIMIZER_FAILURE or count the restored parent
-            # weights as this run's own changes. The exploratory resume path (no execution seal) is
-            # unaffected and fully supported.
-            raise TrainerError(
-                "sealed-configuration resume is not yet supported: the execution-evidence tracker "
-                "does not offset for a resumed-from step. Resume an exploratory plan, or wait for the "
-                "Phase-C sealed-resume slice."
-            )
         from corpus_studio.platform.checkpoint import (  # noqa: PLC0415
             verify_checkpoint_integrity,
             verify_matches_request,
@@ -3310,6 +3304,11 @@ def run_training(  # pragma: no cover - optional training-stack integration
 
         resume_manifest = verify_checkpoint_integrity(resume.checkpoint_dir)
         verify_matches_request(resume_manifest, resume)
+        if execution_tracker is not None:
+            # A sealed resumed run's execution evidence counts from the resumed-from optimizer step: HF
+            # continues its global_step from the restored checkpoint, so the tracker's step-sequence +
+            # loss-coverage checks expect [resumed_from+1 .. schedule], not [1 .. new-steps].
+            execution_tracker.resumed_from_step = resume_manifest.state.global_optimizer_step
         materialized_resume_dir = Path(config.output_dir).parent / "_resume_hf"
         try:
             resume_from_checkpoint = str(
@@ -3327,6 +3326,27 @@ def run_training(  # pragma: no cover - optional training-stack integration
             shutil.rmtree(materialized_resume_dir, ignore_errors=True)
             materialized_resume_dir = None
             raise
+        if execution_tracker is not None:
+            # Attribution (Codex #5): recapture the evidence 'before' snapshot from the RESTORED adapter,
+            # so the trainable/export deltas measure only THIS run's training - not the jump from the
+            # fresh pre-restore adapter to the parent's checkpoint. HF re-loads the same bytes inside
+            # train(); loading them into the evidence model here first makes the snapshot honest.
+            from peft import set_peft_model_state_dict  # noqa: PLC0415
+
+            from corpus_studio.training.checkpoint_io import ADAPTER_FILE  # noqa: PLC0415
+
+            sealed_adapter = torch.load(
+                str(Path(resume.checkpoint_dir) / ADAPTER_FILE), weights_only=False
+            )
+            set_peft_model_state_dict(evidence_model, sealed_adapter)
+            before_trainable_state = capture_trainable_state(
+                evidence_model, torch, stage=StageMarker.adapter_attached
+            )
+            before_export_state = capture_adapter_export_state(
+                get_peft_model_state_dict(evidence_model),
+                torch,
+                stage=StageMarker.adapter_attached,
+            )
         _stage(
             "resume",
             f"resuming from checkpoint {resume.checkpoint_id} at optimizer step "

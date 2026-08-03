@@ -166,6 +166,7 @@ export type ObservedTensorCount = number;
  */
 export type ObservedTensorNames = [string, ...string[]];
 export type OptimizerCreated = true;
+export type ResumedFromStep = number;
 /**
  * @minItems 1
  */
@@ -347,6 +348,7 @@ export interface TrainingExecutionEvidence {
   completed_optimizer_steps: CompletedOptimizerSteps;
   gradient_coverage: GradientCoverageEvidence;
   optimizer_created: OptimizerCreated;
+  resumed_from_step?: ResumedFromStep;
   step_losses: StepLosses;
   trainable_state: TrainableStateChangeEvidence;
 }
