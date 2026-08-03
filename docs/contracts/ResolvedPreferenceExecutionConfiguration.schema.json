@@ -1119,12 +1119,8 @@
           "type": "number"
         },
         "loss_type": {
+          "const": "sigmoid",
           "default": "sigmoid",
-          "enum": [
-            "sigmoid",
-            "hinge",
-            "ipo"
-          ],
           "title": "Loss Type",
           "type": "string"
         },
@@ -1187,25 +1183,11 @@
     },
     "ReferenceModelBinding": {
       "additionalProperties": false,
-      "description": "The frozen reference policy an offline DPO run scores its trainable policy against.\n\n``frozen_base`` is the standard QLoRA-DPO path: the reference IS the same quantized base with the\ntrainable adapter disabled, so TRL computes reference log-probs by turning the PEFT adapter off and\nno second model is loaded. ``prior_adapter`` instead pins an explicit, previously-trained adapter as\nthe reference. ``precompute_ref_log_probs`` caches the reference log-probs once (a memory/throughput\ntrade the worker honors verbatim).",
+      "description": "The frozen reference policy an offline DPO run scores its trainable policy against.\n\nOnly ``frozen_base`` is sealed in this slice: the reference IS the same quantized base with the\ntrainable PEFT adapter disabled, so TRL computes reference log-probs by turning the adapter off and\nno second model is loaded - nothing beyond the already-sealed base/adapter needs an execution-input\nbinding. Chaining a previously-trained adapter as the reference (a future ``prior_adapter`` mode) is\ndeferred to the worker slice, where it must carry its OWN immutable ``ExecutionInputBinding``\n(location + content digest) so its bytes are covered by the execution-input verification path - a\nbare hash ref would not be loadable or verifiable. ``precompute_ref_log_probs`` caches the reference\nlog-probs once (a memory/throughput trade the worker honors verbatim).",
       "properties": {
-        "adapter_ref": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/Ref"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
         "mode": {
+          "const": "frozen_base",
           "default": "frozen_base",
-          "enum": [
-            "frozen_base",
-            "prior_adapter"
-          ],
           "title": "Mode",
           "type": "string"
         },
@@ -1374,7 +1356,7 @@
     }
   },
   "additionalProperties": false,
-  "description": "The hash-sealed configuration for an offline preference-optimization (DPO) run - the sibling of\n:class:`ResolvedExecutionConfiguration` for the ``preference_dpo`` execution variant.\n\nThe dense-QLoRA-SFT seal is byte-locked two ways (its own ``configuration_hash`` AND a committed\nsemantic golden over its full field set), so DPO's execution semantics live on THIS separate\ncontract, never as new fields on the SFT config. It reuses every shared execution sub-spec\n(placement / precision / attention / adapter / optimizer / sequence / batching / checkpoint /\nschedule / trainer interface) and adds only what DPO needs: a :class:`PreferenceDataPolicy` (never\nthe SFT ``TrainingDataPolicy``) and a :class:`PreferenceOptimizationSpec` (beta / loss / reference).\n\nNOT yet consumed by a worker: the ``DPOTrainer`` branch, a workload-verified 4B run, and the\nmilestone wheel that promotes ``preference_dpo`` to ``workload_verified`` are a separate, gated\nslice. This contract only makes a DPO run EXPRESSIBLE and hash-sealable so the architecture is\nreviewable before any worker byte changes.",
+  "description": "The hash-sealed configuration for an offline preference-optimization (DPO) run - the sibling of\n:class:`ResolvedExecutionConfiguration` for the ``preference_dpo`` execution variant.\n\nThe dense-QLoRA-SFT seal is byte-locked two ways (its own ``configuration_hash`` AND a committed\nsemantic golden over its full field set), so DPO's execution semantics live on THIS separate\ncontract, never as new fields on the SFT config. It reuses every shared execution sub-spec\n(placement / precision / attention / adapter / optimizer / sequence / batching / checkpoint /\nschedule / trainer interface) and adds only what DPO needs: a :class:`PreferenceDataPolicy` (never\nthe SFT ``TrainingDataPolicy``) and a :class:`PreferenceOptimizationSpec` (beta / loss / reference).\n\nNOT yet consumed by a worker: the ``DPOTrainer`` branch, a workload-verified 4B run, and the\nmilestone wheel that promotes ``preference_dpo`` to ``workload_verified`` are a separate, gated\nslice. This contract only makes a DPO run EXPRESSIBLE and hash-sealable so the architecture is\nreviewable before any worker byte changes.\n\nTwo bindings are deferred to that worker slice (as with the SFT sibling, which likewise pins a\nhash-only ``objective_ref`` and defers registry binding to the resolver): (1) the resolver binds +\nverifies ``objective_ref`` names the registered preference/DPO objective - the pure contract has no\nregistry access; and (2) ``trainer_interface`` is reused here as an execution-shaped placeholder,\nbut the DPO trainer surface (``DPOConfig`` loss/reference fields, distinct from ``SFTConfig``) is\nsealed with the ``DPOTrainer`` branch, since the contract is not yet executable.",
   "properties": {
     "adapter": {
       "$ref": "#/$defs/AdapterSpec"

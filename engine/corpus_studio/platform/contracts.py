@@ -3906,24 +3906,17 @@ class ResolvedExecutionConfiguration(ContractModel):
 class ReferenceModelBinding(ContractModel):
     """The frozen reference policy an offline DPO run scores its trainable policy against.
 
-    ``frozen_base`` is the standard QLoRA-DPO path: the reference IS the same quantized base with the
-    trainable adapter disabled, so TRL computes reference log-probs by turning the PEFT adapter off and
-    no second model is loaded. ``prior_adapter`` instead pins an explicit, previously-trained adapter as
-    the reference. ``precompute_ref_log_probs`` caches the reference log-probs once (a memory/throughput
-    trade the worker honors verbatim)."""
+    Only ``frozen_base`` is sealed in this slice: the reference IS the same quantized base with the
+    trainable PEFT adapter disabled, so TRL computes reference log-probs by turning the adapter off and
+    no second model is loaded - nothing beyond the already-sealed base/adapter needs an execution-input
+    binding. Chaining a previously-trained adapter as the reference (a future ``prior_adapter`` mode) is
+    deferred to the worker slice, where it must carry its OWN immutable ``ExecutionInputBinding``
+    (location + content digest) so its bytes are covered by the execution-input verification path - a
+    bare hash ref would not be loadable or verifiable. ``precompute_ref_log_probs`` caches the reference
+    log-probs once (a memory/throughput trade the worker honors verbatim)."""
 
-    mode: Literal["frozen_base", "prior_adapter"] = "frozen_base"
-    adapter_ref: Ref | None = None
+    mode: Literal["frozen_base"] = "frozen_base"
     precompute_ref_log_probs: bool = False
-
-    @model_validator(mode="after")
-    def _validate_reference(self) -> ReferenceModelBinding:
-        if self.mode == "prior_adapter":
-            if self.adapter_ref is None or not _is_pinned_ref(self.adapter_ref):
-                raise ValueError("a prior-adapter reference must pin the reference adapter by hash")
-        elif self.adapter_ref is not None:
-            raise ValueError("a frozen-base reference reuses the base and takes no adapter ref")
-        return self
 
 
 class PreferenceOptimizationSpec(ContractModel):
@@ -3934,7 +3927,10 @@ class PreferenceOptimizationSpec(ContractModel):
 
     objective: Literal["dpo"] = "dpo"
     beta: float = Field(default=0.1, gt=0)
-    loss_type: Literal["sigmoid", "hinge", "ipo"] = "sigmoid"
+    # Only the canonical DPO sigmoid loss is sealed here. Other preference losses (e.g. hinge, IPO) are
+    # DISTINCT objectives in the catalog - adding one means adding its objective + provenance, not just
+    # a loss string under an ``objective="dpo"`` seal - so they are deferred, not silently mislabeled.
+    loss_type: Literal["sigmoid"] = "sigmoid"
     label_smoothing: float = Field(default=0.0, ge=0, lt=0.5)
     reference_model: ReferenceModelBinding
 
@@ -3953,7 +3949,14 @@ class ResolvedPreferenceExecutionConfiguration(ContractModel):
     NOT yet consumed by a worker: the ``DPOTrainer`` branch, a workload-verified 4B run, and the
     milestone wheel that promotes ``preference_dpo`` to ``workload_verified`` are a separate, gated
     slice. This contract only makes a DPO run EXPRESSIBLE and hash-sealable so the architecture is
-    reviewable before any worker byte changes."""
+    reviewable before any worker byte changes.
+
+    Two bindings are deferred to that worker slice (as with the SFT sibling, which likewise pins a
+    hash-only ``objective_ref`` and defers registry binding to the resolver): (1) the resolver binds +
+    verifies ``objective_ref`` names the registered preference/DPO objective - the pure contract has no
+    registry access; and (2) ``trainer_interface`` is reused here as an execution-shaped placeholder,
+    but the DPO trainer surface (``DPOConfig`` loss/reference fields, distinct from ``SFTConfig``) is
+    sealed with the ``DPOTrainer`` branch, since the contract is not yet executable."""
 
     contract_version: CONTRACT_VERSION_LITERAL = "1.0.0"
     configuration_id: str = Field(pattern=_ID)
@@ -4076,6 +4079,21 @@ class ResolvedPreferenceExecutionConfiguration(ContractModel):
         # guarantees max_prompt_length < max_length).
         if self.data.max_length > self.sequence.max_sequence_len:
             raise ValueError("data.max_length must fit within the sealed sequence length")
+        # No-silent-truncation cross-check (same contradiction the SFT sibling refuses): a config that
+        # declares over-length pairs make it invalid yet permits truncation at runtime would silently
+        # truncate a preference pair.
+        if not self.sequence.truncation_allowed and self.data.truncation_policy == "allow":
+            raise ValueError(
+                "sequence.truncation_allowed is False but data.truncation_policy is 'allow' - a config "
+                "that declares no truncation yet permits it at runtime would silently truncate"
+            )
+        # One reproducible sample order: the preference data policy's seed and the top-level execution
+        # data seed must agree, so a worker cannot honor two different orderings.
+        if self.data.data_seed != self.data_seed:
+            raise ValueError(
+                "the preference data_seed and the top-level data_seed must match for one reproducible "
+                "sample order"
+            )
         if any(
             value is None
             for value in (

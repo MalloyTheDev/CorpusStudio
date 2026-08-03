@@ -6,7 +6,7 @@ branch + a workload-verified run + the milestone wheel are a separate, gated sli
 
 import pytest
 
-from corpus_studio.platform.common import HashRef, Ref
+from corpus_studio.platform.common import Ref
 from corpus_studio.platform.contracts import (
     AdapterSpec,
     PreferenceDataPolicy,
@@ -61,10 +61,12 @@ def _dpo_fields(**over) -> dict:
         batching=sft.batching,
         checkpoint_policy=sft.checkpoint_policy,
         schedule=sft.schedule,
-        # size the DPO length budget to the demo's small sealed sequence window
+        # size the DPO length budget to the demo's small sealed sequence window, and keep the data seed
+        # equal to the top-level execution seed so the base fixture is internally consistent.
         data=_preference_data(
             max_prompt_length=sft.sequence.max_sequence_len // 2,
             max_length=sft.sequence.max_sequence_len,
+            data_seed=sft.data_seed,
         ),
         preference=PreferenceOptimizationSpec(
             reference_model=ReferenceModelBinding(mode="frozen_base"),
@@ -141,17 +143,40 @@ def test_dpo_refuses_a_length_budget_that_overflows_the_sequence_window():
         )
 
 
-def test_prior_adapter_reference_must_pin_its_adapter():
-    with pytest.raises(ValueError, match="pin the reference adapter"):
-        ReferenceModelBinding(mode="prior_adapter")  # no adapter_ref
-
-
-def test_frozen_base_reference_takes_no_adapter_ref():
-    with pytest.raises(ValueError, match="no adapter ref"):
-        ReferenceModelBinding(
-            mode="frozen_base",
-            adapter_ref=Ref(id="x", hash=HashRef(algo="sha256", value="b" * 64)),
+def test_dpo_refuses_a_silent_truncation_contradiction():
+    # the same no-silent-truncation contradiction the SFT sibling refuses.
+    sft = demo_training_plan().resolved_execution
+    assert sft is not None
+    seq = sft.sequence.max_sequence_len
+    with pytest.raises(ValueError, match="would silently truncate"):
+        ResolvedPreferenceExecutionConfiguration(
+            **_dpo_fields(
+                sequence=sft.sequence.model_copy(update={"truncation_allowed": False}),
+                data=_preference_data(
+                    max_prompt_length=seq // 2, max_length=seq, truncation_policy="allow"
+                ),
+            )
         )
+
+
+def test_dpo_requires_matching_data_seeds():
+    # the preference-data seed and the top-level execution data seed must agree (one sample order).
+    sft = demo_training_plan().resolved_execution
+    assert sft is not None
+    seq = sft.sequence.max_sequence_len
+    with pytest.raises(ValueError, match="must match for one reproducible"):
+        ResolvedPreferenceExecutionConfiguration(
+            **_dpo_fields(
+                data=_preference_data(max_prompt_length=seq // 2, max_length=seq, data_seed=1),
+                data_seed=2,
+            )
+        )
+
+
+def test_reference_model_defaults_to_the_frozen_base():
+    ref = ReferenceModelBinding()
+    assert ref.mode == "frozen_base"
+    assert ref.precompute_ref_log_probs is False
 
 
 def test_dpo_execution_config_requires_hash_pinned_refs():

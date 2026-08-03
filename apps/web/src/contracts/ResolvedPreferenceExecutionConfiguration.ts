@@ -136,9 +136,9 @@ export type QuantizationMode = "none" | "int8" | "int4" | "nf4" | "fp4" | "gptq"
 export type QuantizationMode1 = "none" | "int8" | "int4" | "nf4" | "fp4" | "gptq" | "awq" | "hqq";
 export type Beta = number;
 export type LabelSmoothing = number;
-export type LossType = "sigmoid" | "hinge" | "ipo";
+export type LossType = "sigmoid";
 export type Objective = "dpo";
-export type Mode = "frozen_base" | "prior_adapter";
+export type Mode = "frozen_base";
 export type PrecomputeRefLogProbs = boolean;
 export type RuntimeMode = "training" | "cpu_toy";
 export type SaveStrategy = "no" | "steps";
@@ -182,6 +182,13 @@ export type UseSafetensors = true;
  * milestone wheel that promotes ``preference_dpo`` to ``workload_verified`` are a separate, gated
  * slice. This contract only makes a DPO run EXPRESSIBLE and hash-sealable so the architecture is
  * reviewable before any worker byte changes.
+ *
+ * Two bindings are deferred to that worker slice (as with the SFT sibling, which likewise pins a
+ * hash-only ``objective_ref`` and defers registry binding to the resolver): (1) the resolver binds +
+ * verifies ``objective_ref`` names the registered preference/DPO objective - the pure contract has no
+ * registry access; and (2) ``trainer_interface`` is reused here as an execution-shaped placeholder,
+ * but the DPO trainer surface (``DPOConfig`` loss/reference fields, distinct from ``SFTConfig``) is
+ * sealed with the ``DPOTrainer`` branch, since the contract is not yet executable.
  */
 export interface ResolvedPreferenceExecutionConfiguration {
   adapter: AdapterSpec;
@@ -398,14 +405,16 @@ export interface PreferenceOptimizationSpec {
 /**
  * The frozen reference policy an offline DPO run scores its trainable policy against.
  *
- * ``frozen_base`` is the standard QLoRA-DPO path: the reference IS the same quantized base with the
- * trainable adapter disabled, so TRL computes reference log-probs by turning the PEFT adapter off and
- * no second model is loaded. ``prior_adapter`` instead pins an explicit, previously-trained adapter as
- * the reference. ``precompute_ref_log_probs`` caches the reference log-probs once (a memory/throughput
- * trade the worker honors verbatim).
+ * Only ``frozen_base`` is sealed in this slice: the reference IS the same quantized base with the
+ * trainable PEFT adapter disabled, so TRL computes reference log-probs by turning the adapter off and
+ * no second model is loaded - nothing beyond the already-sealed base/adapter needs an execution-input
+ * binding. Chaining a previously-trained adapter as the reference (a future ``prior_adapter`` mode) is
+ * deferred to the worker slice, where it must carry its OWN immutable ``ExecutionInputBinding``
+ * (location + content digest) so its bytes are covered by the execution-input verification path - a
+ * bare hash ref would not be loadable or verifiable. ``precompute_ref_log_probs`` caches the reference
+ * log-probs once (a memory/throughput trade the worker honors verbatim).
  */
 export interface ReferenceModelBinding {
-  adapter_ref?: Ref | null;
   mode?: Mode;
   precompute_ref_log_probs?: PrecomputeRefLogProbs;
 }
