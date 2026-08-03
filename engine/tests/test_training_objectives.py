@@ -49,6 +49,7 @@ _EXPECTED_IDS = sorted(
         "completion_only",
         "response_only_loss",
         "dpo",
+        "dpo_qlora",
         "ipo",
         "kto",
         "orpo",
@@ -141,7 +142,7 @@ def _expert_selective_objective() -> TrainingObjective:
 def test_builtin_catalog_covers_all_requested_objectives_and_is_sealed():
     objectives = builtin_objectives()
     assert [item.objective_id for item in objectives] == _EXPECTED_IDS
-    assert len(objectives) == 29
+    assert len(objectives) == 30
     assert all(item.objective_version == "1.0.0" for item in objectives)
     assert all(verify_objective_hash(item) for item in objectives)
     qlora = next(item for item in objectives if item.objective_id == "qlora")
@@ -638,7 +639,7 @@ def test_training_objective_check_cli_reports_independent_axes(tmp_path):
 def test_objective_registry_import_is_torch_free_in_a_fresh_process():
     code = (
         "import sys; import corpus_studio.platform.objectives as o; "
-        "assert len(o.builtin_objectives()) == 29; "
+        "assert len(o.builtin_objectives()) == 30; "
         "assert all(x not in sys.modules for x in "
         "('torch','transformers','trl','peft','bitsandbytes'))"
     )
