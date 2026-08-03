@@ -26,7 +26,7 @@ from corpus_studio.platform.contracts import (
     BackendExecutionVariant,
     ResolvedExecutionConfiguration,
 )
-from corpus_studio.platform.enums import ExecutionVariantKind, ExecutionVariantSupport
+from corpus_studio.platform.enums import ExecutionVariantKind, ExecutionVariantSupport, TaskType
 from corpus_studio.platform.execution_config import (
     canonical_sha256,
     execution_configuration_hash_for,
@@ -34,6 +34,8 @@ from corpus_studio.platform.execution_config import (
 from corpus_studio.platform.execution_variants import (
     ExecutionVariantRefused,
     admit_execution_variant,
+    admit_task_execution_variant,
+    execution_variant_kind_for_task,
     reference_execution_variants,
     variant_envelope,
 )
@@ -237,3 +239,20 @@ def test_descriptor_is_not_the_sealed_worker_configuration():
     variant = _variant(ExecutionVariantKind.dense_qlora_sft, ExecutionVariantSupport.workload_verified)
     assert not isinstance(variant, ResolvedExecutionConfiguration)
     assert admit_execution_variant(variant) is None
+
+
+def test_task_maps_to_an_execution_variant_shape_and_admits_fail_closed():
+    declared = reference_execution_variants()
+    # sft -> the workload_verified dense-QLoRA-SFT shape: admitted, returns that variant.
+    assert execution_variant_kind_for_task(TaskType.sft) == ExecutionVariantKind.dense_qlora_sft
+    assert admit_task_execution_variant(TaskType.sft, declared_variants=declared).variant_kind == (
+        ExecutionVariantKind.dense_qlora_sft
+    )
+    # pretraining -> a declared-only shape: refused below workload_verified (no fallback).
+    assert execution_variant_kind_for_task(TaskType.pretraining) == ExecutionVariantKind.pretraining
+    with pytest.raises(ExecutionVariantRefused, match="below the required"):
+        admit_task_execution_variant(TaskType.pretraining, declared_variants=declared)
+    # preference -> NO executable shape yet: refused.
+    assert execution_variant_kind_for_task(TaskType.preference) is None
+    with pytest.raises(ExecutionVariantRefused, match="no executable execution variant"):
+        admit_task_execution_variant(TaskType.preference, declared_variants=declared)

@@ -407,6 +407,19 @@ def _storage_physical(assessment, storage):
 # ---- resolution paths -------------------------------------------------------
 
 
+def test_planner_admits_the_dense_qlora_sft_task_and_refuses_unexecutable_variants():
+    # #484 wired into planning: only the dense-QLoRA-SFT execution shape is workload_verified. sft maps
+    # to it and the plan builds; a task whose shape the first-party harness cannot execute is refused
+    # FAIL-CLOSED at planning - never silently downgraded to dense_qlora_sft.
+    assert _plan(_profile(cc_major=8), _report(), task_type="sft").resolved_execution is not None
+    # pretraining maps to a declared-only shape -> refused below workload_verified.
+    with pytest.raises(PlannerError, match="below the required 'workload_verified'"):
+        _plan(_profile(cc_major=8), _report(), task_type="pretraining")
+    # preference maps to no executable shape at all -> refused.
+    with pytest.raises(PlannerError, match="no executable execution variant"):
+        _plan(_profile(cc_major=8), _report(), task_type="preference")
+
+
 def test_native_windows_blackwell_host_forces_math_bf16_nf4_qlora():
     plan = _plan(_profile(cc_major=12, os="windows"), _report())
     assert plan.attention_backend.value == "math"  # native-Windows Blackwell (WDDM) mandate

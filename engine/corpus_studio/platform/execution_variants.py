@@ -16,7 +16,7 @@ from dataclasses import dataclass
 
 from corpus_studio.platform.common import CONTRACT_VERSION
 from corpus_studio.platform.contracts import BackendExecutionVariant
-from corpus_studio.platform.enums import ExecutionVariantKind, ExecutionVariantSupport
+from corpus_studio.platform.enums import ExecutionVariantKind, ExecutionVariantSupport, TaskType
 
 
 # The sealed SFT config's task-type lock (``adapter_task_type: Literal["CAUSAL_LM"]``) is FROZEN by
@@ -141,3 +141,45 @@ def admit_execution_variant(
             f"execution variant '{variant.variant_kind.value}' is '{variant.support.value}', below the "
             f"required '{required_support.value}' - refused (no fallback to dense_qlora_sft)"
         )
+
+
+# The requested task -> the execution-variant SHAPE the first-party harness would run it as. Only a task
+# whose shape has a workload_verified backend variant is executable; the objective x shape axes are
+# co-linear today (SFT == the dense-QLoRA-SFT shape), so this bridge is deliberately minimal and gets
+# richer as each real variant lands (S2+). A task with no mapped shape is refused fail-closed.
+_TASK_TO_VARIANT_KIND: dict[TaskType, ExecutionVariantKind] = {
+    TaskType.sft: ExecutionVariantKind.dense_qlora_sft,
+    TaskType.pretraining: ExecutionVariantKind.pretraining,
+}
+
+
+def execution_variant_kind_for_task(task_type: TaskType) -> ExecutionVariantKind | None:
+    """The execution-variant shape the first-party harness maps a requested ``task_type`` to, or ``None``
+    when the task has no mapped executable shape yet (preference / reward / distillation / grpo / ... are
+    declared objectives with no built execution path). ``None`` -> the caller refuses fail-closed."""
+    return _TASK_TO_VARIANT_KIND.get(task_type)
+
+
+def admit_task_execution_variant(
+    task_type: TaskType,
+    *,
+    declared_variants: tuple[BackendExecutionVariant, ...],
+    required_support: ExecutionVariantSupport = ExecutionVariantSupport.workload_verified,
+) -> BackendExecutionVariant:
+    """Resolve a requested ``task_type`` to its execution-variant shape and admit it fail-closed against
+    the backend's ``declared_variants``. Returns the admitted variant, or raises
+    :class:`ExecutionVariantRefused` when the task maps to no executable shape, the backend does not
+    declare that shape, or the declared support is below ``required_support``. Never falls back."""
+    kind = execution_variant_kind_for_task(task_type)
+    if kind is None:
+        raise ExecutionVariantRefused(
+            f"task '{task_type.value}' maps to no executable execution variant - the first-party harness "
+            f"implements the dense-QLoRA-SFT shape (pretraining/MoE are declared-only); refused"
+        )
+    declared = next((item for item in declared_variants if item.variant_kind == kind), None)
+    if declared is None:
+        raise ExecutionVariantRefused(
+            f"the backend declares no '{kind.value}' execution variant for task '{task_type.value}'"
+        )
+    admit_execution_variant(declared, required_support=required_support)
+    return declared
