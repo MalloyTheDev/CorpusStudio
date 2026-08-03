@@ -3658,6 +3658,44 @@ class PretrainingDataPolicy(ContractModel):
         return self
 
 
+class PreferenceDataPolicy(ContractModel):
+    """Additive, dense/MoE-safe preference-pair data policy (S2 / DPO), PARALLEL to the SFT-only
+    ``TrainingDataPolicy`` - never reuse the SFT contract for preference pairs. It seals the RESOLVED
+    dataset schema identity - ``schema_id`` + ``schema_version`` + ``schema_sha256`` (the content digest
+    of the resolved schema) - so a consumer fails closed on a row-layout change even when a project-local
+    schema shadows the builtin and edits fields without bumping the version; plus the pair render layout,
+    formatter + chat template, and the DPO prompt/response length budget - so a preference run formats
+    every pair identically and refuses (never silently truncates) an over-length prompt or response. The
+    reference model + DPO loss hyperparameters live on the DPO execution seal (a separate worker slice),
+    not here - this is only the data contract."""
+
+    contract_version: CONTRACT_VERSION_LITERAL = "1.0.0"
+    # The sealed resolved-schema identity: id + version + the content DIGEST of the resolved schema. A
+    # project-local schema can shadow the builtin and edit fields WITHOUT bumping the version, so only
+    # the digest actually fails closed on a row-layout change. All three are required - no convenience
+    # default that could silently seal a version the producer never selected.
+    schema_id: str = Field(min_length=1)
+    schema_version: str = Field(min_length=1)
+    schema_sha256: str = Field(pattern=SHA256_PATTERN)
+    # The pair render layout (a loss-mask/label kind), distinct from the dataset schema identity.
+    pair_schema: Literal["chosen_rejected", "preference_pair"] = "chosen_rejected"
+    formatter_id: str = Field(min_length=1)
+    formatter_sha256: str = Field(pattern=SHA256_PATTERN)
+    chat_template_sha256: str | None = Field(default=None, pattern=SHA256_PATTERN)
+    max_prompt_length: int = Field(ge=1)
+    max_length: int = Field(ge=1)
+    truncation_policy: Literal["refuse", "allow"] = "refuse"
+    data_seed: int = Field(default=42, ge=0)
+
+    @model_validator(mode="after")
+    def _validate_policy(self) -> PreferenceDataPolicy:
+        if self.max_prompt_length >= self.max_length:
+            raise ValueError(
+                "max_prompt_length must be below max_length so the chosen/rejected response has room"
+            )
+        return self
+
+
 class TrainerInterfacePolicy(ContractModel):
     """Version- and field-exact adapter to the installed TRL/Transformers surface."""
 
