@@ -21,6 +21,7 @@ from .contracts import (
     CapabilityReport,
     ExecutionInputBinding,
     ResolvedExecutionConfiguration,
+    ResolvedPreferenceExecutionConfiguration,
     RunPlan,
 )
 
@@ -97,6 +98,21 @@ def execution_configuration_hash_for(config: ResolvedExecutionConfiguration) -> 
 
 def verify_execution_configuration_hash(config: ResolvedExecutionConfiguration) -> bool:
     return config.configuration_hash == execution_configuration_hash_for(config)
+
+
+def preference_execution_configuration_hash_for(
+    config: ResolvedPreferenceExecutionConfiguration,
+) -> str:
+    """Seal a DPO execution configuration exactly as the SFT sibling is sealed (canonical JSON over
+    every field but ``configuration_hash``). A separate function keeps the two seals decoupled: the
+    byte-locked SFT seal can never be perturbed by a DPO change."""
+    return canonical_sha256(config.model_dump(mode="json", exclude={"configuration_hash"}))
+
+
+def verify_preference_execution_configuration_hash(
+    config: ResolvedPreferenceExecutionConfiguration,
+) -> bool:
+    return config.configuration_hash == preference_execution_configuration_hash_for(config)
 
 
 def capability_report_hash_for(report: CapabilityReport) -> str:
