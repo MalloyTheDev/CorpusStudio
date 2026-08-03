@@ -4021,6 +4021,14 @@ class ResolvedPreferenceExecutionConfiguration(ContractModel):
             raise ValueError(
                 "resolved preference execution requires the first-party corpus_studio worker backend"
             )
+        # The only admitted preference shape is QLoRA-DPO, so the seal must bind the dpo_qlora objective -
+        # a config whose loss semantics disagree with its objective lineage is refused. The resolver
+        # additionally verifies the objective's sealed catalog hash (the pure contract has no registry).
+        if self.objective_ref.id != "dpo_qlora":
+            raise ValueError(
+                "preference execution must bind the 'dpo_qlora' objective (the only admitted preference "
+                "shape)"
+            )
         environment_hash = self.environment_ref.hash
         assert environment_hash is not None and environment_hash.value is not None
         if (
@@ -4040,28 +4048,17 @@ class ResolvedPreferenceExecutionConfiguration(ContractModel):
             DeviceMapEntry(module="", device="cpu")
         ]:
             raise ValueError("cpu_toy execution must bind the entire model to CPU")
-        # QLoRA-DPO is the target: the reference is the frozen base with the PEFT adapter disabled, so a
-        # LoRA-family adapter is mandatory and full-parameter DPO is refused.
-        if self.adapter.method not in {
-            AdapterMethod.lora,
-            AdapterMethod.qlora,
-            AdapterMethod.dora,
-        }:
-            raise ValueError("preference optimization requires a LoRA-family (PEFT) adapter")
-        # LoRA and QLoRA are DISTINCT methods: QLoRA trains over a 4-bit quantized base (int4/nf4, matching
-        # the registered qlora objective), plain LoRA/DoRA over an unquantized base. Refuse a seal whose
-        # adapter method contradicts its sealed quantization.
-        quantized_format = self.precision.quantized_storage_format
-        if self.adapter.method == AdapterMethod.qlora and quantized_format not in {
+        # The dpo_qlora objective this seal binds requires the qlora adaptation over a 4-bit base
+        # (int4/nf4). Restrict the seal to exactly that: the reference is the frozen 4-bit base with the
+        # PEFT adapter disabled. Full-parameter DPO and plain LoRA/DoRA (or any non-4-bit base) have no
+        # admitting objective and are refused - not left contract-valid-but-unadmittable.
+        if self.adapter.method != AdapterMethod.qlora:
+            raise ValueError("QLoRA-DPO requires the qlora adapter method")
+        if self.precision.quantized_storage_format not in {
             QuantizationMode.int4,
             QuantizationMode.nf4,
         }:
-            raise ValueError("QLoRA requires a 4-bit quantized base (int4 or nf4)")
-        if (
-            self.adapter.method in {AdapterMethod.lora, AdapterMethod.dora}
-            and quantized_format != QuantizationMode.none
-        ):
-            raise ValueError("plain LoRA/DoRA requires an unquantized base; a quantized base is QLoRA")
+            raise ValueError("QLoRA-DPO requires a 4-bit quantized base (int4 or nf4)")
         if any(
             value is None
             for value in (
@@ -4597,6 +4594,12 @@ class RunPlan(ContractModel):
             self.parameter_accounting_ref
         ):
             raise ValueError("parameter_accounting_ref must pin the sealed report hash")
+        # A plan carries exactly one execution authority - checked before the per-config summary
+        # cross-checks so a double-authority plan fails on THAT, not on an incidental summary mismatch.
+        if self.resolved_execution is not None and self.resolved_preference_execution is not None:
+            raise ValueError(
+                "a RunPlan carries either the SFT or the preference execution config, never both"
+            )
         execution = self.resolved_execution
         if execution is not None:
             expected_hash = _canonical_contract_sha256(
@@ -4650,11 +4653,6 @@ class RunPlan(ContractModel):
                 raise ValueError("resolved export format/output must match the RunPlan summary")
         preference = self.resolved_preference_execution
         if preference is not None:
-            # A plan carries exactly one execution authority.
-            if execution is not None:
-                raise ValueError(
-                    "a RunPlan carries either the SFT or the preference execution config, never both"
-                )
             expected_preference_hash = _canonical_contract_sha256(
                 preference.model_dump(mode="json", exclude={"configuration_hash"})
             )
@@ -4676,6 +4674,46 @@ class RunPlan(ContractModel):
                 raise ValueError(
                     "resolved preference execution model location must match base_model"
                 )
+            # The DPO seal belongs on a preference plan, and its summaries must not contradict the seal a
+            # future worker consumes (mirror the SFT cross-checks; the DPO loss lives on preference, so
+            # there is no loss_impl summary to compare).
+            if self.task_type != TaskType.preference:
+                raise ValueError("a resolved preference execution requires a preference RunPlan")
+            if preference.precision.forward_compute_dtype != self.precision:
+                raise ValueError("resolved preference forward precision must match the RunPlan summary")
+            if preference.precision.quantized_storage_format != self.quantization:
+                raise ValueError("resolved preference quantization must match the RunPlan summary")
+            for label, resolved, summary in (
+                ("adapter", preference.adapter, self.adapter),
+                ("optimizer", preference.optimizer, self.optimizer),
+                ("sequence", preference.sequence, self.sequence),
+                ("batching", preference.batching, self.batching),
+                ("checkpoint", preference.checkpoint_policy, self.checkpoint_policy),
+            ):
+                if resolved != summary:
+                    raise ValueError(
+                        f"resolved preference {label} policy must match the RunPlan summary"
+                    )
+            preference_attention_summary = {
+                AttentionKernel.eager: AttentionImpl.eager,
+                AttentionKernel.torch_sdpa_math: AttentionImpl.math,
+                AttentionKernel.torch_sdpa_flash: AttentionImpl.sdpa,
+                AttentionKernel.torch_sdpa_mem_efficient: AttentionImpl.sdpa,
+                AttentionKernel.flash_attention_2: AttentionImpl.flash_attention_2,
+                AttentionKernel.flash_attention_3: AttentionImpl.flash_attention_3,
+                AttentionKernel.xformers: AttentionImpl.xformers,
+            }[preference.attention.effective_backend_required]
+            if preference_attention_summary != self.attention_backend:
+                raise ValueError("resolved preference attention policy must match the RunPlan summary")
+            if preference.seed != self.seed or (
+                preference.gradient_checkpointing != self.gradient_checkpointing
+            ):
+                raise ValueError("resolved preference seed/checkpointing must match the RunPlan summary")
+            if (
+                preference.export_format != self.export.format
+                or preference.output_dir != self.export.output_dir
+            ):
+                raise ValueError("resolved preference export format/output must match the RunPlan summary")
         if self.physical_execution is None:
             return self
         if (
@@ -5834,6 +5872,8 @@ class TrainingPlanParameters(ContractModel):
     tokenizer_content_sha256: str | None = None
     dataset_content_sha256: str | None = None
     task_type: str = "sft"
+    # The specific training objective (required for a preference task; see PlannerConstraints).
+    objective_id: str | None = None
     dataset_format: str = "instruction"
     adapter_method: str | None = None
     lora_r: int = 16

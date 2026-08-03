@@ -7,7 +7,7 @@ wheel are the retained-human slice."""
 
 import pytest
 
-from corpus_studio.platform.common import Ref
+from corpus_studio.platform.common import HashRef, Ref
 from corpus_studio.platform.contracts import (
     AdapterSpec,
     PreferenceDataPolicy,
@@ -17,13 +17,31 @@ from corpus_studio.platform.contracts import (
     RunPlan,
     TrainingDataPolicy,
 )
-from corpus_studio.platform.enums import AdapterMethod
+from corpus_studio.platform.enums import AdapterMethod, QuantizationMode
 from corpus_studio.platform.execution_config import (
     preference_execution_configuration_hash_for,
     verify_execution_configuration_hash,
     verify_preference_execution_configuration_hash,
 )
+from corpus_studio.platform.objectives import get_objective
 from corpus_studio.platform.runners import demo_training_plan
+
+
+def _dpo_qlora_objective_ref() -> Ref:
+    obj = get_objective("dpo_qlora")
+    assert obj is not None
+    return Ref(id="dpo_qlora", hash=HashRef(value=obj.objective_hash))
+
+
+def _qlora_4bit_precision(sft_precision):
+    # the demo SFT precision is unquantized LoRA; make it the QLoRA 4-bit form the dpo_qlora seal needs.
+    return sft_precision.model_copy(
+        update={
+            "quantized_storage_format": QuantizationMode.nf4,
+            "weight_storage_dtype": None,
+            "dequantization_dtype": sft_precision.forward_compute_dtype,
+        }
+    )
 
 
 def _preference_data(**over) -> PreferenceDataPolicy:
@@ -55,12 +73,12 @@ def _dpo_fields(**over) -> dict:
         environment_binding=sft.environment_binding,
         capability_report_ref=sft.capability_report_ref,
         inputs=sft.inputs,
-        objective_ref=sft.objective_ref,
+        objective_ref=_dpo_qlora_objective_ref(),
         runtime_mode=sft.runtime_mode,
-        precision=sft.precision,
+        precision=_qlora_4bit_precision(sft.precision),
         attention=sft.attention,
         device_map=sft.device_map,
-        adapter=sft.adapter,
+        adapter=sft.adapter.model_copy(update={"method": AdapterMethod.qlora}),
         optimizer=sft.optimizer,
         sequence=sft.sequence,
         batching=sft.batching,
@@ -123,11 +141,21 @@ def test_dpo_seal_changes_when_a_loss_hyperparameter_changes():
 # ---- fails closed on the DPO-specific invariants ---------------------------------------------------
 
 
-def test_dpo_requires_a_peft_adapter():
-    with pytest.raises(ValueError, match="LoRA-family"):
+def test_dpo_requires_the_qlora_adapter_method():
+    # the only admitted preference objective (dpo_qlora) requires qlora; full-parameter and plain LoRA
+    # have no admitting objective and are refused.
+    with pytest.raises(ValueError, match="requires the qlora adapter method"):
         ResolvedPreferenceExecutionConfiguration(
             **_dpo_fields(adapter=AdapterSpec(method=AdapterMethod.full_finetune))
         )
+
+
+def test_dpo_seal_must_bind_the_dpo_qlora_objective():
+    # a config whose objective lineage points elsewhere (here the SFT lora objective) is refused.
+    sft = demo_training_plan().resolved_execution
+    assert sft is not None
+    with pytest.raises(ValueError, match="must bind the 'dpo_qlora' objective"):
+        ResolvedPreferenceExecutionConfiguration(**_dpo_fields(objective_ref=sft.objective_ref))
 
 
 def test_dpo_refuses_to_pack_sequences():
@@ -200,26 +228,34 @@ def test_dpo_requires_the_first_party_backend():
         )
 
 
-def test_qlora_method_requires_a_4bit_base():
-    # the demo base is unquantized; naming the QLoRA method over it contradicts the sealed quantization.
+def test_qlora_dpo_requires_a_4bit_base():
+    # QLoRA-DPO must be over a 4-bit base; an unquantized base contradicts the sealed quantization.
     sft = demo_training_plan().resolved_execution
     assert sft is not None
-    with pytest.raises(ValueError, match="QLoRA requires a 4-bit quantized base"):
-        ResolvedPreferenceExecutionConfiguration(
-            **_dpo_fields(adapter=sft.adapter.model_copy(update={"method": AdapterMethod.qlora}))
-        )
+    with pytest.raises(ValueError, match="QLoRA-DPO requires a 4-bit quantized base"):
+        ResolvedPreferenceExecutionConfiguration(**_dpo_fields(precision=sft.precision))
 
 
 # ---- carried on RunPlan ----------------------------------------------------------------------------
 
 
-def test_run_plan_carries_the_dpo_config_at_most_one_and_byte_safe():
+def _dpo_plan_payload():
+    """A RunPlan payload carrying the DPO config, with its summaries reconciled to the sealed config
+    (task type, quantization, adapter) - exactly what a resolver would emit consistently."""
     sft_plan = demo_training_plan()
-    dpo = _dpo_config()  # reuses the demo SFT config's backend/env/dataset/model refs -> matches the plan
-    # A plan carrying the DPO config (and NOT the SFT config) validates when its refs match the plan.
+    dpo = _dpo_config()  # reuses the demo SFT config's refs/sub-specs (backend/env/dataset/model + more)
     payload = sft_plan.model_dump(mode="json")
     payload["resolved_execution"] = None
     payload["resolved_preference_execution"] = dpo.model_dump(mode="json")
+    payload["task_type"] = "preference"
+    payload["quantization"] = dpo.precision.quantized_storage_format.value
+    payload["adapter"] = dpo.adapter.model_dump(mode="json")
+    return sft_plan, dpo, payload
+
+
+def test_run_plan_carries_the_dpo_config_at_most_one_and_byte_safe():
+    sft_plan, dpo, payload = _dpo_plan_payload()
+    # A plan carrying the DPO config (and NOT the SFT config), with matching summaries, validates.
     plan = RunPlan.model_validate(payload)
     assert plan.resolved_preference_execution is not None
     assert verify_preference_execution_configuration_hash(plan.resolved_preference_execution)
@@ -231,6 +267,14 @@ def test_run_plan_carries_the_dpo_config_at_most_one_and_byte_safe():
         RunPlan.model_validate(both)
     # byte-safe: an SFT plan (no preference config) omits the field from its serialization entirely.
     assert "resolved_preference_execution" not in sft_plan.model_dump(mode="json")
+
+
+def test_run_plan_refuses_a_dpo_config_on_a_non_preference_plan():
+    # the DPO seal must sit on a preference plan - a summary that contradicts the seal is refused.
+    _sft_plan, _dpo, payload = _dpo_plan_payload()
+    payload["task_type"] = "sft"
+    with pytest.raises(ValueError, match="requires a preference RunPlan"):
+        RunPlan.model_validate(payload)
 
 
 # ---- the dense SFT seal stays byte-decoupled -------------------------------------------------------

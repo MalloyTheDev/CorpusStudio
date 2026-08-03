@@ -49,6 +49,7 @@ export type MicroBatchSize = number;
 export type ModelContentSha256 = string | null;
 export type ModelRevision = string | null;
 export type NumTrainEpochs = number;
+export type ObjectiveId1 = string | null;
 export type Optim = string;
 export type OutputDir = string;
 export type Seed = number;
@@ -139,6 +140,7 @@ export interface TrainingPlanParameters {
   model_content_sha256?: ModelContentSha256;
   model_revision?: ModelRevision;
   num_train_epochs?: NumTrainEpochs;
+  objective_id?: ObjectiveId1;
   optim?: Optim;
   output_dir?: OutputDir;
   seed?: Seed;
