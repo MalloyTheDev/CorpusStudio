@@ -859,6 +859,24 @@ def _resolve_preference_execution(
     # ACTUALLY governs the dataset (a project-local schema shadows the builtin of the same id), so a
     # row-layout drift fails closed even under a project-local override.
     schema, _schema_source = resolve_schema(project_dir, "preference")
+    # A project-local schema can make prompt/chosen/rejected optional or retype them; the sealed
+    # chosen_rejected pair layout + format_preference_pair REQUIRE all three as text. Refuse an
+    # incompatible resolved schema rather than sealing a config the formatter would reject at execution.
+    _string_field_types = {"text", "markdown", "string"}
+    schema_fields = {field.name: field for field in schema.fields}
+    unusable = sorted(
+        name
+        for name in ("prompt", "chosen", "rejected")
+        if (field := schema_fields.get(name)) is None
+        or not getattr(field, "required", False)
+        or field.type not in _string_field_types
+    )
+    if unusable:
+        raise PlannerError(
+            f"the resolved 'preference' schema is incompatible with the chosen_rejected pair formatter: "
+            f"field(s) {unusable} must each be present, required, and text/markdown (a project-local "
+            f"schema may have made them optional or retyped them)"
+        )
     # The preference-pair formatter (prompt/chosen/rejected), NOT the SFT format_example_text.
     formatter_id, formatter_hash = preference_formatter_identity()
     max_length = constraints.sequence_len

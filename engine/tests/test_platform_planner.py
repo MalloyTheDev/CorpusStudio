@@ -461,6 +461,26 @@ def test_preference_dpo_resolves_to_a_sealed_config_and_the_runner_refuses_it_at
         TrainingRunner(cpu_toy=False)._resolve_config(plan, "run-x")  # defense-in-depth
 
 
+def test_preference_resolver_refuses_an_incompatible_project_local_schema(monkeypatch):
+    # A project-local 'preference' schema that makes a required pair field optional (or retypes it) is
+    # rejected - the sealed chosen_rejected formatter needs prompt/chosen/rejected as required text.
+    import corpus_studio.platform.planner as planner_mod
+    from corpus_studio.schemas.registry import load_builtin_schema
+
+    good = load_builtin_schema("preference")
+    incompatible = good.model_copy(
+        update={
+            "fields": [
+                field.model_copy(update={"required": False}) if field.name == "chosen" else field
+                for field in good.fields
+            ]
+        }
+    )
+    monkeypatch.setattr(planner_mod, "resolve_schema", lambda _project_dir, _schema_id: (incompatible, "project"))
+    with pytest.raises(PlannerError, match="incompatible with the chosen_rejected pair formatter"):
+        _plan(_profile(cc_major=8), _report(), task_type="preference", objective_id="dpo_qlora")
+
+
 def test_planner_refuses_a_preference_objective_on_a_non_preference_task():
     # A preference objective (dpo_qlora) with task_type=sft would silently lower to a dense-SFT run while
     # retaining a misleading DPO identity - refuse the objective/task contradiction fail-closed.
