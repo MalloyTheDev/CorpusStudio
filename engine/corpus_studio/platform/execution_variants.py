@@ -184,10 +184,15 @@ def execution_variant_kind_for_task(
     pretraining -> pretraining). A PREFERENCE task maps by its specific ``objective_id`` (only the
     QLoRA-DPO objective has a built shape; DPO/IPO/KTO/ORPO are NOT interchangeable), so a bare
     preference task without a recognized objective maps to nothing. ``None`` -> refuse fail-closed."""
+    # A preference task resolves by its specific objective FIRST - before the generic MoE routing - so a
+    # MoE preference request (or an absent/unmapped objective) refuses fail-closed instead of being
+    # silently routed to the generic ``moe`` shape (there is no built MoE-preference shape).
+    if task_type == TaskType.preference:
+        if is_moe or not objective_id:
+            return None
+        return _PREFERENCE_OBJECTIVE_TO_VARIANT.get(objective_id)
     if is_moe:
         return ExecutionVariantKind.moe
-    if task_type == TaskType.preference:
-        return _PREFERENCE_OBJECTIVE_TO_VARIANT.get(objective_id) if objective_id else None
     return _TASK_TO_VARIANT_KIND.get(task_type)
 
 

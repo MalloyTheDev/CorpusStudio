@@ -51,7 +51,7 @@ Each registry is an independent, versioned, dependency-light set of entries. Eve
 
 | # | Registry | What an entry is | Today |
 |---|---|---|---|
-| 1 | **TrainingObjective** | what is optimized (loss/label/mask/update semantics) | **shipped** - 29 sealed defs, `TrainingObjective` contract, `ObjectiveKind` (16 families incl. pretraining, preference, reward, distillation, process-supervision, embedding, multimodal). See [Training Objectives](#training-objectives). |
+| 1 | **TrainingObjective** | what is optimized (loss/label/mask/update semantics) | **shipped** - 30 sealed defs, `TrainingObjective` contract, `ObjectiveKind` (16 families incl. pretraining, preference, reward, distillation, process-supervision, embedding, multimodal). See [Training Objectives](#training-objectives). |
 | 2 | **ModelTopology** | dense vs MoE structure + expert layout | **contract shipped** - `ModelTopology`, `ExpertGroup`, `ExpertTopologyCounts`, `SemanticRouting`; no runtime training claim. Registry surface: **planned**. |
 | 3 | **UpdateMethod** | which parameters change + how | **partial** - `AdapterMethod` enum + `ObjectiveUpdateScope` (all_parameters / adapters / router / selected_experts / all_experts). Full independent registry with per-method deps/hardware: **planned**. |
 | 4 | **FrameworkBackend** | compute substrate (PyTorch / JAX / TF-Keras / MLX) | **contract shipped (P0c, [#483](https://github.com/MalloyTheDev/CorpusStudio/issues/483))** - `FrameworkBackend` split from `BackendManifest` **append-only** (its digest is untouched) + registry + `SupportLevel`. Defaults are evidence-selected. |
@@ -128,6 +128,7 @@ variants each require their own implementation + workload-verification gate.
 | dense_full_finetune | yes | no | no | no |
 | pretraining | yes | no | no | no |
 | moe | yes | no | no | no |
+| preference_dpo | yes | no | no | no (admitted-as-known, refused at execution) |
 
 ## 4. Support levels (installed is never supported)
 
@@ -290,11 +291,11 @@ say `verified_compatible`.
 
 ### Built-in catalog
 
-The registry contains 29 sealed definitions:
+The registry contains 30 sealed definitions:
 
 - language-model training: `pretraining`, `continued_pretraining`, `full_parameter_sft`, `lora`,
   `qlora`, `other_peft`, `chat_tuning`, `completion_only`, `response_only_loss`, and `tool_use`;
-- preference and reward: `dpo`, `ipo`, `kto`, `orpo`, and `reward_model`;
+- preference and reward: `dpo`, `dpo_qlora`, `ipo`, `kto`, `orpo`, and `reward_model`;
 - distillation and supervision: `knowledge_distillation`, `sequence_distillation`,
   `logit_distillation`, `rationale_distillation`, `process_supervision`, and `verifier_training`;
 - task-specific training: `embedding`, `reranker`, `classifier`, and `multimodal`;

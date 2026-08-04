@@ -250,6 +250,7 @@ def _dpo_plan_payload():
     payload["task_type"] = "preference"
     payload["quantization"] = dpo.precision.quantized_storage_format.value
     payload["adapter"] = dpo.adapter.model_dump(mode="json")
+    payload["loss_impl"] = "dpo"
     return sft_plan, dpo, payload
 
 

@@ -268,6 +268,14 @@ def test_preference_resolves_by_its_specific_objective_not_the_task():
     )
     for oid in ("dpo", "ipo", "kto", "orpo", "unknown"):
         assert execution_variant_kind_for_task(TaskType.preference, objective_id=oid) is None
+    # a MoE preference request has no built shape: it is refused, NOT routed to the generic moe variant
+    # (the preference-objective rule is applied before MoE routing).
+    assert (
+        execution_variant_kind_for_task(
+            TaskType.preference, objective_id="dpo_qlora", is_moe=True
+        )
+        is None
+    )
     # dpo_qlora is declared at contract_validated: admitted at that bar, refused below workload_verified.
     admitted = admit_task_execution_variant(
         TaskType.preference,

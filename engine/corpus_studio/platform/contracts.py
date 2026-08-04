@@ -4022,8 +4022,9 @@ class ResolvedPreferenceExecutionConfiguration(ContractModel):
                 "resolved preference execution requires the first-party corpus_studio worker backend"
             )
         # The only admitted preference shape is QLoRA-DPO, so the seal must bind the dpo_qlora objective -
-        # a config whose loss semantics disagree with its objective lineage is refused. The resolver
-        # additionally verifies the objective's sealed catalog hash (the pure contract has no registry).
+        # a config whose loss semantics disagree with its objective lineage is refused. This is the id
+        # check the pure contract can make; verifying objective_ref.hash against the sealed catalog is the
+        # resolver/runner's job (the DPO resolver milestone wires it, as the SFT path already does).
         if self.objective_ref.id != "dpo_qlora":
             raise ValueError(
                 "preference execution must bind the 'dpo_qlora' objective (the only admitted preference "
@@ -4683,6 +4684,10 @@ class RunPlan(ContractModel):
                 raise ValueError("resolved preference forward precision must match the RunPlan summary")
             if preference.precision.quantized_storage_format != self.quantization:
                 raise ValueError("resolved preference quantization must match the RunPlan summary")
+            # The DPO loss is the plan's loss: a preference plan whose loss summary still reads a
+            # supervised loss (e.g. cross_entropy inherited from an SFT plan) contradicts the seal.
+            if self.loss_impl != LossImpl.dpo:
+                raise ValueError("a resolved preference (DPO) execution requires the 'dpo' loss summary")
             for label, resolved, summary in (
                 ("adapter", preference.adapter, self.adapter),
                 ("optimizer", preference.optimizer, self.optimizer),

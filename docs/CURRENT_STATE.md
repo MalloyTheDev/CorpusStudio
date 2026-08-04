@@ -319,7 +319,7 @@ per-item error isolation, and off-thread document opens.
   hardware-fit proof. See [`MODEL_TOKENIZER_CONTRACTS.md`](MODEL_TOKENIZER_CONTRACTS.md) and
   [`MOE_ARCHITECTURE.md`](MOE_ARCHITECTURE.md) for the exact static evidence boundary.
 - **Training objective foundation** (`training-objectives` / `training-objective-check`): a
-  hash-sealed registry of 29 backend-independent definitions spanning pretraining, full/adapter SFT,
+  hash-sealed registry of 30 backend-independent definitions spanning pretraining, full/adapter SFT,
   completion/response masks, preference and reward optimization, four distillation modes,
   process/verifier/tool-use training, embedding/reranking/classification/multimodal work, and
   evaluation/merge/conversion/quantization-only operations. Every definition carries explicit
