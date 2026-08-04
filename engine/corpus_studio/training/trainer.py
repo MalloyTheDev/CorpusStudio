@@ -2493,6 +2493,50 @@ def token_coverage_refusal(ledger: TokenCoverageLedger) -> str | None:
     )
 
 
+class PreferencePairTokens(BaseModel):
+    """One preference pair's token accounting for the DPO no-silent-truncation guard: the shared prompt
+    plus each response's (loss-bearing) length. DPO trains TWO sequences per pair - prompt+chosen and
+    prompt+rejected - and compares their log-probs, so the response tail on BOTH sides must survive: a
+    truncated response on either branch corrupts the preference comparison exactly as a severed SFT
+    completion corrupts supervised learning."""
+
+    prompt_tokens: int = Field(ge=0)
+    chosen_response_tokens: int = Field(ge=0)
+    rejected_response_tokens: int = Field(ge=0)
+
+
+def preference_pair_spans(
+    pairs: list[PreferencePairTokens], seq_len: int
+) -> list[ExampleTokenSpan]:
+    """PURE + torch-free. Expand preference pairs into per-branch token spans (chosen + rejected) for the
+    SHARED token-coverage ledger, so DPO reuses the exact SFT no-silent-truncation authority. Each
+    branch's supervised span is its response; a right-truncation at ``seq_len`` cuts the response tail
+    first, so dropped supervised tokens = the response tokens past ``seq_len`` (all of them once the
+    prompt alone exceeds ``seq_len``)."""
+    spans: list[ExampleTokenSpan] = []
+    for pair in pairs:
+        for response in (pair.chosen_response_tokens, pair.rejected_response_tokens):
+            total = pair.prompt_tokens + response
+            dropped = min(response, max(0, total - seq_len))
+            spans.append(
+                ExampleTokenSpan(
+                    total_tokens=total,
+                    supervised_tokens=response,
+                    dropped_supervised_tokens=dropped,
+                )
+            )
+    return spans
+
+
+def analyze_preference_truncation(
+    pairs: list[PreferencePairTokens], seq_len: int
+) -> TokenCoverageLedger:
+    """The no-silent-truncation guard extended to preference PAIRS: a pair is safe only if BOTH its
+    branches fit, since DPO needs the full response on each side to compare them. Returns the shared
+    :class:`TokenCoverageLedger`; feed it to :func:`token_coverage_refusal` to fail closed."""
+    return compute_token_coverage(preference_pair_spans(pairs, seq_len), seq_len)
+
+
 def _prepare_training_texts(
     rows: list[dict[str, Any]],
     config: TrainRunConfig,

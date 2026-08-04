@@ -34,10 +34,13 @@ from corpus_studio.training.trainer import (
     TrainerError,
     TrainRunConfig,
     ExampleTokenSpan,
+    PreferencePairTokens,
+    analyze_preference_truncation,
     analyze_truncation,
     apply_attention_execution_policy,
     build_lora_kwargs,
     compute_token_coverage,
+    preference_pair_spans,
     token_coverage_refusal,
     build_model_load_kwargs,
     build_training_kwargs,
@@ -252,6 +255,47 @@ def test_analyze_truncation_the_wbg_bug():
     assert report.pct_truncated == 100.0
     assert report.seq_len_for_zero_truncation == 3445
     assert "1536" in (truncation_warning(report) or "") and "3445" in (truncation_warning(report) or "")
+
+
+# --- DPO pair truncation guard (the SFT no-silent-truncation authority extended to preference pairs) ---
+
+def test_preference_pair_truncation_safe_when_both_branches_fit():
+    pairs = [
+        PreferencePairTokens(prompt_tokens=100, chosen_response_tokens=200, rejected_response_tokens=150),
+        PreferencePairTokens(prompt_tokens=80, chosen_response_tokens=120, rejected_response_tokens=300),
+    ]
+    led = analyze_preference_truncation(pairs, seq_len=512)  # longest full seq = 80+300 = 380 < 512
+    assert led.n_examples == 4  # two branches per pair
+    assert led.supervision_intact and led.boundary_severances == 0
+    assert token_coverage_refusal(led) is None
+
+
+def test_preference_pair_truncation_refuses_when_either_response_is_cut():
+    # chosen fits, but the REJECTED response is long enough to be cut - DPO still needs it whole to
+    # compare, so the pair is refused fail-closed (a chosen-only check would miss this).
+    pairs = [PreferencePairTokens(prompt_tokens=100, chosen_response_tokens=200, rejected_response_tokens=900)]
+    led = analyze_preference_truncation(pairs, seq_len=512)  # rejected branch = 100+900 = 1000 > 512
+    assert not led.supervision_intact and led.boundary_severances == 1
+    assert led.supervised_dropped == (100 + 900) - 512  # the rejected response tail past seq_len
+    assert "REFUSED" in (token_coverage_refusal(led) or "")
+
+
+def test_preference_pair_prompt_alone_over_length_drops_the_whole_response_on_both_branches():
+    pairs = [PreferencePairTokens(prompt_tokens=600, chosen_response_tokens=50, rejected_response_tokens=80)]
+    spans = preference_pair_spans(pairs, seq_len=512)  # prompt 600 > 512 -> every response token cut
+    assert [s.dropped_supervised_tokens for s in spans] == [50, 80]  # entire response dropped on each
+    assert not analyze_preference_truncation(pairs, seq_len=512).supervision_intact
+    # raising seq_len above the longest full sequence (600+80) keeps both whole
+    assert analyze_preference_truncation(pairs, seq_len=1024).supervision_intact
+
+
+def test_preference_pair_spans_expands_each_pair_into_two_branches():
+    pairs = [PreferencePairTokens(prompt_tokens=10, chosen_response_tokens=20, rejected_response_tokens=30)]
+    spans = preference_pair_spans(pairs, seq_len=25)
+    assert [(s.total_tokens, s.supervised_tokens, s.dropped_supervised_tokens) for s in spans] == [
+        (30, 20, 5),   # chosen: 10+20=30, last 5 response tokens past 25 dropped
+        (40, 30, 15),  # rejected: 10+30=40, last 15 response tokens past 25 dropped
+    ]
 
 
 # --- token-coverage ledger (the no-silent-truncation foundation for the full validated run) ---
