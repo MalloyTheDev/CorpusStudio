@@ -22,11 +22,13 @@ optimization** - are adopted below, because without them the harness drifts into
   control-plane** merged (#778 `PreferenceDataPolicy`; #779 the `dpo_qlora` objective +
   `ResolvedPreferenceExecutionConfiguration`); `preference_dpo` is declared at **`contract_validated`** -
   admitted-then-refused-at-execution, **not executable**.
-- **S2 offline DPO worker**: the sequence-chunked log-prob is an **exploratory** primitive. An
-  uncommitted scratchpad prototype trained 4B QLoRA DPO at seq 4096 (~9.99 GiB, where trl / off-the-shelf
-  liger cap at ~seq 1024) - **exploratory evidence, not a recorded or sealed result** (it is absent from
-  `HOST_STATE.md`/`HANDOFF.md` and `preference_dpo` is not `WORKLOAD_VERIFIED`). A sealed run + milestone
-  wheel + promotion remain the gated milestone.
+- **S2 offline DPO worker**: the sequence-chunked log-prob primitive (PR #781, `run_dpo_training`) is
+  **GPU-validated** at seq 4096 (4B QLoRA, RTX 5070): loss 0.6931(=log2)->0.28 monotonic, implicit reward
+  margin 0->11.2 (sane - the pre-shift-fix scratchpad prototype's margin exploded to ~1150, a leaked
+  objective), **peak 9.49 GiB** (where trl / off-the-shelf liger cap at ~seq 1024), held-out ranking
+  accuracy 1.0. That is **EXPLORATORY/product evidence from a direct primitive call, not a sealed
+  platform-run** - `preference_dpo` is not `WORKLOAD_VERIFIED`. The config->args adapter + a sealed run +
+  the milestone wheel + promotion remain the gated milestone (#784).
 
 The `SupportLevel` ladder is **tuple-scoped**: the one `WORKLOAD_VERIFIED` tuple is `dense_qlora_sft`.
 DPO is **expressible and admitted-fail-closed** but its execution is **unproven**; every paradigm below is

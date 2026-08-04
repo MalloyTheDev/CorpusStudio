@@ -15,9 +15,12 @@ implied-away.
 
 ## 1. Reinforcement learning as an architected mode (not just labels)
 
-**Today:** RL exists only as *declared objectives* - `ObjectiveKind.preference_optimization` /
-`reward_modeling`, `TaskType.grpo` / `preference` / `reward` - with **no training architecture behind
-them**. There is no rollout loop, reward-model serving, or on-policy driver.
+**Today:** **offline preference optimization (DPO) has a shipped control-plane vertical** -
+`ObjectiveKind.preference_optimization` + the `dpo_qlora` objective, fail-closed admission (#775/#779), a
+resolver that seals a `ResolvedPreferenceExecutionConfiguration` (#782), and CLI knobs (#783); its worker
+primitive is GPU-validated (exploratory), refused at execution until a sealed run promotes it (#784).
+**On-policy RL** (`reward_modeling`, `TaskType.grpo` / `reward`) remains *declared objectives only* -
+there is still no rollout loop, reward-model serving, or on-policy driver.
 
 **Proposed additive architecture:**
 

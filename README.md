@@ -80,9 +80,9 @@ installed external trainer:
 - compare two versions (added / removed / common rows) and **restore** a
   version's exact rows. `examples.jsonl` now has a **single writer in the engine** —
   the `examples-append` command (#546); the WPF/Avalonia desktop that previously
-  owned it is being retired (#545). In-place restore (capture an undo point, atomically
-  swap in the restored rows, refuse without a safe undo) is being re-homed to the engine
-  CLI next (#546). See [`docs/VERSIONING.md`](docs/VERSIONING.md)
+  owned it was **removed** (#545). In-place restore (capture an undo point, atomically
+  swap in the restored rows, refuse without a safe undo) now lives in the engine
+  CLI (#546). See [`docs/VERSIONING.md`](docs/VERSIONING.md)
 
 **Govern & gate**
 - role-based provider policy enforced **in the engine** (not just the UI):
@@ -137,6 +137,11 @@ installed external trainer:
   `train-check`, `train-merge`, and `model-fetch` remain supporting tools. The low-level `train-run`
   entry point is development-only: it refuses unless explicitly acknowledged and labels its result
   `UNSEALED_DIRECT_EXECUTION`, `NON_REPRODUCIBLE`, and `NO_PLATFORM_LINEAGE`
+- **offline DPO / preference planning** (`platform-plan --task-type preference --objective dpo_qlora
+  --dpo-beta … --dpo-label-smoothing … --max-prompt-length …`): a QLoRA-DPO plan is admitted at planning
+  and lowered into a sealed `ResolvedPreferenceExecutionConfiguration` (a byte-locked sibling of the SFT
+  seal), then refused at execution with a typed reason until the DPO worker wheel + a sealed run promote
+  it. The worker primitive reaches seq 4096 on a 12 GB card and is GPU-validated as correct (exploratory)
 - versioned `TraceRecord` artifacts preserve source rows, role context, reasoning/tool/final-answer
   boundaries, producer-policy evidence, validation, and separate human review. Generated candidates
   are pending by default; `trace-review` writes immutable successors and first-party trainer admission refuses
@@ -178,7 +183,7 @@ installed external trainer:
   fit/residency claim is made (see
   [`docs/MODEL_TOKENIZER_CONTRACTS.md`](docs/MODEL_TOKENIZER_CONTRACTS.md) and
   [`docs/MOE_ARCHITECTURE.md`](docs/MOE_ARCHITECTURE.md))
-- a 29-entry, hash-sealed `TrainingObjective` registry describes datasets, labels, masks, losses,
+- a 30-entry, hash-sealed `TrainingObjective` registry describes datasets, labels, masks, losses,
   model/update/backend requirements, artifacts, resume/evaluation, and MoE-safe router/expert intent
   independently from backend implementation; its checker keeps declarations separate from measured
   capability evidence (see [`docs/TRAINING_SYSTEMS_ARCHITECTURE.md`](docs/TRAINING_SYSTEMS_ARCHITECTURE.md))
@@ -231,15 +236,15 @@ CorpusStudio
 ```
 
 **Target architecture:** a **Rust authoritative core** + isolated Python ML workers, driven by the
-**Tauri 2 / React** frontend over the Python engine. The WPF/Avalonia desktop is a **decommissioning
-prototype** (#545), kept only until the engine CLI re-homes dataset authoring (#546); the Rust core is
-a staged target (#522) and is not yet in the tree.
+**Tauri 2 / React** frontend over the Python engine. It replaced the **removed** WPF/Avalonia desktop
+prototype (#545); dataset authoring was re-homed to the engine CLI (#546). The Rust core is a staged
+target (#522) and is not yet in the tree.
 
-## Desktop preview
+## Workspace UX (design reference)
 
-A walk through the workspace, front to back. An IDE-style activity bar toggles
-between the **Start Center**, the file **Explorer**, and the **Studio**, with
-**Problems** and **Output** panels docked at the bottom. See
+The workspace UX that the removed WPF/Avalonia prototype demonstrated and that the target Tauri/React
+client ports: an IDE-style activity bar toggling between the **Start Center**, the file **Explorer**, and
+the **Studio**, with **Problems** and **Output** panels docked at the bottom. See
 [`docs/WORKSPACE_SYSTEM.md`](docs/WORKSPACE_SYSTEM.md).
 
 ### Design system (Nocturne)
@@ -268,7 +273,7 @@ Build a local desktop app that supports:
 
 The recommended stack is:
 
-- Tauri 2 + React frontend (`apps/web`) — the target UI (a C# WPF/Avalonia desktop prototype is being retired, #545)
+- Tauri 2 + React frontend (`apps/web`) — the target UI (the earlier C# WPF/Avalonia desktop prototype was removed, #545)
 - Python dataset engine
 - file-backed project state, with an optional SQLite index for fast project listing
 - JSONL as the first export target
