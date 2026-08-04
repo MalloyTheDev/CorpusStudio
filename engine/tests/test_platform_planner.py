@@ -478,6 +478,19 @@ def test_preference_resolver_threads_the_dpo_knobs():
     assert dpref.data.max_prompt_length == dpref.data.max_length // 2
 
 
+def test_preference_resolver_rejects_invalid_dpo_knobs():
+    # Fail-closed on out-of-range / non-finite knobs (a clean PlannerError, never a silent clamp).
+    base = dict(task_type="preference", objective_id="dpo_qlora")
+    for bad_beta in (0.0, -1.0, float("inf"), float("nan")):
+        with pytest.raises(PlannerError, match="preference_beta"):
+            _plan(_profile(cc_major=8), _report(), **base, preference_beta=bad_beta)
+    with pytest.raises(PlannerError, match="label_smoothing"):
+        _plan(_profile(cc_major=8), _report(), **base, preference_label_smoothing=0.5)
+    for bad_cap in (0, -5, 999999):  # < 1 or >= the sequence window
+        with pytest.raises(PlannerError, match="max_prompt_length"):
+            _plan(_profile(cc_major=8), _report(), **base, preference_max_prompt_length=bad_cap)
+
+
 def test_preference_resolver_refuses_an_incompatible_project_local_schema(monkeypatch):
     # A project-local 'preference' schema that makes a required pair field optional (or retypes it) is
     # rejected - the sealed chosen_rejected formatter needs prompt/chosen/rejected as required text.

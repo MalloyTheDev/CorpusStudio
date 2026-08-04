@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -885,14 +886,22 @@ def _resolve_preference_execution(
     # The preference-pair formatter (prompt/chosen/rejected), NOT the SFT format_example_text.
     formatter_id, formatter_hash = preference_formatter_identity()
     max_length = constraints.sequence_len
-    # The sealed prompt cap is the operator's knob, else half the window; always < max_length so the
-    # chosen/rejected response has room.
-    requested_prompt_cap = (
-        constraints.preference_max_prompt_length
-        if constraints.preference_max_prompt_length is not None
-        else max_length // 2
-    )
-    max_prompt_length = max(1, min(max_length - 1, requested_prompt_cap))
+    # Validate the operator's DPO knobs fail-closed (a clean PlannerError, never a silent clamp or a raw
+    # pydantic error): an out-of-range or non-finite value hides operator intent rather than surfacing it.
+    beta = constraints.preference_beta
+    if not math.isfinite(beta) or beta <= 0:
+        raise PlannerError(f"preference_beta must be a finite positive number (got {beta!r})")
+    smoothing = constraints.preference_label_smoothing
+    if not math.isfinite(smoothing) or not 0.0 <= smoothing < 0.5:
+        raise PlannerError(f"preference_label_smoothing must be in [0, 0.5) (got {smoothing!r})")
+    cap = constraints.preference_max_prompt_length
+    if cap is not None and not 1 <= cap < max_length:
+        raise PlannerError(
+            f"preference_max_prompt_length must be in [1, {max_length}) - below the sequence window so "
+            f"the response has room (got {cap!r})"
+        )
+    # The sealed prompt cap is the (validated) operator knob, else half the window.
+    max_prompt_length = cap if cap is not None else max(1, max_length // 2)
     data_policy = PreferenceDataPolicy(
         schema_id=schema.id,
         schema_version=schema.version,
@@ -907,8 +916,8 @@ def _resolve_preference_execution(
         data_seed=constraints.data_seed if constraints.data_seed is not None else constraints.seed,
     )
     preference_spec = PreferenceOptimizationSpec(
-        beta=constraints.preference_beta,
-        label_smoothing=constraints.preference_label_smoothing,
+        beta=beta,
+        label_smoothing=smoothing,
         reference_model=ReferenceModelBinding(mode="frozen_base", precompute_ref_log_probs=False),
     )
     try:
