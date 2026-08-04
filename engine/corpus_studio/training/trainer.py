@@ -2558,7 +2558,8 @@ def sequence_chunked_logprob(
     (``hidden[i]`` -> ``labels[i+1]``) once; scoring ``labels[i]`` from ``hidden[i]`` directly would leak
     each target into its own hidden state. ``average_log_prob`` returns the per-token mean (length-
     normalized, the production default so the margin does not scale with response length); otherwise the
-    sum. Measured: 4B QLoRA DPO, seq 4096, peak 9.99 GiB."""
+    sum. Exploratory (uncommitted scratchpad) prototype measured ~9.99 GiB for 4B QLoRA DPO at seq 4096 -
+    not a sealed/recorded result."""
     import torch  # noqa: PLC0415
     import torch.nn.functional as F  # noqa: PLC0415
     from torch.utils.checkpoint import checkpoint  # noqa: PLC0415
@@ -2811,7 +2812,7 @@ def _encode_preference_branch(
     return ids, labels, content_len
 
 
-def run_dpo_training(  # pragma: no cover - optional training-stack integration (GPU-validated)
+def run_dpo_training(  # pragma: no cover - optional training-stack integration (exploratory; sealed GPU run gated)
     model: Any,
     tokenizer: Any,
     pairs: list[dict[str, str]],
@@ -2827,8 +2828,10 @@ def run_dpo_training(  # pragma: no cover - optional training-stack integration 
 ) -> dict[str, Any]:
     """The harness's DPO training primitive - the seq-4096-capable path trl/off-the-shelf-liger cannot do.
     ``pairs`` are ``{"prompt","chosen","rejected"}`` (the prompt already chat-templated). Fail-closes on
-    truncation BEFORE touching the GPU, then trains with the sequence-chunked loss. GPU-validated: 4B
-    QLoRA, seq 4096, peak 9.99 GiB, correct DPO curve. Reference log-probs use the PEFT adapter disabled.
+    truncation BEFORE touching the GPU, then trains with the sequence-chunked loss. An exploratory
+    (uncommitted scratchpad) prototype measured 4B QLoRA seq 4096 at ~9.99 GiB with a correct DPO curve;
+    that is exploratory evidence, not a sealed/recorded result - the sealed run + milestone wheel remain
+    gated. Reference log-probs use the PEFT adapter disabled.
 
     Consumed by the platform DPO worker (a thin adapter maps a sealed
     ``ResolvedPreferenceExecutionConfiguration`` to these arguments). Returns an evidence bundle (per-step
@@ -2945,7 +2948,7 @@ def run_dpo_training(  # pragma: no cover - optional training-stack integration 
     return evidence
 
 
-def evaluate_preference_accuracy(  # pragma: no cover - optional training-stack integration (GPU-validated)
+def evaluate_preference_accuracy(  # pragma: no cover - optional training-stack integration (exploratory; sealed GPU run gated)
     model: Any,
     tokenizer: Any,
     pairs: list[dict[str, str]],

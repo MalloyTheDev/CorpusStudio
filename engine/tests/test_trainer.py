@@ -321,7 +321,7 @@ def test_preference_pair_spans_expands_each_pair_into_two_branches():
     ]
 
 
-# --- sequence-chunked DPO loss (the seq-4096-on-12GB core; torch-gated, GPU-validated at 9.99 GiB) ---
+# --- sequence-chunked DPO loss (the seq-4096-on-12GB core; torch-gated; ~9.99 GiB in an exploratory prototype) ---
 
 def test_sequence_chunked_logprob_matches_the_direct_computation():
     torch = pytest.importorskip("torch")
