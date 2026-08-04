@@ -362,6 +362,17 @@ per-item error isolation, and off-thread document opens.
   functional proof, so newly planned training is refused on every host rather than inferred from an
   import or static feature list. Native-Windows/WDDM Blackwell remains an additional hard refusal
   because its required math path is unavailable there.
+- **Offline DPO (preference) planning** (`platform-plan --task-type preference --objective dpo_qlora`):
+  a QLoRA-DPO plan is admitted AT PLANNING and lowered into a sealed `ResolvedPreferenceExecutionConfiguration`
+  (its own byte-locked seal, sibling to the SFT config) - a `PreferenceDataPolicy` (pair schema +
+  preference formatter + prompt/response budget) + a `PreferenceOptimizationSpec` (beta / sigmoid loss /
+  label-smoothing / frozen-base reference) bound to the `dpo_qlora` objective, with `--dpo-beta` /
+  `--dpo-label-smoothing` / `--max-prompt-length` as fail-closed knobs. EXECUTION is refused with a typed
+  reason (`preference_dpo` is `contract_validated`, not `workload_verified`) at every gate until the DPO
+  worker wheel + a sealed run promote it. The worker primitive (a sequence-chunked log-prob that reaches
+  seq 4096 on a 12 GB card where trl/off-the-shelf-liger cap at ~1024) is GPU-validated as correct
+  (exploratory: loss->log2-start curve, held-out ranking 1.0, peak 9.49 GiB) but not yet on the sealed
+  platform-run path.
 - **Identity-bound backend worker protocol 2.0**: every newly generated RunPlan hash-pins the exact
   static BackendManifest. A subprocess worker must send `hello` first with that manifest and its exact
   environment/lock ref; only then can the core dispatch. The parent enforces protocol/direction/body,
