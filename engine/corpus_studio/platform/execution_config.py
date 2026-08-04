@@ -30,6 +30,7 @@ _FORMATTER_IDENTITIES = {
     "instruction": "corpus-studio:instruction-alpaca-v1",
     "chat": "corpus-studio:tokenizer-chat-template-v1",
     "trace": "corpus-studio:structured-trace-renderer-v1",
+    "preference": "corpus-studio:preference-pair-v1",
 }
 _RUNTIME_ID = re.compile(r"^[A-Za-z0-9._-]+$")
 
@@ -53,6 +54,13 @@ def run_scoped_training_output(
     return Path(config.output_dir) / "runs" / run_id / "artifacts" / "adapter"
 
 
+PREFERENCE_NOT_EXECUTABLE_REASON = (
+    "this is a sealed preference (DPO) plan - admitted at planning but not yet executable: "
+    "'preference_dpo' is contract_validated, not workload_verified. The DPOTrainer worker branch, a "
+    "workload-verified run, and the milestone wheel are the gated next step."
+)
+
+
 def required_runner_lane(plan: RunPlan) -> str:
     """Return the only runner lane allowed to consume ``plan``."""
 
@@ -63,6 +71,11 @@ def required_runner_lane(plan: RunPlan) -> str:
                 "resolved training plans require the first-party corpus_studio worker"
             )
         return "cpu_toy" if execution.runtime_mode == "cpu_toy" else "training"
+    if plan.resolved_preference_execution is not None:
+        # A sealed preference (DPO) plan is admitted at planning but refused at EXECUTION here - the
+        # earliest dispatch gate - with a typed reason, so the refusal is reachable through the shipping
+        # platform-run flow rather than surfacing the generic "no executable runner lane" below.
+        raise ExecutionConfigurationError(PREFERENCE_NOT_EXECUTABLE_REASON)
     if plan.backend_ref.id == "echo":
         if plan.task_type.value != "evaluation":
             raise ExecutionConfigurationError(
@@ -148,6 +161,23 @@ def formatter_identity(dataset_format: str) -> tuple[str, str]:
     except (ImportError, OSError, TypeError) as exc:
         raise ExecutionConfigurationError(
             f"cannot inspect the sealed formatter implementation for {dataset_format!r}: {exc}"
+        ) from exc
+    return formatter_id, canonical_sha256({"formatter_id": formatter_id, "sources": sources})
+
+
+def preference_formatter_identity() -> tuple[str, str]:
+    """The sealed identity of the preference-pair formatter, DISTINCT from :func:`formatter_identity`'s
+    SFT ``format_example_text`` (which reads instruction/messages/trace fields, not a preference pair's
+    ``prompt``/``chosen``/``rejected``). Returns the id + a content digest of ``format_preference_pair``'s
+    source, so a DPO run formats every pair identically and a formatter change fails closed."""
+    formatter_id = _FORMATTER_IDENTITIES["preference"]
+    try:
+        from corpus_studio.training.trainer import format_preference_pair  # noqa: PLC0415
+
+        sources = [inspect.getsource(format_preference_pair)]
+    except (ImportError, OSError, TypeError) as exc:
+        raise ExecutionConfigurationError(
+            f"cannot inspect the sealed preference formatter implementation: {exc}"
         ) from exc
     return formatter_id, canonical_sha256({"formatter_id": formatter_id, "sources": sources})
 

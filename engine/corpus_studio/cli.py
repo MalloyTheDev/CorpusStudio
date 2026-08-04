@@ -862,6 +862,20 @@ def checkpoint_verify(
         )
 
 
+def _project_dir_for_dataset(dataset_path: str) -> Optional[Path]:
+    """The nearest project root (a directory containing ``project.json``) at or above the dataset, or None.
+    A preference plan resolves its dataset schema against this root, so a project-local schema that shadows
+    the builtin governs the sealed digest (rather than silently sealing the builtin)."""
+    try:
+        start = Path(dataset_path).resolve().parent
+    except (OSError, ValueError):
+        return None
+    for candidate in (start, *start.parents):
+        if (candidate / "project.json").is_file():
+            return candidate
+    return None
+
+
 @app.command("platform-plan")
 def platform_plan(
     base_model: str = typer.Option(..., "--base-model", help="The base model to fine-tune."),
@@ -878,6 +892,12 @@ def platform_plan(
     dataset_path: str = typer.Option(..., "--dataset", help="Path to the training JSONL."),
     dataset_ref: str = typer.Option("dataset", "--dataset-ref", help="Stable id for the dataset the plan references."),
     task_type: str = typer.Option("sft", "--task-type", help="Training task type (sft / preference / ...)."),
+    objective: Optional[str] = typer.Option(
+        None,
+        "--objective",
+        help="Training objective id (REQUIRED for --task-type preference, e.g. dpo_qlora; "
+        "see 'training-objectives'). Ignored for sft/pretraining, which resolve by task.",
+    ),
     dataset_format: str = typer.Option("instruction", "--dataset-format", help="Row format: instruction (Alpaca) or chat (messages)."),
     output_dir: Optional[str] = typer.Option(
         None,
@@ -1056,6 +1076,7 @@ def platform_plan(
         dataset_path=dataset_path,
         dataset_content_sha256=dataset_digest,
         task_type=task_type,
+        objective_id=objective,
         dataset_format=dataset_format,
         output_dir=output_dir,
         sequence_len=sequence_len,
@@ -1153,6 +1174,7 @@ def platform_plan(
             storage_profile=storage_profile,
             allow_marginal_storage=allow_marginal_storage,
             allow_unknown_storage=allow_unknown_storage,
+            project_dir=_project_dir_for_dataset(dataset_path),
         )
     except PlannerError as exc:
         typer.echo(str(exc), err=True)

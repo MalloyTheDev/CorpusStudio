@@ -606,6 +606,24 @@ def test_format_empty_row_is_dropped():
     assert format_example_text({"messages": []}, "chat") == ""
 
 
+def test_format_preference_pair_renders_the_pair_and_fails_closed():
+    from corpus_studio.training.trainer import TrainerError, format_preference_pair
+
+    out = format_preference_pair({"prompt": " hi ", "chosen": "good", "rejected": "bad", "reason": "x"})
+    assert out == {"prompt": "hi", "chosen": "good", "rejected": "bad"}  # stripped, no tokenizer
+    with pytest.raises(TrainerError):  # a missing/empty required field fails closed
+        format_preference_pair({"prompt": "p", "chosen": "", "rejected": "r"})
+
+    class _Tok:
+        def apply_chat_template(self, messages, tokenize=False, add_generation_prompt=False):
+            assert messages == [{"role": "user", "content": "hi"}]
+            assert not tokenize and add_generation_prompt
+            return "<user>hi<gen>"
+
+    templated = format_preference_pair({"prompt": "hi", "chosen": "c", "rejected": "r"}, _Tok())
+    assert templated["prompt"] == "<user>hi<gen>" and templated["chosen"] == "c"
+
+
 # ---- arg mapping -------------------------------------------------------------
 
 

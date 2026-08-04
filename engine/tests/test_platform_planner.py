@@ -418,10 +418,74 @@ def test_planner_admits_the_dense_qlora_sft_task_and_refuses_unexecutable_varian
     # a preference request must name its objective; without one it maps to no shape -> refused.
     with pytest.raises(PlannerError, match="no executable execution variant"):
         _plan(_profile(cc_major=8), _report(), task_type="preference")
-    # preference + the dpo_qlora objective maps to preference_dpo, declared at contract_validated ->
-    # admitted-as-known but refused at execution (below workload_verified), NOT "no variant".
-    with pytest.raises(PlannerError, match="'preference_dpo' is 'contract_validated'"):
+    # preference + the dpo_qlora objective maps to preference_dpo (contract_validated) -> ADMITTED at
+    # planning: the resolver seals a ResolvedPreferenceExecutionConfiguration and the plan carries it
+    # (not the SFT resolved_execution). Execution is refused separately by the runner (DPOTrainer + wheel
+    # gated), so the plan's loss summary is the DPO loss and it binds the dpo_qlora objective.
+    dpo_plan = _plan(_profile(cc_major=8), _report(), task_type="preference", objective_id="dpo_qlora")
+    assert dpo_plan.resolved_preference_execution is not None
+    assert dpo_plan.resolved_execution is None
+    assert dpo_plan.loss_impl.value == "dpo"
+    assert dpo_plan.resolved_preference_execution.objective_ref.id == "dpo_qlora"
+
+
+def test_preference_dpo_resolves_to_a_sealed_config_and_the_runner_refuses_it_at_execution():
+    from corpus_studio.platform.execution_config import preference_execution_configuration_hash_for
+    from corpus_studio.platform.runners import RunnerFailure, TrainingRunner
+
+    plan = _plan(_profile(cc_major=8), _report(), task_type="preference", objective_id="dpo_qlora")
+    pref = plan.resolved_preference_execution
+    assert pref is not None and plan.resolved_execution is None
+    # the resolver sealed a self-consistent config bound to the dpo_qlora objective + the DPO loss/data
+    assert pref.configuration_hash == preference_execution_configuration_hash_for(pref)
+    assert pref.objective_ref.id == "dpo_qlora"
+    assert pref.preference.objective == "dpo" and pref.data.schema_id == "preference"
+    # the sealed data policy binds the PREFERENCE-pair formatter, not the SFT instruction formatter
+    assert pref.data.formatter_id == "corpus-studio:preference-pair-v1"
+    assert pref.data.max_prompt_length < pref.data.max_length  # room for the response
+    # deferred #779 finding: device_map reconciles to exactly the one sealed compute device
+    assert len(pref.device_map) == 1
+    # refuse-at-execution must be REACHABLE with a TYPED reason at the actual gates, not just the innermost
+    # _resolve_config: the dispatch lane selector AND the direct runner's first resolution step both refuse
+    # a preference plan before the generic "no ResolvedExecutionConfiguration" path.
+    from corpus_studio.platform.execution_config import (
+        ExecutionConfigurationError,
+        required_runner_lane,
+    )
+
+    with pytest.raises(ExecutionConfigurationError, match="not yet executable"):
+        required_runner_lane(plan)  # dispatch gate (shipping platform-run flow)
+    with pytest.raises(RunnerFailure, match="not yet executable"):
+        TrainingRunner(cpu_toy=False)._resolve_trainer(plan)  # direct runner, before _resolve_config
+    with pytest.raises(RunnerFailure, match="not yet executable"):
+        TrainingRunner(cpu_toy=False)._resolve_config(plan, "run-x")  # defense-in-depth
+
+
+def test_preference_resolver_refuses_an_incompatible_project_local_schema(monkeypatch):
+    # A project-local 'preference' schema that makes a required pair field optional (or retypes it) is
+    # rejected - the sealed chosen_rejected formatter needs prompt/chosen/rejected as required text.
+    import corpus_studio.platform.planner as planner_mod
+    from corpus_studio.schemas.registry import load_builtin_schema
+
+    good = load_builtin_schema("preference")
+    incompatible = good.model_copy(
+        update={
+            "fields": [
+                field.model_copy(update={"required": False}) if field.name == "chosen" else field
+                for field in good.fields
+            ]
+        }
+    )
+    monkeypatch.setattr(planner_mod, "resolve_schema", lambda _project_dir, _schema_id: (incompatible, "project"))
+    with pytest.raises(PlannerError, match="incompatible with the chosen_rejected pair formatter"):
         _plan(_profile(cc_major=8), _report(), task_type="preference", objective_id="dpo_qlora")
+
+
+def test_planner_refuses_a_preference_objective_on_a_non_preference_task():
+    # A preference objective (dpo_qlora) with task_type=sft would silently lower to a dense-SFT run while
+    # retaining a misleading DPO identity - refuse the objective/task contradiction fail-closed.
+    with pytest.raises(PlannerError, match="requires task_type='preference'"):
+        _plan(_profile(cc_major=8), _report(), task_type="sft", objective_id="dpo_qlora")
 
 
 def test_native_windows_blackwell_host_forces_math_bf16_nf4_qlora():

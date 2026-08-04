@@ -89,6 +89,16 @@ def test_formatter_identity_is_implementation_bound_and_fail_closed(monkeypatch)
         formatter_identity("instruction")
 
 
+def test_preference_formatter_identity_is_the_pair_formatter_not_the_sft_one():
+    from corpus_studio.platform.execution_config import preference_formatter_identity
+
+    formatter_id, digest = preference_formatter_identity()
+    assert formatter_id == "corpus-studio:preference-pair-v1"
+    assert len(digest) == 64
+    # it binds the preference-pair formatter, NOT the SFT format_example_text
+    assert (formatter_id, digest) != formatter_identity("instruction")
+
+
 def test_stable_file_and_directory_bindings_cover_exact_bytes(tmp_path: Path):
     source = tmp_path / "dataset.jsonl"
     source.write_bytes(b'{"instruction":"a","output":"b"}\n')
