@@ -2238,6 +2238,37 @@ def format_example_text(row: dict, dataset_format: str, tokenizer: Any | None = 
     return f"### Instruction:\n{prompt}\n\n### Response:\n{output}"
 
 
+def format_preference_pair(row: dict, tokenizer: Any | None = None) -> dict[str, str]:
+    """Render one preference row (the ``chosen_rejected`` schema: ``prompt`` / ``chosen`` / ``rejected``)
+    into the three strings the DPO worker scores - the preference analog of :func:`format_example_text`,
+    which renders the SFT ``instruction`` / ``messages`` / trace shapes and cannot format a preference pair.
+
+    The prompt is wrapped with the model's chat template as a single user turn WITH a generation prompt
+    (when a tokenizer is supplied), so ``chosen`` / ``rejected`` are the assistant completions the policy is
+    trained to prefer / disprefer; without a tokenizer it falls back to the raw prompt. Returns
+    ``{"prompt", "chosen", "rejected"}`` and fails closed on a row missing a required field (a downstream
+    empty branch would NaN the length-normalized log-prob - see :func:`refuse_degenerate_preference_pairs`)."""
+    prompt = str(row.get("prompt", "")).strip()
+    chosen = str(row.get("chosen", "")).strip()
+    rejected = str(row.get("rejected", "")).strip()
+    if not prompt or not chosen or not rejected:
+        raise TrainerError(
+            "a preference row requires non-empty 'prompt', 'chosen', and 'rejected' fields"
+        )
+    if tokenizer is not None and hasattr(tokenizer, "apply_chat_template"):
+        try:
+            prompt = str(
+                tokenizer.apply_chat_template(
+                    [{"role": "user", "content": prompt}],
+                    tokenize=False,
+                    add_generation_prompt=True,
+                )
+            )
+        except Exception as exc:  # noqa: BLE001 - normalize third-party template exceptions.
+            raise TrainerError(f"the tokenizer chat template failed: {exc}") from exc
+    return {"prompt": prompt, "chosen": chosen, "rejected": rejected}
+
+
 def build_lora_kwargs(config: TrainRunConfig) -> dict[str, Any]:
     """peft ``LoraConfig`` kwargs. ``target_modules='all-linear'`` targets every linear layer, so it
     works across architectures (tiny Llama toy → real Qwen) without a per-model module list."""

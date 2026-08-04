@@ -862,6 +862,20 @@ def checkpoint_verify(
         )
 
 
+def _project_dir_for_dataset(dataset_path: str) -> Optional[Path]:
+    """The nearest project root (a directory containing ``project.json``) at or above the dataset, or None.
+    A preference plan resolves its dataset schema against this root, so a project-local schema that shadows
+    the builtin governs the sealed digest (rather than silently sealing the builtin)."""
+    try:
+        start = Path(dataset_path).resolve().parent
+    except (OSError, ValueError):
+        return None
+    for candidate in (start, *start.parents):
+        if (candidate / "project.json").is_file():
+            return candidate
+    return None
+
+
 @app.command("platform-plan")
 def platform_plan(
     base_model: str = typer.Option(..., "--base-model", help="The base model to fine-tune."),
@@ -1160,6 +1174,7 @@ def platform_plan(
             storage_profile=storage_profile,
             allow_marginal_storage=allow_marginal_storage,
             allow_unknown_storage=allow_unknown_storage,
+            project_dir=_project_dir_for_dataset(dataset_path),
         )
     except PlannerError as exc:
         typer.echo(str(exc), err=True)

@@ -33,6 +33,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
+from pathlib import Path
 from typing import Any
 
 from pydantic import ValidationError
@@ -96,8 +97,9 @@ from corpus_studio.platform.execution_config import (
     formatter_identity,
     huggingface_input_ref,
     preference_execution_configuration_hash_for,
+    preference_formatter_identity,
 )
-from corpus_studio.schemas.registry import load_builtin_schema
+from corpus_studio.schemas.project_schemas import resolve_schema
 from corpus_studio.platform.host_platform import flash_sdpa_deadlocks
 from corpus_studio.platform.parameter_accounting import verify_parameter_accounting_hash
 from corpus_studio.platform.objectives import get_objective
@@ -825,6 +827,7 @@ def _resolve_preference_execution(
     constraints: PlannerConstraints,
     resolved_physical: PhysicalExecutionSpec,
     chat_template_sha256: str | None,
+    project_dir: Path | str | None,
 ) -> ResolvedPreferenceExecutionConfiguration:
     """Lower a preference + ``dpo_qlora`` plan into a SEALED
     :class:`ResolvedPreferenceExecutionConfiguration` - the DPO sibling of the SFT resolver. Reuses every
@@ -852,10 +855,12 @@ def _resolve_preference_execution(
             f"execution device {expected_device!r}"
         )
 
-    # Resolved 'preference' dataset-schema identity: id + version + a content digest of the builtin
-    # schema, so a row-layout drift fails closed even when a project-local schema shadows the builtin.
-    schema = load_builtin_schema("preference")
-    formatter_id, formatter_hash = formatter_identity(constraints.dataset_format)
+    # Resolved 'preference' dataset-schema identity: id + version + a content digest of the schema that
+    # ACTUALLY governs the dataset (a project-local schema shadows the builtin of the same id), so a
+    # row-layout drift fails closed even under a project-local override.
+    schema, _schema_source = resolve_schema(project_dir, "preference")
+    # The preference-pair formatter (prompt/chosen/rejected), NOT the SFT format_example_text.
+    formatter_id, formatter_hash = preference_formatter_identity()
     max_length = constraints.sequence_len
     # Reserve room for the response: default the prompt cap to half the window (< max_length invariant).
     max_prompt_length = max(1, min(max_length - 1, max_length // 2))
@@ -907,6 +912,7 @@ def build_run_plan(
     storage_profile: StorageProfile | None = None,
     allow_marginal_storage: bool = False,
     allow_unknown_storage: bool = False,
+    project_dir: Path | str | None = None,
     now: str | None = None,
 ) -> RunPlan:
     """Resolve one immutable, hash-sealed :class:`RunPlan` from the host profile + proven
@@ -1400,6 +1406,7 @@ def build_run_plan(
             constraints=constraints,
             resolved_physical=resolved_physical,
             chat_template_sha256=constraints.chat_template_sha256,
+            project_dir=project_dir,
         )
         resolved_preference_field = preference_execution.model_dump(mode="json")
     else:

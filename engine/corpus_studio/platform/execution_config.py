@@ -30,6 +30,7 @@ _FORMATTER_IDENTITIES = {
     "instruction": "corpus-studio:instruction-alpaca-v1",
     "chat": "corpus-studio:tokenizer-chat-template-v1",
     "trace": "corpus-studio:structured-trace-renderer-v1",
+    "preference": "corpus-studio:preference-pair-v1",
 }
 _RUNTIME_ID = re.compile(r"^[A-Za-z0-9._-]+$")
 
@@ -160,6 +161,23 @@ def formatter_identity(dataset_format: str) -> tuple[str, str]:
     except (ImportError, OSError, TypeError) as exc:
         raise ExecutionConfigurationError(
             f"cannot inspect the sealed formatter implementation for {dataset_format!r}: {exc}"
+        ) from exc
+    return formatter_id, canonical_sha256({"formatter_id": formatter_id, "sources": sources})
+
+
+def preference_formatter_identity() -> tuple[str, str]:
+    """The sealed identity of the preference-pair formatter, DISTINCT from :func:`formatter_identity`'s
+    SFT ``format_example_text`` (which reads instruction/messages/trace fields, not a preference pair's
+    ``prompt``/``chosen``/``rejected``). Returns the id + a content digest of ``format_preference_pair``'s
+    source, so a DPO run formats every pair identically and a formatter change fails closed."""
+    formatter_id = _FORMATTER_IDENTITIES["preference"]
+    try:
+        from corpus_studio.training.trainer import format_preference_pair  # noqa: PLC0415
+
+        sources = [inspect.getsource(format_preference_pair)]
+    except (ImportError, OSError, TypeError) as exc:
+        raise ExecutionConfigurationError(
+            f"cannot inspect the sealed preference formatter implementation: {exc}"
         ) from exc
     return formatter_id, canonical_sha256({"formatter_id": formatter_id, "sources": sources})
 

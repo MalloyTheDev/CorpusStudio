@@ -440,6 +440,8 @@ def test_preference_dpo_resolves_to_a_sealed_config_and_the_runner_refuses_it_at
     assert pref.configuration_hash == preference_execution_configuration_hash_for(pref)
     assert pref.objective_ref.id == "dpo_qlora"
     assert pref.preference.objective == "dpo" and pref.data.schema_id == "preference"
+    # the sealed data policy binds the PREFERENCE-pair formatter, not the SFT instruction formatter
+    assert pref.data.formatter_id == "corpus-studio:preference-pair-v1"
     assert pref.data.max_prompt_length < pref.data.max_length  # room for the response
     # deferred #779 finding: device_map reconciles to exactly the one sealed compute device
     assert len(pref.device_map) == 1

@@ -272,6 +272,7 @@ def resolve_training_plan(
     storage_profile: StorageProfile | None = None,
     allow_marginal_storage: bool = False,
     allow_unknown_storage: bool = False,
+    project_dir: str | None = None,
     now: str | None = None,
 ) -> TrainingPlanResolution:
     """Lower a :class:`TrainingPlan` into a RunPlan via the authoritative planner, then wrap it in a
@@ -331,6 +332,7 @@ def resolve_training_plan(
         storage_profile=storage_profile,
         allow_marginal_storage=allow_marginal_storage,
         allow_unknown_storage=allow_unknown_storage,
+        project_dir=project_dir,
         now=now,
     )
     return TrainingPlanResolution(
