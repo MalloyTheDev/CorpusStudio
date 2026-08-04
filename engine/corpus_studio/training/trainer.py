@@ -2863,8 +2863,11 @@ def run_dpo_training(  # pragma: no cover - optional training-stack integration 
     learning_rate: float = 5e-5,
     max_steps: int,
     gradient_accumulation_steps: int = 1,
+    pairs_per_microbatch: int = 1,
     max_prompt_length: int | None = None,
     optimizer: Any = None,
+    checkpoint_callback: Callable[[int], None] | None = None,
+    checkpoint_every: int = 0,
     truncation_allowed: bool = False,
     stage_callback: StageCallback | None = None,
 ) -> dict[str, Any]:
@@ -2879,6 +2882,18 @@ def run_dpo_training(  # pragma: no cover - optional training-stack integration 
     ``gradient_accumulation_steps`` come from the plan, and the caller passes the sealed ``optimizer``
     (e.g. paged 8-bit AdamW) - only when it is ``None`` does this build a plain AdamW as a dev convenience.
     Each optimizer step accumulates ``gradient_accumulation_steps`` preference microbatches. The sealed
+    checkpoint cadence is honored via ``checkpoint_callback`` (invoked with the completed optimizer-step
+    count every ``checkpoint_every`` steps) - the primitive does not own the atomic save; the worker wires
+    it to the checkpoint coordinator.
+
+    Constraints this primitive REFUSES rather than silently violating: (1) a sealed
+    ``batching.micro_batch_size > 1`` (``pairs_per_microbatch``) - the seq-4096 memory envelope processes
+    ONE pair per microbatch, so a larger per-device batch must be expressed via
+    ``gradient_accumulation_steps``; (2) a LoRA adapter with ``bias != "none"`` - ``disable_adapter()`` does
+    not restore trained biases, so the reference would drift from the frozen base. It also ASSUMES a frozen
+    (unadapted) LM head - ``target_modules`` must exclude it, so the shared ``lm_head`` weight cancels in
+    the margin; and it computes the reference inline under ``disable_adapter`` (equivalent to
+    ``precompute_ref_log_probs`` for a frozen reference, and trl's precompute is broken in-env). The sealed
     ``adapter.lora_dropout`` should be 0 for DPO; :func:`disable_dropout` is a runtime backstop and the
     count it neutralizes is surfaced in the evidence.
 
@@ -2895,6 +2910,12 @@ def run_dpo_training(  # pragma: no cover - optional training-stack integration 
     if gradient_accumulation_steps < 1:
         raise TrainerError(
             f"gradient_accumulation_steps must be >= 1 (got {gradient_accumulation_steps}).")
+    if pairs_per_microbatch != 1:
+        raise TrainerError(
+            f"this DPO primitive processes one pair per microbatch (got pairs_per_microbatch="
+            f"{pairs_per_microbatch}); the seq-4096 memory envelope cannot hold a larger per-device batch "
+            f"- express a bigger effective batch via gradient_accumulation_steps."
+        )
 
     def _stage(name: str, message: str) -> None:
         if stage_callback is not None:
@@ -2939,16 +2960,28 @@ def run_dpo_training(  # pragma: no cover - optional training-stack integration 
             "DPO policy has no trainable parameters - attach a PEFT adapter before training (a base with "
             "no adapter has nothing to optimize and no implicit-reward anchor)."
         )
+    # The reference is the frozen base reached via disable_adapter(); a trained LoRA BIAS is NOT reverted
+    # by disable_adapter (only the low-rank delta is), so a bias-carrying adapter makes the reference drift
+    # from the frozen base and corrupts the implicit reward. Refuse it.
+    for adapter_name, adapter_cfg in getattr(model, "peft_config", {}).items():
+        if getattr(adapter_cfg, "bias", "none") not in (None, "none"):
+            raise TrainerError(
+                f"DPO requires a bias-free adapter, but '{adapter_name}' has bias="
+                f"{adapter_cfg.bias!r}: disable_adapter() does not restore trained biases, so the "
+                f"reference would not be the frozen base. Seal the adapter with bias='none'."
+            )
     if optimizer is None:
         optimizer = torch.optim.AdamW(trainable, lr=learning_rate)
     device = next(model.parameters()).device
+    cuda_device = device if getattr(device, "type", None) == "cuda" else None
 
     _stage("training", f"sequence-chunked DPO at seq_len={seq_len}, chunk={chunk_size}")
     model.train()
     # DPO discipline: the reference must be a FIXED anchor, so kill all dropout (base + LoRA) - otherwise
     # both forwards are stochastic and the margin carries per-step sampling noise. After model.train().
     dropout_neutralized = disable_dropout(model)
-    torch.cuda.reset_peak_memory_stats() if torch.cuda.is_available() else None
+    if cuda_device is not None:
+        torch.cuda.reset_peak_memory_stats(cuda_device)
     losses: list[float] = []
     margins: list[float] = []
     grad_norms: list[float] = []
@@ -3014,8 +3047,12 @@ def run_dpo_training(  # pragma: no cover - optional training-stack integration 
         losses.append(micro_loss / gradient_accumulation_steps)
         margins.append(micro_margin / gradient_accumulation_steps)
         length_deltas.append(micro_delta / gradient_accumulation_steps)
+        # Honor the sealed checkpoint cadence: the worker wires this callback to the checkpoint coordinator
+        # (which owns the atomic, identity-bound save); the primitive only signals the step boundary.
+        if checkpoint_callback is not None and checkpoint_every > 0 and (step + 1) % checkpoint_every == 0:
+            checkpoint_callback(step + 1)
     peak_gib = (
-        torch.cuda.max_memory_allocated() / (1024**3) if torch.cuda.is_available() else 0.0
+        torch.cuda.max_memory_allocated(cuda_device) / (1024**3) if cuda_device is not None else 0.0
     )
     evidence = summarize_preference_evidence(losses, margins, length_deltas)
     evidence.update({
@@ -3041,6 +3078,7 @@ def evaluate_preference_accuracy(  # pragma: no cover - optional training-stack 
     beta: float = 0.1,
     label_smoothing: float = 0.0,
     average_log_prob: bool = True,
+    max_prompt_length: int | None = None,
     truncation_allowed: bool = False,
     stage_callback: StageCallback | None = None,
 ) -> dict[str, Any]:
@@ -3050,15 +3088,16 @@ def evaluate_preference_accuracy(  # pragma: no cover - optional training-stack 
     A falling TRAINING loss is never the promotion gate; a measured held-out preference accuracy is. Never
     mutates weights: eval mode (restored on exit), no optimizer, no backward - a pure measurement.
 
-    Fail-closes on held-out truncation exactly like training: a silently cut held-out response would
-    corrupt the very metric the gate is measured on."""
+    Fail-closes on held-out truncation AND the sealed ``max_prompt_length`` exactly like training: a
+    silently cut held-out pair would corrupt the very metric the gate is measured on."""
     import torch  # noqa: PLC0415
 
     def _stage(name: str, message: str) -> None:
         if stage_callback is not None:
             stage_callback(name, message)
 
-    # Same no-silent-truncation guard as training - the gate metric must not be measured on cut pairs.
+    # Same no-silent-truncation + prompt-length guards as training - the gate metric must not be measured
+    # on cut pairs.
     if pairs:
         eval_lengths = [
             PreferencePairTokens(
@@ -3068,6 +3107,13 @@ def evaluate_preference_accuracy(  # pragma: no cover - optional training-stack 
             )
             for p in pairs
         ]
+        if max_prompt_length is not None:
+            over = [i for i, length in enumerate(eval_lengths) if length.prompt_tokens > max_prompt_length]
+            if over and not truncation_allowed:
+                raise TrainerError(
+                    f"{len(over)} held-out pair(s) exceed the sealed max_prompt_length={max_prompt_length} "
+                    f"(first at index {over[0]}); measuring the gate on cut prompts would corrupt it."
+                )
         refuse_preference_truncation(eval_lengths, seq_len, truncation_allowed=truncation_allowed)
 
     backbone, lm_head_weight = _causal_backbone_and_head(model)
