@@ -2594,6 +2594,122 @@ def dpo_preference_loss(
     return loss, reward_margin
 
 
+def refuse_preference_truncation(
+    pairs: list[PreferencePairTokens], seq_len: int, *, truncation_allowed: bool
+) -> TokenCoverageLedger:
+    """Fail-closed preflight for the DPO worker (PURE + torch-free): refuse a preference run that would
+    silently truncate EITHER branch of any pair - training on a response severed from its prompt, exactly
+    the degeneracy that produces NaN log-probs - unless a lossy policy was explicitly sealed. Returns the
+    ledger either way. Mirrors the SFT worker's refuse-don't-truncate contract, extended to pairs."""
+    ledger = analyze_preference_truncation(pairs, seq_len)
+    refusal = token_coverage_refusal(ledger)
+    if refusal is not None and not truncation_allowed:
+        raise TrainerError(refusal.removeprefix("REFUSED: "))
+    return ledger
+
+
+def run_dpo_training(  # pragma: no cover - optional training-stack integration (GPU-validated)
+    model: Any,
+    tokenizer: Any,
+    pairs: list[dict[str, str]],
+    *,
+    seq_len: int,
+    chunk_size: int = 512,
+    beta: float = 0.1,
+    average_log_prob: bool = True,
+    learning_rate: float = 5e-5,
+    max_steps: int,
+    truncation_allowed: bool = False,
+    stage_callback: StageCallback | None = None,
+) -> dict[str, Any]:
+    """The harness's DPO training primitive - the seq-4096-capable path trl/off-the-shelf-liger cannot do.
+    ``pairs`` are ``{"prompt","chosen","rejected"}`` (the prompt already chat-templated). Fail-closes on
+    truncation BEFORE touching the GPU, then trains with the sequence-chunked loss. GPU-validated: 4B
+    QLoRA, seq 4096, peak 9.99 GiB, correct DPO curve. Reference log-probs use the PEFT adapter disabled.
+
+    Consumed by the platform DPO worker (a thin adapter maps a sealed
+    ``ResolvedPreferenceExecutionConfiguration`` to these arguments). Returns evidence (per-step loss +
+    implicit reward margin, peak VRAM)."""
+    import torch  # noqa: PLC0415
+
+    def _stage(name: str, message: str) -> None:
+        if stage_callback is not None:
+            stage_callback(name, message)
+
+    def _encode(prompt: str, response: str) -> tuple[list[int], list[int]]:
+        prompt_ids = tokenizer(prompt, add_special_tokens=False)["input_ids"]
+        response_ids = tokenizer(response, add_special_tokens=False)["input_ids"] + [tokenizer.eos_token_id]
+        ids = (prompt_ids + response_ids)[:seq_len]
+        labels = ([-100] * len(prompt_ids) + response_ids)[:seq_len]
+        labels = labels + [-100] * (seq_len - len(labels))
+        ids = ids + [tokenizer.pad_token_id] * (seq_len - len(ids))
+        return ids, labels
+
+    # Fail-closed truncation preflight over EVERY pair, before any GPU weights are touched.
+    _stage("truncation_analysis", f"tokenizing {len(pairs)} preference pairs for the coverage ledger")
+    lengths = [
+        PreferencePairTokens(
+            prompt_tokens=len(tokenizer(p["prompt"], add_special_tokens=False)["input_ids"]),
+            chosen_response_tokens=len(tokenizer(p["chosen"], add_special_tokens=False)["input_ids"]) + 1,
+            rejected_response_tokens=len(tokenizer(p["rejected"], add_special_tokens=False)["input_ids"]) + 1,
+        )
+        for p in pairs
+    ]
+    refuse_preference_truncation(lengths, seq_len, truncation_allowed=truncation_allowed)
+
+    lm_head_weight = model.get_base_model().lm_head.weight
+    transformer = model.get_base_model().model
+    transformer.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
+    model.enable_input_require_grads()
+    model.config.use_cache = False
+    optimizer = torch.optim.AdamW(
+        [p for p in model.parameters() if p.requires_grad], lr=learning_rate
+    )
+    device = next(model.parameters()).device
+
+    _stage("training", f"sequence-chunked DPO at seq_len={seq_len}, chunk={chunk_size}")
+    model.train()
+    torch.cuda.reset_peak_memory_stats() if torch.cuda.is_available() else None
+    losses: list[float] = []
+    margins: list[float] = []
+    for step in range(max_steps):
+        row = pairs[step % len(pairs)]
+        chosen_ids, chosen_labels = _encode(row["prompt"], row["chosen"])
+        rejected_ids, rejected_labels = _encode(row["prompt"], row["rejected"])
+        input_ids = torch.tensor([chosen_ids, rejected_ids], device=device)
+        labels = torch.tensor([chosen_labels, rejected_labels], device=device)
+        attention_mask = (input_ids != tokenizer.pad_token_id).long()
+        policy = transformer(input_ids=input_ids, attention_mask=attention_mask).last_hidden_state
+        policy_chosen = sequence_chunked_logprob(
+            policy[0], labels[0], lm_head_weight, chunk_size=chunk_size, average_log_prob=average_log_prob
+        )
+        policy_rejected = sequence_chunked_logprob(
+            policy[1], labels[1], lm_head_weight, chunk_size=chunk_size, average_log_prob=average_log_prob
+        )
+        with torch.no_grad(), model.disable_adapter():
+            reference = transformer(input_ids=input_ids, attention_mask=attention_mask).last_hidden_state
+            ref_chosen = sequence_chunked_logprob(
+                reference[0], labels[0], lm_head_weight, chunk_size=chunk_size,
+                average_log_prob=average_log_prob,
+            )
+            ref_rejected = sequence_chunked_logprob(
+                reference[1], labels[1], lm_head_weight, chunk_size=chunk_size,
+                average_log_prob=average_log_prob,
+            )
+        loss, margin = dpo_preference_loss(
+            policy_chosen, policy_rejected, ref_chosen, ref_rejected, beta=beta
+        )
+        loss.backward()
+        optimizer.step()
+        optimizer.zero_grad()
+        losses.append(float(loss))
+        margins.append(float(margin))
+    peak_gib = (
+        torch.cuda.max_memory_allocated() / (1024**3) if torch.cuda.is_available() else 0.0
+    )
+    return {"steps": len(losses), "losses": losses, "reward_margins": margins, "peak_gib": peak_gib}
+
+
 def _prepare_training_texts(
     rows: list[dict[str, Any]],
     config: TrainRunConfig,

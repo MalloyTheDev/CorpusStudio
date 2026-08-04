@@ -42,6 +42,7 @@ from corpus_studio.training.trainer import (
     compute_token_coverage,
     dpo_preference_loss,
     preference_pair_spans,
+    refuse_preference_truncation,
     sequence_chunked_logprob,
     token_coverage_refusal,
     build_model_load_kwargs,
@@ -289,6 +290,20 @@ def test_preference_pair_prompt_alone_over_length_drops_the_whole_response_on_bo
     assert not analyze_preference_truncation(pairs, seq_len=512).supervision_intact
     # raising seq_len above the longest full sequence (600+80) keeps both whole
     assert analyze_preference_truncation(pairs, seq_len=1024).supervision_intact
+
+
+def test_refuse_preference_truncation_fails_closed_unless_a_lossy_policy_is_sealed():
+    fits = [PreferencePairTokens(prompt_tokens=100, chosen_response_tokens=200, rejected_response_tokens=150)]
+    # both branches fit -> no refusal, ledger returned
+    led = refuse_preference_truncation(fits, seq_len=512, truncation_allowed=False)
+    assert led.supervision_intact
+    # a branch over-length -> refused fail-closed
+    cut = [PreferencePairTokens(prompt_tokens=100, chosen_response_tokens=200, rejected_response_tokens=900)]
+    with pytest.raises(TrainerError):
+        refuse_preference_truncation(cut, seq_len=512, truncation_allowed=False)
+    # explicitly opting into a lossy policy records it instead of raising
+    led2 = refuse_preference_truncation(cut, seq_len=512, truncation_allowed=True)
+    assert not led2.supervision_intact
 
 
 def test_preference_pair_spans_expands_each_pair_into_two_branches():
