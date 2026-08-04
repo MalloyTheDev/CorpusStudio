@@ -81,6 +81,7 @@ from corpus_studio.platform.enums import (
     ExportFormat,
     FailureTaxonomy,
     MemoryTier,
+    ObjectiveKind,
     OffloadStrategy,
     OperatingSystem,
     Optimizer,
@@ -933,6 +934,17 @@ def build_run_plan(
     # differ). The caller names it via constraints.objective_id; admission maps only the built ones
     # (dpo_qlora -> preference_dpo, declared at contract_validated so it is refused at execution until
     # the worker lands) and refuses the rest fail-closed. SFT/pretraining resolve by task alone.
+    # A preference OBJECTIVE requires the preference TASK. Without this guard a plan that names a
+    # preference objective (e.g. dpo_qlora) while leaving task_type=sft would silently lower to a dense-SFT
+    # run - build_run_plan ignores objective_id for non-preference tasks - retaining a misleading DPO
+    # identity in the resolution. Refuse the contradiction fail-closed.
+    if constraints.objective_id is not None and constraints.task_type != TaskType.preference.value:
+        named_objective = get_objective(constraints.objective_id)
+        if named_objective is not None and named_objective.kind == ObjectiveKind.preference_optimization:
+            raise PlannerError(
+                f"objective '{constraints.objective_id}' is a preference objective but task_type is "
+                f"'{constraints.task_type}' - a preference objective requires task_type='preference'"
+            )
     admission_objective_id = (
         constraints.objective_id if constraints.task_type == TaskType.preference.value else None
     )
@@ -1141,6 +1153,9 @@ def build_run_plan(
         )
     device = "cpu" if cpu_toy else ("cuda" if profile.gpus else "cpu")
     host_os = profile.host.os.value
+    # A preference plan's loss IS the DPO loss - fit-check that, not the SFT loss_impl, so the backend
+    # capability evidence reflects the plan the resolver actually seals.
+    fit_loss = "dpo" if is_preference_dpo else loss_impl
     unmet = unmet_requirements(
         backend,
         os=host_os,
@@ -1152,21 +1167,22 @@ def build_run_plan(
         attention=attention_backend,
         attention_kernel=attention_policy.effective_backend_required.value,
         optimizer=constraints.optim,
-        loss=loss_impl,
+        loss=fit_loss,
         checkpoint=checkpoint_impl,
         export_format=constraints.export_format,
         execution_contract_version=_EXECUTION_CONTRACT_VERSION,
     )
     if is_preference_dpo:
-        # The corpus_studio manifest cannot yet DECLARE the preference task: task_types is content-hashed
-        # into backend_manifest_ref, which is sealed into the byte-locked SFT configuration - declaring a
-        # new task type is coupled to a new manifest + milestone wheel. So a preference+dpo_qlora plan is
-        # admitted at planning despite that one unmet reason (every OTHER fit-check still applies), and the
-        # runner refuses it at execution until the wheel promotes it.
-        unmet = [
-            reason for reason in unmet
-            if reason != f"task '{constraints.task_type}' not supported"
-        ]
+        # The corpus_studio manifest cannot yet DECLARE the preference task OR the dpo loss: both are
+        # content-hashed into backend_manifest_ref, which is sealed into the byte-locked SFT configuration,
+        # so declaring either is coupled to a new manifest + milestone wheel. A preference+dpo_qlora plan is
+        # therefore admitted at planning despite exactly those not-yet-declarable reasons (every OTHER
+        # fit-check still applies), and the runner refuses it at execution until the wheel promotes it.
+        not_yet_declarable = {
+            f"task '{constraints.task_type}' not supported",
+            f"loss '{fit_loss}' not supported",
+        }
+        unmet = [reason for reason in unmet if reason not in not_yet_declarable]
     if unmet:
         alternatives = [
             b.backend_id

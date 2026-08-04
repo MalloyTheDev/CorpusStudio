@@ -448,6 +448,13 @@ def test_preference_dpo_resolves_to_a_sealed_config_and_the_runner_refuses_it_at
         TrainingRunner(cpu_toy=False)._resolve_config(plan, "run-x")
 
 
+def test_planner_refuses_a_preference_objective_on_a_non_preference_task():
+    # A preference objective (dpo_qlora) with task_type=sft would silently lower to a dense-SFT run while
+    # retaining a misleading DPO identity - refuse the objective/task contradiction fail-closed.
+    with pytest.raises(PlannerError, match="requires task_type='preference'"):
+        _plan(_profile(cc_major=8), _report(), task_type="sft", objective_id="dpo_qlora")
+
+
 def test_native_windows_blackwell_host_forces_math_bf16_nf4_qlora():
     plan = _plan(_profile(cc_major=12, os="windows"), _report())
     assert plan.attention_backend.value == "math"  # native-Windows Blackwell (WDDM) mandate
