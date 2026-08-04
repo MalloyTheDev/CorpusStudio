@@ -40,7 +40,9 @@ from corpus_studio.training.trainer import (
     apply_attention_execution_policy,
     build_lora_kwargs,
     compute_token_coverage,
+    dpo_preference_loss,
     preference_pair_spans,
+    sequence_chunked_logprob,
     token_coverage_refusal,
     build_model_load_kwargs,
     build_training_kwargs,
@@ -296,6 +298,45 @@ def test_preference_pair_spans_expands_each_pair_into_two_branches():
         (30, 20, 5),   # chosen: 10+20=30, last 5 response tokens past 25 dropped
         (40, 30, 15),  # rejected: 10+30=40, last 15 response tokens past 25 dropped
     ]
+
+
+# --- sequence-chunked DPO loss (the seq-4096-on-12GB core; torch-gated, GPU-validated at 9.99 GiB) ---
+
+def test_sequence_chunked_logprob_matches_the_direct_computation():
+    torch = pytest.importorskip("torch")
+    import torch.nn.functional as F
+
+    torch.manual_seed(0)
+    seq, hidden_dim, vocab = 20, 8, 32
+    hidden = torch.randn(seq, hidden_dim, dtype=torch.float32)
+    lm_head = torch.randn(vocab, hidden_dim, dtype=torch.float32)
+    labels = torch.randint(0, vocab, (seq,))
+    labels[:5] = -100  # mask a prompt; only the response tail is scored
+    logp = F.log_softmax(hidden @ lm_head.t(), dim=-1)
+    tok = logp.gather(-1, labels.clamp(min=0).unsqueeze(-1)).squeeze(-1)
+    direct_sum = (tok * (labels != -100)).sum()
+    direct_mean = direct_sum / (labels != -100).sum()
+    # the sequence-chunked version (chunk_size=4) must equal the full-logits computation
+    assert torch.allclose(
+        sequence_chunked_logprob(hidden, labels, lm_head, chunk_size=4, average_log_prob=False),
+        direct_sum, atol=1e-4)
+    assert torch.allclose(
+        sequence_chunked_logprob(hidden, labels, lm_head, chunk_size=4, average_log_prob=True),
+        direct_mean, atol=1e-4)
+
+
+def test_dpo_preference_loss_is_log2_at_zero_margin_and_falls_as_the_margin_rises():
+    torch = pytest.importorskip("torch")
+    import math
+
+    equal = torch.tensor(1.5)  # policy == reference, chosen == rejected -> zero margin
+    loss, margin = dpo_preference_loss(equal, equal, equal, equal, beta=0.1)
+    assert torch.allclose(margin, torch.tensor(0.0))
+    assert abs(float(loss) - math.log(2)) < 1e-5
+    # a positive implicit reward margin (policy prefers chosen over rejected) drives the loss below log 2
+    better, _ = dpo_preference_loss(
+        torch.tensor(2.0), torch.tensor(-1.0), torch.tensor(0.0), torch.tensor(0.0), beta=0.1)
+    assert float(better) < math.log(2)
 
 
 # --- token-coverage ledger (the no-silent-truncation foundation for the full validated run) ---
