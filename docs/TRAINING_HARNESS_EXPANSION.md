@@ -52,10 +52,13 @@ risk already seen wiring the DPO truncation guard by hand.
   prove a worker *invokes* the safety helpers, so enforcement lives in a template-method runner
   (`run_objective(worker)`) that owns the shared preflight/evidence/checkpoint calls, plus **conformance
   tests** that assert each variant actually goes through it. Each variant supplies its own method-specific
-  state; the lifecycle order is:
+  state; the lifecycle is a **startup phase, a repeated step loop, then a finalize phase** (resume is a
+  pre-loop branch, not a post-training step; evaluate/checkpoint are cadence hooks INSIDE the loop):
   `validate_request -> verify_inputs -> prepare_data -> estimate_resources -> allocate_models ->
-  initialize_state -> train_step -> evaluate -> checkpoint -> resume -> export -> reload_verify ->
-  emit_evidence`.
+  initialize_state -> [resume: restore_from_checkpoint]` (startup) `-> loop { train_step -> [every N:
+  evaluate] -> [every M: checkpoint] } -> export -> reload_verify -> emit_evidence` (finalize). A resumed
+  job restores BEFORE the first `train_step` so it never checkpoints fresh state over the parent then
+  discards it.
 - **Contracts (mostly ALIGN/extract existing, not net-new):** `ObjectiveExecutionSpec`,
   `ObjectiveRuntimeState`, `ObjectiveCheckpointState`, `ObjectiveEvidenceBundle`, `ObjectiveArtifactSet`,
   `ObjectiveFailureClassification`, `ObjectiveWorkerCapabilities`.
@@ -76,11 +79,14 @@ risk already seen wiring the DPO truncation guard by hand.
 | GRPO | policy, reference, grouped rollout state |
 | Memory training | memory-store **contents** (mutable learned state) + retrieval cursor |
 
-**Gate:** every execution variant proves the same lifecycle on cpu_toy. Rewiring the existing SFT worker
-to go through the enforced template **changes its source and therefore mints a new wheel** - "byte
--unchanged" is not achievable and is the wrong bar. The right bar is **behavior-preserving**: the SFT
-sealed `ResolvedExecutionConfiguration` stays byte-identical (the contract does not change) and the
-re-sealed worker reproduces the SFT evidence (bitwise where already proven) before promotion carries over.
+**Gate:** the lifecycle is proven on cpu_toy by the **currently-executable workers (SFT) plus a template
+fixture** - NOT by every declared variant, or S0 would depend on S2a (the DPO worker is unwired until
+S2a). Each later variant proves it through the same template as it is built; S0 ships the kernel + SFT +
+fixture. Rewiring the existing SFT worker to go through the enforced template **changes its source and
+therefore mints a new wheel** - "byte-unchanged" is not achievable and is the wrong bar. The right bar is
+**behavior-preserving**: the SFT sealed `ResolvedExecutionConfiguration` stays byte-identical (the
+contract does not change) and the re-sealed worker reproduces the SFT evidence (bitwise where already
+proven) before promotion carries over.
 
 ## Sequenced backlog
 
@@ -91,14 +97,14 @@ re-sealed worker reproduces the SFT evidence (bitwise where already proven) befo
 | **S2a** | **Offline DPO** vertical slice | preference-pair data policy + sequence-chunked DPO worker (reference, no rollout) | ⛔ gated: worker unwired, `preference_dpo` at `contract_validated`. Gate = DPO tuple `WORKLOAD_VERIFIED` on 4B seq 4096 (sealed run + wheel) |
 | **S2b** | **Preference family** | IPO / KTO / ORPO - each its OWN objective + provenance (never a loss string under a `dpo` seal). **KTO/unpaired methods need their OWN data contract** - `PreferenceDataPolicy` is prompt/chosen/rejected PAIRS; KTO takes unpaired (prompt + single response + binary desirable/undesirable label), so add an `UnpairedPreferenceDataPolicy` rather than forcing it into pairs | each variant's tuple |
 | **S3** | **Pretraining path** | **tokenizer lifecycle** (freeze before tokens, content-hash, token-accounting invalidation) + streaming per-rank data cursor + token budget + continued-pretraining data policy -> dense pretraining | continued-pretrain on a small corpus |
-| **S4a** | **Distillation** workers | teacher-serving reference + logit/sequence/rationale distillation loss | KD on 4B (teacher 7B) |
+| **S4a** | **Distillation** workers | teacher-serving reference + logit/sequence/rationale distillation loss + **a sealed distillation-input data contract** (`TrainingDataPolicy` cannot represent KD inputs): cached-vs-online targets, teacher-output provenance + teacher identity, student/teacher token+vocabulary alignment, valid target masks - so the platform can safely admit the logit/sequence/rationale workers | KD on 4B (teacher 7B), input contract wired before the workload gate |
 | **S4b** | **Synthetic data + self-training** | teacher generation, best-of-N, rejection sampling, hard-negative mining, self-consistency, verifier/judge filtering, curriculum, iterative student<->teacher - with **full per-row provenance** (generator+revision, settings, prompt source, **the filtering judge/verifier's own identity + version + config**, its decision, rejected candidates, filtering reasons, license/policy, dataset version, contamination status) - binding only a decision without the model that made it makes a filtered set unauditable and unreproducible | a filtered synthetic set feeds S4a/S2 with intact provenance |
 | **S5a** | **Reward + verifier modeling** | pairwise / scalar-pointwise / process / outcome reward models, generative verifiers, rule composition, ensembles, uncertainty. Artifacts: weights/adapter + **score head + calibration + input formatter + output scale/direction + provenance**. Eval: pairwise accuracy, tie handling, **calibration, length/verbosity/position bias, reward saturation, OOD, reward-hacking, disagreement vs human/judge** | RM tuple with held-out ranking accuracy + calibration evidence |
-| **S5b** | **Rollout + experience plane** (+ value/critic) | `RolloutRequest` / `RolloutRecord` / `RewardRecord` / `TokenLogprobRecord` / `AdvantageRecord` / `ExperienceBatch` / `ExperienceBufferState` / `RolloutWorkerManifest` / `EnvironmentReference`; an explicit **stale-experience policy** (a rollout from an old policy is NOT silently on-policy); the **environment protocol** `reset(seed) / step(action) / snapshot() / restore()` for agentic/tool-use RL; the **value/critic** head+loss+state | an experience batch binds policy version + old/reference logprobs + rewards + validity/staleness |
+| **S5b** | **Rollout + experience plane** (+ value/critic) | `RolloutRequest` / `RolloutRecord` / `RewardRecord` / `TokenLogprobRecord` / `AdvantageRecord` / `ExperienceBatch` / `ExperienceBufferState` / `RolloutWorkerManifest` / `EnvironmentReference`; an explicit **stale-experience policy** (a rollout from an old policy is NOT silently on-policy); the **environment protocol** `reset(seed) / step(action) / snapshot() / restore()` for agentic/tool-use RL; the **value/critic** head+loss+state. **Security (fail-closed): a policy-produced `action` crosses into `step(action)`, so agentic/tool-use environments need a sealed environment-capability manifest** - action schema, tool allowlist, side-effect policy, argv-only process launches, resource bounds + timeouts, audited results - enforced by a dispatcher and linked to `BackendSecurityPosture` (whose worker-wide network/download/remote-code bounds do NOT authorize individual file/process/tool ops); a learned policy must never reach ambient worker capabilities | an experience batch binds policy version + old/reference logprobs + rewards + validity/staleness; rollouts run under the sealed capability manifest |
 | **S5c** | **RL optimization** | the update ALGORITHM only - PPO / GRPO / REINFORCE / ... (policy + reference + reward + optional critic) + KL/entropy controller, consuming S5b experience + S5a rewards. **RLHF vs RLAIF is NOT an optimizer** - it is the reward's *feedback source* (human vs AI), a provenance axis on the S5a reward / S5b experience, orthogonal to which algorithm runs (any optimizer x either source) | GRPO on 4B with a rule reward |
 | **S6** | **Memory-augmented training** (L2) | memory-topology descriptor (MoE-safe) + retrieval-augmented data policy + read/write objective | retrieval-augmented tuple + held-out memory-use eval |
 | **S7** | **Memory synthesis / "dreaming"** (L3) | background memory-consolidation pipeline (synthesize memory *state* from interaction logs) + long-horizon memory eval profiles | temporal-recall / staleness-resistance eval |
-| **S8** | **Continual + incremental learning** (anti-forgetting) | replay/rehearsal, domain/task-incremental, adapter-per-domain + composition, regularization against old behavior, data-mixture refresh. Measure **forward/backward transfer, forgetting-per-capability, base regression, behavior/calibration drift, replay coverage** | **new-domain gain must NOT promote unless retained capabilities stay above declared regression floors** |
+| **S8** | **Continual + incremental learning** (anti-forgetting) | replay/rehearsal, domain/task-incremental, adapter-per-domain + composition, regularization against old behavior, data-mixture refresh. Measure **forward/backward transfer, forgetting-per-capability, base regression, behavior/calibration drift, replay coverage**. A regression floor is meaningless against a moving reference, so add a **capability-baseline contract** that seals together the prior model artifact, the eval split + fingerprint, scorer version, as-served config, capability inventory, and baseline score; before/after must reference the SAME immutable definition | **new-domain gain must NOT promote unless retained capabilities stay above their floors, measured against the sealed immutable baseline** |
 | **S9** | **Multi-stage training pipelines** | one `TrainingPlan` -> a DAG of **stages**, where a stage lowers to a `RunPlan` (training) **OR to a non-training operation** (eval, merge, quantize, export, release) - `TaskType`/`RunPlan` has no release/eval op, so the pipeline node is a `PipelineStage` union, not "every node is a `RunPlan`". Plus artifact handoff, immutable parent-child lineage, stage-local retry/rollback/branching, stage-specific env/data, **acceptance gates + stop-on-regression**, pipeline resume, branch comparison | e.g. ContinuedPretrain -> SFT -> RM -> PPO -> SafetyEval -> Release runs end to end with gated handoff |
 
 ## Orthogonal (land opportunistically; each a registry entry / track, not a new backend id)
