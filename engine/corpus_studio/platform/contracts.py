@@ -3944,6 +3944,15 @@ class PreferenceOptimizationSpec(ContractModel):
     loss_type: Literal["sigmoid"] = "sigmoid"
     label_smoothing: float = Field(default=0.0, ge=0, lt=0.5)
     reference_model: ReferenceModelBinding
+    # The seq-4096 memory lever: the worker sums each response's log-probs in SEQUENCE sub-chunks of this
+    # size, each gradient-checkpointed, so only [chunk x vocab] logits are ever materialized - never the
+    # full [seq x vocab]. This is what lets 4B DPO reach seq 4096 on a 12GB card (measured 9.99 GiB);
+    # trl and off-the-shelf liger (batch-only chunking) cap at ~seq 1024. A per-card tuning knob.
+    sequence_chunk_size: int = Field(default=512, ge=1)
+    # Length-normalize the per-response log-prob (mean) so the implicit reward margin does not scale with
+    # response length; the production default. False sums (unnormalized), which saturates fast on long
+    # responses.
+    average_log_prob: bool = True
 
 
 class ResolvedPreferenceExecutionConfiguration(ContractModel):

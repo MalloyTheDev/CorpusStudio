@@ -565,12 +565,14 @@ export type EnvironmentBinding1 = "profile_snapshot" | "managed_lock";
 export type GradientCheckpointing2 = boolean;
 export type OutputDir2 = string;
 export type OutputLayout1 = "run_scoped_v1";
+export type AverageLogProb = boolean;
 export type Beta = number;
 export type LabelSmoothing = number;
 export type LossType = "sigmoid";
 export type Objective = "dpo";
 export type Mode = "frozen_base";
 export type PrecomputeRefLogProbs = boolean;
+export type SequenceChunkSize = number;
 export type RuntimeMode2 = "training" | "cpu_toy";
 export type SaveStrategy1 = "no" | "steps";
 export type Seed1 = number;
@@ -1641,11 +1643,13 @@ export interface PreferenceDataPolicy {
  * data policy stays reusable by a non-DPO preference method later.
  */
 export interface PreferenceOptimizationSpec {
+  average_log_prob?: AverageLogProb;
   beta?: Beta;
   label_smoothing?: LabelSmoothing;
   loss_type?: LossType;
   objective?: Objective;
   reference_model: ReferenceModelBinding;
+  sequence_chunk_size?: SequenceChunkSize;
 }
 /**
  * The frozen reference policy an offline DPO run scores its trainable policy against.
