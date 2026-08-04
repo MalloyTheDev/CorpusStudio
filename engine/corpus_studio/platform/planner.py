@@ -192,6 +192,11 @@ class PlannerConstraints:
     truncation_allowed: bool = False
     chat_template_sha256: str | None = None
     allow_cpu_toy: bool = False
+    # Preference (DPO) knobs - consumed only by the preference resolver; ignored on the SFT/pretraining
+    # paths. ``preference_max_prompt_length`` defaults to half the sequence window when None.
+    preference_beta: float = 0.1
+    preference_label_smoothing: float = 0.0
+    preference_max_prompt_length: int | None = None
 
 
 def _require_enum(value: str, enum_cls: type[Enum], label: str) -> None:
@@ -837,8 +842,8 @@ def _resolve_preference_execution(
     reference), bound to the sealed ``dpo_qlora`` objective. Admitted at planning; the runner refuses it at
     EXECUTION until the DPOTrainer branch + workload-verified evidence + milestone wheel land.
 
-    ``beta`` / ``label_smoothing`` / ``max_prompt_length`` are sealed at documented defaults here; exposing
-    them as first-class planner knobs is a follow-up (the config is reviewable but not yet executable)."""
+    ``beta`` / ``label_smoothing`` / ``max_prompt_length`` come from the operator's ``PlannerConstraints``
+    (``preference_*`` knobs), defaulting to 0.1 / 0.0 / half-the-window when unset."""
     objective = get_objective("dpo_qlora")
     if objective is None:  # pragma: no cover - sealed built-in catalog invariant
         raise PlannerError("the dpo_qlora objective is absent from the sealed registry")
@@ -880,8 +885,14 @@ def _resolve_preference_execution(
     # The preference-pair formatter (prompt/chosen/rejected), NOT the SFT format_example_text.
     formatter_id, formatter_hash = preference_formatter_identity()
     max_length = constraints.sequence_len
-    # Reserve room for the response: default the prompt cap to half the window (< max_length invariant).
-    max_prompt_length = max(1, min(max_length - 1, max_length // 2))
+    # The sealed prompt cap is the operator's knob, else half the window; always < max_length so the
+    # chosen/rejected response has room.
+    requested_prompt_cap = (
+        constraints.preference_max_prompt_length
+        if constraints.preference_max_prompt_length is not None
+        else max_length // 2
+    )
+    max_prompt_length = max(1, min(max_length - 1, requested_prompt_cap))
     data_policy = PreferenceDataPolicy(
         schema_id=schema.id,
         schema_version=schema.version,
@@ -896,6 +907,8 @@ def _resolve_preference_execution(
         data_seed=constraints.data_seed if constraints.data_seed is not None else constraints.seed,
     )
     preference_spec = PreferenceOptimizationSpec(
+        beta=constraints.preference_beta,
+        label_smoothing=constraints.preference_label_smoothing,
         reference_model=ReferenceModelBinding(mode="frozen_base", precompute_ref_log_probs=False),
     )
     try:

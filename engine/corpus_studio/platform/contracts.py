@@ -5917,6 +5917,11 @@ class TrainingPlanParameters(ContractModel):
     truncation_allowed: bool = False
     chat_template_sha256: str | None = None
     allow_cpu_toy: bool = False
+    # Preference (DPO) knobs - mirrored from PlannerConstraints (the drift test enforces lockstep);
+    # consumed only by the preference resolver, ignored on SFT/pretraining.
+    preference_beta: float = 0.1
+    preference_label_smoothing: float = 0.0
+    preference_max_prompt_length: int | None = None
 
 
 class TrainingPlanComposition(ContractModel):

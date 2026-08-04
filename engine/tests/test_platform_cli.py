@@ -311,6 +311,34 @@ def test_platform_plan_objective_flows_through_the_cli_for_a_preference_plan(mon
     assert plan["resolved_preference_execution"]["objective_ref"]["id"] == "dpo_qlora"
 
 
+def test_platform_plan_dpo_knobs_flow_to_the_sealed_preference_config(monkeypatch, tmp_path):
+    # --dpo-beta / --dpo-label-smoothing / --max-prompt-length are the operator's DPO knobs; they seal
+    # into the preference config instead of the resolver's fixed defaults.
+    _ready_host(monkeypatch)
+    result = runner.invoke(
+        app,
+        [
+            *_platform_plan_args(tmp_path),
+            "--task-type",
+            "preference",
+            "--objective",
+            "dpo_qlora",
+            "--dpo-beta",
+            "0.25",
+            "--dpo-label-smoothing",
+            "0.1",
+            "--max-prompt-length",
+            "1000",
+            "--json",
+        ],
+    )
+    assert result.exit_code == 0, result.stdout
+    pref = json.loads(result.stdout)["run_plan"]["resolved_preference_execution"]
+    assert pref["preference"]["beta"] == 0.25
+    assert pref["preference"]["label_smoothing"] == 0.1
+    assert pref["data"]["max_prompt_length"] == 1000
+
+
 def test_platform_plan_allocator_policy_flows_through_the_cli(monkeypatch, tmp_path):
     # --allocator-policy + --max-split-size-mb seal the CUDA allocator config into the plan (so the
     # seq-4096 paged config no longer smuggles it via the dispatch env).
