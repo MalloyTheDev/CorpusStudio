@@ -47,16 +47,23 @@ INTERFACE + shared preflight/evidence/checkpoint helpers every method's worker M
 logic (truncation refusal, evidence, checkpoint identity-binding) is *not re-wired per method* - the exact
 risk already seen wiring the DPO truncation guard by hand.
 
-- **Delta (lighter than a heavy ABC):** an `ObjectiveWorker` **Protocol** + **mandatory shared helpers**,
-  proven identical by tests, each variant supplying its own method-specific state:
+- **Delta:** an `ObjectiveWorker` **Protocol** (the method surface) driven by an **enforced template**
+  that CALLS the mandatory shared helpers - a structural Protocol proves the methods *exist*, it cannot
+  prove a worker *invokes* the safety helpers, so enforcement lives in a template-method runner
+  (`run_objective(worker)`) that owns the shared preflight/evidence/checkpoint calls, plus **conformance
+  tests** that assert each variant actually goes through it. Each variant supplies its own method-specific
+  state; the lifecycle order is:
   `validate_request -> verify_inputs -> prepare_data -> estimate_resources -> allocate_models ->
   initialize_state -> train_step -> evaluate -> checkpoint -> resume -> export -> reload_verify ->
   emit_evidence`.
 - **Contracts (mostly ALIGN/extract existing, not net-new):** `ObjectiveExecutionSpec`,
   `ObjectiveRuntimeState`, `ObjectiveCheckpointState`, `ObjectiveEvidenceBundle`, `ObjectiveArtifactSet`,
   `ObjectiveFailureClassification`, `ObjectiveWorkerCapabilities`.
-- **Objective-generic checkpoint state:** bind method-specific state, and bind **immutable identities,
-  never mutable state** (a frozen reference model is an *identity*, not checkpointed weights).
+- **Objective-generic checkpoint state:** for **immutable** dependencies bind an *identity*, not the
+  bytes (a frozen reference or teacher model is an identity - a hash/ref - never checkpointed weights).
+  But **mutable learned state must be checkpointed as contents** (or a content hash + backing store) - a
+  version tag and cursor cannot restore it: S6's memory store, an experience buffer, and optimizer state
+  are learned/mutable and must round-trip exactly.
 
 | Method | Additional state the lifecycle must carry |
 |---|---|
@@ -67,9 +74,13 @@ risk already seen wiring the DPO truncation guard by hand.
 | Reward model | scoring head, calibration state |
 | PPO | policy, reference, reward, critic, rollout state |
 | GRPO | policy, reference, grouped rollout state |
-| Memory training | memory-store version, retrieval cursor |
+| Memory training | memory-store **contents** (mutable learned state) + retrieval cursor |
 
-**Gate:** every execution variant proves the same lifecycle on cpu_toy; SFT/DPO byte-unchanged.
+**Gate:** every execution variant proves the same lifecycle on cpu_toy. Rewiring the existing SFT worker
+to go through the enforced template **changes its source and therefore mints a new wheel** - "byte
+-unchanged" is not achievable and is the wrong bar. The right bar is **behavior-preserving**: the SFT
+sealed `ResolvedExecutionConfiguration` stays byte-identical (the contract does not change) and the
+re-sealed worker reproduces the SFT evidence (bitwise where already proven) before promotion carries over.
 
 ## Sequenced backlog
 
@@ -78,17 +89,17 @@ risk already seen wiring the DPO truncation guard by hand.
 | **S0** | Objective-worker lifecycle kernel | `ObjectiveWorker` Protocol + shared helpers + objective-generic checkpoint/evidence | every variant proves the same lifecycle on cpu_toy |
 | **S1** | Admission gate + backend-scoped execution | fail-closed variant admission + `resolved_execution` variants (P0) | ✅ admission gate shipped (#775); `preference_dpo` at `contract_validated` (#778/#779) |
 | **S2a** | **Offline DPO** vertical slice | preference-pair data policy + sequence-chunked DPO worker (reference, no rollout) | ⛔ gated: worker unwired, `preference_dpo` at `contract_validated`. Gate = DPO tuple `WORKLOAD_VERIFIED` on 4B seq 4096 (sealed run + wheel) |
-| **S2b** | **Preference family** | IPO / KTO / ORPO - each its OWN objective + provenance (never a loss string under a `dpo` seal) | each variant's tuple |
+| **S2b** | **Preference family** | IPO / KTO / ORPO - each its OWN objective + provenance (never a loss string under a `dpo` seal). **KTO/unpaired methods need their OWN data contract** - `PreferenceDataPolicy` is prompt/chosen/rejected PAIRS; KTO takes unpaired (prompt + single response + binary desirable/undesirable label), so add an `UnpairedPreferenceDataPolicy` rather than forcing it into pairs | each variant's tuple |
 | **S3** | **Pretraining path** | **tokenizer lifecycle** (freeze before tokens, content-hash, token-accounting invalidation) + streaming per-rank data cursor + token budget + continued-pretraining data policy -> dense pretraining | continued-pretrain on a small corpus |
 | **S4a** | **Distillation** workers | teacher-serving reference + logit/sequence/rationale distillation loss | KD on 4B (teacher 7B) |
-| **S4b** | **Synthetic data + self-training** | teacher generation, best-of-N, rejection sampling, hard-negative mining, self-consistency, verifier/judge filtering, curriculum, iterative student<->teacher - with **full per-row provenance** (generator+revision, settings, prompt source, judge/verifier decision, rejected candidates, filtering reasons, license/policy, dataset version, contamination status) | a filtered synthetic set feeds S4a/S2 with intact provenance |
+| **S4b** | **Synthetic data + self-training** | teacher generation, best-of-N, rejection sampling, hard-negative mining, self-consistency, verifier/judge filtering, curriculum, iterative student<->teacher - with **full per-row provenance** (generator+revision, settings, prompt source, **the filtering judge/verifier's own identity + version + config**, its decision, rejected candidates, filtering reasons, license/policy, dataset version, contamination status) - binding only a decision without the model that made it makes a filtered set unauditable and unreproducible | a filtered synthetic set feeds S4a/S2 with intact provenance |
 | **S5a** | **Reward + verifier modeling** | pairwise / scalar-pointwise / process / outcome reward models, generative verifiers, rule composition, ensembles, uncertainty. Artifacts: weights/adapter + **score head + calibration + input formatter + output scale/direction + provenance**. Eval: pairwise accuracy, tie handling, **calibration, length/verbosity/position bias, reward saturation, OOD, reward-hacking, disagreement vs human/judge** | RM tuple with held-out ranking accuracy + calibration evidence |
 | **S5b** | **Rollout + experience plane** (+ value/critic) | `RolloutRequest` / `RolloutRecord` / `RewardRecord` / `TokenLogprobRecord` / `AdvantageRecord` / `ExperienceBatch` / `ExperienceBufferState` / `RolloutWorkerManifest` / `EnvironmentReference`; an explicit **stale-experience policy** (a rollout from an old policy is NOT silently on-policy); the **environment protocol** `reset(seed) / step(action) / snapshot() / restore()` for agentic/tool-use RL; the **value/critic** head+loss+state | an experience batch binds policy version + old/reference logprobs + rewards + validity/staleness |
-| **S5c** | **RL optimization** | PPO / GRPO / RLHF / RLAIF (policy + reference + reward + optional critic) + KL/entropy controller, consuming S5b experience + S5a rewards | GRPO on 4B with a rule reward |
+| **S5c** | **RL optimization** | the update ALGORITHM only - PPO / GRPO / REINFORCE / ... (policy + reference + reward + optional critic) + KL/entropy controller, consuming S5b experience + S5a rewards. **RLHF vs RLAIF is NOT an optimizer** - it is the reward's *feedback source* (human vs AI), a provenance axis on the S5a reward / S5b experience, orthogonal to which algorithm runs (any optimizer x either source) | GRPO on 4B with a rule reward |
 | **S6** | **Memory-augmented training** (L2) | memory-topology descriptor (MoE-safe) + retrieval-augmented data policy + read/write objective | retrieval-augmented tuple + held-out memory-use eval |
 | **S7** | **Memory synthesis / "dreaming"** (L3) | background memory-consolidation pipeline (synthesize memory *state* from interaction logs) + long-horizon memory eval profiles | temporal-recall / staleness-resistance eval |
 | **S8** | **Continual + incremental learning** (anti-forgetting) | replay/rehearsal, domain/task-incremental, adapter-per-domain + composition, regularization against old behavior, data-mixture refresh. Measure **forward/backward transfer, forgetting-per-capability, base regression, behavior/calibration drift, replay coverage** | **new-domain gain must NOT promote unless retained capabilities stay above declared regression floors** |
-| **S9** | **Multi-stage training pipelines** | one `TrainingPlan` -> **many `RunPlan`s** as a DAG: artifact handoff, immutable parent-child lineage, stage-local retry/rollback/branching, stage-specific env/data, **acceptance gates + stop-on-regression**, pipeline resume, branch comparison | e.g. ContinuedPretrain -> SFT -> RM -> PPO -> SafetyEval -> Release runs end to end with gated handoff |
+| **S9** | **Multi-stage training pipelines** | one `TrainingPlan` -> a DAG of **stages**, where a stage lowers to a `RunPlan` (training) **OR to a non-training operation** (eval, merge, quantize, export, release) - `TaskType`/`RunPlan` has no release/eval op, so the pipeline node is a `PipelineStage` union, not "every node is a `RunPlan`". Plus artifact handoff, immutable parent-child lineage, stage-local retry/rollback/branching, stage-specific env/data, **acceptance gates + stop-on-regression**, pipeline resume, branch comparison | e.g. ContinuedPretrain -> SFT -> RM -> PPO -> SafetyEval -> Release runs end to end with gated handoff |
 
 ## Orthogonal (land opportunistically; each a registry entry / track, not a new backend id)
 - **Update methods** - DoRA, IA3, prefix/prompt tuning, full-parameter fine-tuning.
@@ -107,14 +118,20 @@ risk already seen wiring the DPO truncation guard by hand.
 - **Observability / failure injection.** **Security + method-specific data governance** - bind the
   existing dedup/leakage-split/PII/debt-ledger machinery per method: contamination, exact+semantic dedup,
   **reversed preference pairs, preference ties/ambiguity**, annotator/rubric + teacher-label provenance,
-  source proportions, curriculum order, sample weights, hard-negative provenance.
+  source proportions, curriculum order, sample weights, hard-negative provenance. **Unlike the rest of
+  this section, a method's governance is NOT purely opportunistic - the governance checks a method depends
+  on are a PROMOTION PREREQUISITE for that method** (a slice cannot reach `WORKLOAD_VERIFIED` while its
+  contamination/dedup/leakage-split evidence is unwired), so S2/S4/S5 carry their governance to their gate.
 
 ## Model-family + output-head scope (declare it)
 The first-party worker is currently **CausalLM + `adapter_peft`**. Reward/value/embedding/reranker/
-multimodal heads are **not** ordinary `adapter_peft` CausalLM artifacts. `ModelDescriptor` + the objective
-registry already *recognize* these families; **worker execution + artifact semantics catch up per slice**
-(reward/value heads in S5a/S5b, encoder-decoder / classification / embedding / reranker / multimodal as
-planned execution variants).
+multimodal heads are **not** ordinary `adapter_peft` CausalLM artifacts. `ModelTaskClass` today recognizes
+`causal_lm / masked_lm / seq2seq_lm / classification / embedding / reranker / reward_model / vision /
+speech / multimodal` - so RM/embedding/reranker/classification/encoder-decoder have a *family label* to
+build on, but **there is no `value`/`critic` member: the value/critic head is a NET-NEW contract family**
+(head + loss + checkpoint state), added in S5b, not an existing one to "catch up". For the recognized
+families, **worker execution + artifact semantics catch up per slice** (reward heads in S5a, encoder
+-decoder / classification / embedding / reranker / multimodal as planned execution variants).
 
 ## The per-method workload-verification ladder (4 gates)
 1. **Pure math** - toy tensors validate the loss + gradient equations.
