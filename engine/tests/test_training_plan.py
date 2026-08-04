@@ -20,7 +20,7 @@ from corpus_studio.platform.contracts import (
     TrainingPlanResolution,
 )
 from corpus_studio.platform.enums import AssuranceTier, SupportLevel
-from corpus_studio.platform.planner import PlannerConstraints, build_run_plan
+from corpus_studio.platform.planner import PlannerConstraints, PlannerError, build_run_plan
 from corpus_studio.platform.training_plan import (
     BackendSecurityRefused,
     THIN_REGISTRIES,
@@ -100,6 +100,21 @@ def test_precheck_is_advisory_only():
     findings = training_plan_precheck(plan)
     assert "update_method_mismatch" in {f.code for f in findings}
     assert all(f.severity in {"info", "warning"} for f in findings)  # never 'block'
+
+
+def test_resolve_training_plan_refuses_a_composition_parameters_objective_mismatch():
+    # Deferred #779 finding: the composition's objective SELECTION and the parameters' executable
+    # objective_id are one choice - a plan that disagrees is refused, never silently resolved to one side.
+    profile, caps = _profile(cc_major=12), _report()
+    plan = TrainingPlan(
+        plan_intent_id="intent-1",
+        composition=TrainingPlanComposition(objective_id="dpo_qlora"),
+        parameters=_params(objective_id="qlora-sft"),
+    )
+    with pytest.raises(PlannerError, match="objective mismatch"):
+        resolve_training_plan(
+            plan, profile=profile, capabilities=caps, dataset_ref=_DATASET_REF, plan_id="p1", now=_NOW
+        )
 
 
 def test_precheck_surfaces_the_backend_tuple_support():

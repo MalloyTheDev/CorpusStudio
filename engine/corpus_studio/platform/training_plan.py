@@ -281,7 +281,11 @@ def resolve_training_plan(
     cannot honor the request. Fail-closed SECURITY GATE: if the composed orchestrator is unknown to the
     backend registry, or its declared security posture exceeds ``assurance_tier``, resolution is
     REFUSED with :class:`BackendSecurityRefused` before any RunPlan is built."""
-    from corpus_studio.platform.planner import PlannerConstraints, build_run_plan  # noqa: PLC0415
+    from corpus_studio.platform.planner import (  # noqa: PLC0415
+        PlannerConstraints,
+        PlannerError,
+        build_run_plan,
+    )
 
     adapters = {a.orchestrator_id: a for a in reference_orchestrator_adapters()}
     adapter = adapters.get(training_plan.composition.orchestrator)
@@ -298,8 +302,22 @@ def resolve_training_plan(
             f"orchestrator '{adapter.orchestrator_id}' refused at assurance tier "
             f"'{assurance_tier.value}': {refusal}"
         )
+    # Deferred #779 finding: the composition's objective SELECTION and the parameters' executable
+    # objective_id are two views of ONE choice. Reconcile them so a plan cannot select (say) dpo_qlora in
+    # the composition while the executable parameters silently resolve to a different (or no) objective -
+    # the very mismatch that would route a preference plan to the wrong shape.
+    composition_objective = training_plan.composition.objective_id
+    parameter_objective = training_plan.parameters.objective_id
+    if parameter_objective is not None and parameter_objective != composition_objective:
+        raise PlannerError(
+            f"training plan objective mismatch: composition selects '{composition_objective}' but the "
+            f"parameters carry '{parameter_objective}' - they must name the same objective"
+        )
     constraints = PlannerConstraints(
-        **training_plan.parameters.model_dump(exclude={"contract_version"})
+        **{
+            **training_plan.parameters.model_dump(exclude={"contract_version"}),
+            "objective_id": composition_objective,
+        }
     )
     run_plan = build_run_plan(
         profile=profile,

@@ -57,8 +57,12 @@ from corpus_studio.platform.contracts import (
     PhysicalResource,
     PhysicalScopeSelector,
     ParallelismSpec,
+    PreferenceDataPolicy,
+    PreferenceOptimizationSpec,
     RankBinding,
+    ReferenceModelBinding,
     ResolvedExecutionConfiguration,
+    ResolvedPreferenceExecutionConfiguration,
     RunPlan,
     StatePlacement,
     StorageProfile,
@@ -85,11 +89,14 @@ from corpus_studio.platform.enums import (
     TaskType,
 )
 from corpus_studio.platform.execution_config import (
+    canonical_sha256,
     capability_report_ref_for,
     execution_configuration_hash_for,
     formatter_identity,
     huggingface_input_ref,
+    preference_execution_configuration_hash_for,
 )
+from corpus_studio.schemas.registry import load_builtin_schema
 from corpus_studio.platform.host_platform import flash_sdpa_deadlocks
 from corpus_studio.platform.parameter_accounting import verify_parameter_accounting_hash
 from corpus_studio.platform.objectives import get_objective
@@ -810,6 +817,82 @@ def _precision_policy(precision: str, quantization: str, optimizer: str) -> dict
     }
 
 
+def _resolve_preference_execution(
+    *,
+    plan_id: str,
+    shared_fields: dict[str, Any],
+    constraints: PlannerConstraints,
+    resolved_physical: PhysicalExecutionSpec,
+    chat_template_sha256: str | None,
+) -> ResolvedPreferenceExecutionConfiguration:
+    """Lower a preference + ``dpo_qlora`` plan into a SEALED
+    :class:`ResolvedPreferenceExecutionConfiguration` - the DPO sibling of the SFT resolver. Reuses every
+    shared execution sub-spec already assembled in ``shared_fields`` and adds only what DPO needs: a
+    :class:`PreferenceDataPolicy` (resolved ``preference`` schema identity + formatter + prompt/response
+    budget) and a :class:`PreferenceOptimizationSpec` (beta / sigmoid loss / label-smoothing + frozen-base
+    reference), bound to the sealed ``dpo_qlora`` objective. Admitted at planning; the runner refuses it at
+    EXECUTION until the DPOTrainer branch + workload-verified evidence + milestone wheel land.
+
+    ``beta`` / ``label_smoothing`` / ``max_prompt_length`` are sealed at documented defaults here; exposing
+    them as first-class planner knobs is a follow-up (the config is reviewable but not yet executable)."""
+    objective = get_objective("dpo_qlora")
+    if objective is None:  # pragma: no cover - sealed built-in catalog invariant
+        raise PlannerError("the dpo_qlora objective is absent from the sealed registry")
+    objective_ref = Ref(id=objective.objective_id, hash=HashRef(value=objective.objective_hash))
+
+    # Deferred #779 finding: the resolved device_map must reconcile with the sealed physical execution -
+    # the single dense compute device is the placement root, never an unrelated device.
+    root_device = resolved_physical.resources[0].device_id
+    expected_device = "cpu" if root_device == "cpu:0" else root_device
+    mapped_devices = {entry["device"] for entry in shared_fields["device_map"]}
+    if expected_device is not None and mapped_devices != {expected_device}:
+        raise PlannerError(
+            f"preference device_map {sorted(mapped_devices)} does not reconcile with the sealed physical "
+            f"execution device {expected_device!r}"
+        )
+
+    # Resolved 'preference' dataset-schema identity: id + version + a content digest of the builtin
+    # schema, so a row-layout drift fails closed even when a project-local schema shadows the builtin.
+    schema = load_builtin_schema("preference")
+    formatter_id, formatter_hash = formatter_identity(constraints.dataset_format)
+    max_length = constraints.sequence_len
+    # Reserve room for the response: default the prompt cap to half the window (< max_length invariant).
+    max_prompt_length = max(1, min(max_length - 1, max_length // 2))
+    data_policy = PreferenceDataPolicy(
+        schema_id=schema.id,
+        schema_version=schema.version,
+        schema_sha256=canonical_sha256(schema.model_dump(mode="json")),
+        pair_schema="chosen_rejected",
+        formatter_id=formatter_id,
+        formatter_sha256=formatter_hash,
+        chat_template_sha256=chat_template_sha256,
+        max_prompt_length=max_prompt_length,
+        max_length=max_length,
+        truncation_policy="allow" if constraints.truncation_allowed else "refuse",
+        data_seed=constraints.data_seed if constraints.data_seed is not None else constraints.seed,
+    )
+    preference_spec = PreferenceOptimizationSpec(
+        reference_model=ReferenceModelBinding(mode="frozen_base", precompute_ref_log_probs=False),
+    )
+    try:
+        draft = ResolvedPreferenceExecutionConfiguration.model_validate(
+            {
+                **shared_fields,
+                "configuration_hash": "0" * 64,
+                "objective_ref": objective_ref.model_dump(mode="json"),
+                "data": data_policy.model_dump(mode="json"),
+                "preference": preference_spec.model_dump(mode="json"),
+            }
+        )
+    except ValidationError as exc:
+        raise PlannerError(
+            f"the resolved preference execution configuration is invalid: {exc}"
+        ) from exc
+    return draft.model_copy(
+        update={"configuration_hash": preference_execution_configuration_hash_for(draft)}
+    )
+
+
 def build_run_plan(
     *,
     profile: EnvironmentProfile,
@@ -835,6 +918,7 @@ def build_run_plan(
     # falls back to dense_qlora_sft. The per-variant executable seal + worker land with each variant (S2+).
     from corpus_studio.platform.execution_variants import (  # noqa: PLC0415
         ExecutionVariantRefused,
+        ExecutionVariantSupport,
         admit_task_execution_variant,
         reference_execution_variants,
     )
@@ -852,12 +936,26 @@ def build_run_plan(
     admission_objective_id = (
         constraints.objective_id if constraints.task_type == TaskType.preference.value else None
     )
+    # QLoRA-DPO is admitted AT PLANNING (contract_validated) so the resolver can seal a reviewable
+    # ResolvedPreferenceExecutionConfiguration; it is then refused AT EXECUTION by the runner (the
+    # DPOTrainer branch + workload-verified evidence + wheel are the gated milestone). Every other shape
+    # keeps the workload_verified bar - MoE / non-DPO preference / unbuilt objectives stay refused here.
+    is_preference_dpo = (
+        constraints.task_type == TaskType.preference.value
+        and admission_objective_id == "dpo_qlora"
+        and not plan_targets_moe
+    )
     try:
         admit_task_execution_variant(
             TaskType(constraints.task_type),
             is_moe=plan_targets_moe,
             objective_id=admission_objective_id,
             declared_variants=reference_execution_variants(),
+            required_support=(
+                ExecutionVariantSupport.contract_validated
+                if is_preference_dpo
+                else ExecutionVariantSupport.workload_verified
+            ),
         )
     except ExecutionVariantRefused as exc:
         raise PlannerError(str(exc)) from exc
@@ -1059,6 +1157,16 @@ def build_run_plan(
         export_format=constraints.export_format,
         execution_contract_version=_EXECUTION_CONTRACT_VERSION,
     )
+    if is_preference_dpo:
+        # The corpus_studio manifest cannot yet DECLARE the preference task: task_types is content-hashed
+        # into backend_manifest_ref, which is sealed into the byte-locked SFT configuration - declaring a
+        # new task type is coupled to a new manifest + milestone wheel. So a preference+dpo_qlora plan is
+        # admitted at planning despite that one unmet reason (every OTHER fit-check still applies), and the
+        # runner refuses it at execution until the wheel promotes it.
+        unmet = [
+            reason for reason in unmet
+            if reason != f"task '{constraints.task_type}' not supported"
+        ]
     if unmet:
         alternatives = [
             b.backend_id
@@ -1232,50 +1340,69 @@ def build_run_plan(
     device_map = [
         DeviceMapEntry(module="", device="cpu" if root_device == "cpu:0" else root_device)
     ]
-    try:
-        execution_draft = ResolvedExecutionConfiguration.model_validate(
-            {
-            "configuration_id": f"{plan_id}-execution",
-            "configuration_hash": "0" * 64,
-            "backend_ref": backend_manifest_ref(backend).model_dump(mode="json"),
-            "environment_ref": resolved_environment_ref.model_dump(mode="json"),
-            "environment_binding": (
-                "managed_lock" if environment_ref is not None else "profile_snapshot"
-            ),
-            "capability_report_ref": capability_ref.model_dump(mode="json"),
-            "inputs": execution_inputs.model_dump(mode="json"),
-            "objective_ref": objective_ref.model_dump(mode="json"),
-            "runtime_mode": "cpu_toy" if cpu_toy else "training",
-            "precision": _precision_policy(precision, quantization, constraints.optim),
-            "attention": attention_policy.model_dump(mode="json"),
-            "device_map": [item.model_dump(mode="json") for item in device_map],
-            "adapter": adapter,
-            "optimizer": optimizer,
-            "loss_impl": loss_impl,
-            "sequence": sequence,
-            "batching": batching,
-            "checkpoint_policy": checkpoint_policy,
-            "schedule": schedule.model_dump(mode="json"),
-            "data": data_policy.model_dump(mode="json"),
-            "trainer_interface": trainer_interface.model_dump(mode="json"),
-            "export_format": constraints.export_format,
-            "trust_remote_code": False,
-            "use_safetensors": True,
-            "bnb_4bit_use_double_quant": quantization != "none",
-            "adapter_task_type": "CAUSAL_LM",
-            "save_strategy": "no",
-            "gradient_checkpointing": True,
-            "output_dir": constraints.output_dir,
-            "output_layout": "run_scoped_v1",
-            "seed": constraints.seed,
-            "data_seed": constraints.data_seed if constraints.data_seed is not None else constraints.seed,
-            }
+    # Shared execution sub-specs common to the SFT and preference(DPO) seals. Assembling them once keeps
+    # the two resolvers consistent by construction; the SFT seal stays byte-identical because its
+    # configuration_hash is over the validated MODEL (field values), not this input dict's shape.
+    shared_fields: dict[str, Any] = {
+        "configuration_id": f"{plan_id}-execution",
+        "backend_ref": backend_manifest_ref(backend).model_dump(mode="json"),
+        "environment_ref": resolved_environment_ref.model_dump(mode="json"),
+        "environment_binding": (
+            "managed_lock" if environment_ref is not None else "profile_snapshot"
+        ),
+        "capability_report_ref": capability_ref.model_dump(mode="json"),
+        "inputs": execution_inputs.model_dump(mode="json"),
+        "runtime_mode": "cpu_toy" if cpu_toy else "training",
+        "precision": _precision_policy(precision, quantization, constraints.optim),
+        "attention": attention_policy.model_dump(mode="json"),
+        "device_map": [item.model_dump(mode="json") for item in device_map],
+        "adapter": adapter,
+        "optimizer": optimizer,
+        "sequence": sequence,
+        "batching": batching,
+        "checkpoint_policy": checkpoint_policy,
+        "schedule": schedule.model_dump(mode="json"),
+        "trainer_interface": trainer_interface.model_dump(mode="json"),
+        "export_format": constraints.export_format,
+        "trust_remote_code": False,
+        "use_safetensors": True,
+        "bnb_4bit_use_double_quant": quantization != "none",
+        "adapter_task_type": "CAUSAL_LM",
+        "save_strategy": "no",
+        "gradient_checkpointing": True,
+        "output_dir": constraints.output_dir,
+        "output_layout": "run_scoped_v1",
+        "seed": constraints.seed,
+        "data_seed": constraints.data_seed if constraints.data_seed is not None else constraints.seed,
+    }
+    resolved_execution_field: dict[str, Any] | None = None
+    resolved_preference_field: dict[str, Any] | None = None
+    if is_preference_dpo:
+        preference_execution = _resolve_preference_execution(
+            plan_id=plan_id,
+            shared_fields=shared_fields,
+            constraints=constraints,
+            resolved_physical=resolved_physical,
+            chat_template_sha256=constraints.chat_template_sha256,
         )
-    except ValidationError as exc:
-        raise PlannerError(f"the resolved execution configuration is invalid: {exc}") from exc
-    execution = execution_draft.model_copy(
-        update={"configuration_hash": execution_configuration_hash_for(execution_draft)}
-    )
+        resolved_preference_field = preference_execution.model_dump(mode="json")
+    else:
+        try:
+            execution_draft = ResolvedExecutionConfiguration.model_validate(
+                {
+                    **shared_fields,
+                    "configuration_hash": "0" * 64,
+                    "objective_ref": objective_ref.model_dump(mode="json"),
+                    "loss_impl": loss_impl,
+                    "data": data_policy.model_dump(mode="json"),
+                }
+            )
+        except ValidationError as exc:
+            raise PlannerError(f"the resolved execution configuration is invalid: {exc}") from exc
+        execution = execution_draft.model_copy(
+            update={"configuration_hash": execution_configuration_hash_for(execution_draft)}
+        )
+        resolved_execution_field = execution.model_dump(mode="json")
 
     body: dict[str, Any] = {
         "plan_id": plan_id,
@@ -1289,7 +1416,9 @@ def build_run_plan(
         "quantization": quantization,
         "adapter": adapter,
         "optimizer": optimizer,
-        "loss_impl": loss_impl,
+        # A preference plan's loss summary IS the DPO loss (the supervised loss_impl would contradict the
+        # preference seal the runner cross-checks); the SFT loss stays on the dense path.
+        "loss_impl": "dpo" if is_preference_dpo else loss_impl,
         "attention_backend": attention_backend,
         "sequence": sequence,
         "batching": batching,
@@ -1302,7 +1431,8 @@ def build_run_plan(
         "export": {"format": constraints.export_format, "output_dir": constraints.output_dir},
         "seed": constraints.seed,
         "training_config_snapshot": {},
-        "resolved_execution": execution.model_dump(mode="json"),
+        "resolved_execution": resolved_execution_field,
+        "resolved_preference_execution": resolved_preference_field,
         "parameter_accounting_ref": (
             parameter_accounting_ref.model_dump(mode="json")
             if parameter_accounting_ref is not None

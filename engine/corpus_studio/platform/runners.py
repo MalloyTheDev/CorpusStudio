@@ -562,6 +562,19 @@ class TrainingRunner:
 
         execution = plan.resolved_execution
         if execution is None:
+            if plan.resolved_preference_execution is not None:
+                # Admit-at-planning / refuse-at-EXECUTION: the resolver sealed a reviewable DPO config, but
+                # the 'preference_dpo' variant is contract_validated, not workload_verified. Refuse with a
+                # typed reason instead of the generic "no config" so the gate is legible.
+                raise RunnerFailure(
+                    "this is a sealed preference (DPO) plan - admitted at planning but not yet executable: "
+                    "'preference_dpo' is contract_validated, not workload_verified. The DPOTrainer worker "
+                    "branch, a workload-verified run, and the milestone wheel are the gated next step.",
+                    taxonomy=FailureTaxonomy.UNSUPPORTED_CONFIGURATION,
+                    stage=StageMarker.env_loaded,
+                    remediation="await the DPO worker milestone that promotes preference_dpo to "
+                    "workload_verified; do not hand-edit the plan to the SFT lane",
+                )
             raise RunnerFailure(
                 "the RunPlan carries no ResolvedExecutionConfiguration to execute",
                 taxonomy=FailureTaxonomy.UNSUPPORTED_CONFIGURATION,

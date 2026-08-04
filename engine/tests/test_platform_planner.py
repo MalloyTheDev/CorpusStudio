@@ -418,10 +418,34 @@ def test_planner_admits_the_dense_qlora_sft_task_and_refuses_unexecutable_varian
     # a preference request must name its objective; without one it maps to no shape -> refused.
     with pytest.raises(PlannerError, match="no executable execution variant"):
         _plan(_profile(cc_major=8), _report(), task_type="preference")
-    # preference + the dpo_qlora objective maps to preference_dpo, declared at contract_validated ->
-    # admitted-as-known but refused at execution (below workload_verified), NOT "no variant".
-    with pytest.raises(PlannerError, match="'preference_dpo' is 'contract_validated'"):
-        _plan(_profile(cc_major=8), _report(), task_type="preference", objective_id="dpo_qlora")
+    # preference + the dpo_qlora objective maps to preference_dpo (contract_validated) -> ADMITTED at
+    # planning: the resolver seals a ResolvedPreferenceExecutionConfiguration and the plan carries it
+    # (not the SFT resolved_execution). Execution is refused separately by the runner (DPOTrainer + wheel
+    # gated), so the plan's loss summary is the DPO loss and it binds the dpo_qlora objective.
+    dpo_plan = _plan(_profile(cc_major=8), _report(), task_type="preference", objective_id="dpo_qlora")
+    assert dpo_plan.resolved_preference_execution is not None
+    assert dpo_plan.resolved_execution is None
+    assert dpo_plan.loss_impl.value == "dpo"
+    assert dpo_plan.resolved_preference_execution.objective_ref.id == "dpo_qlora"
+
+
+def test_preference_dpo_resolves_to_a_sealed_config_and_the_runner_refuses_it_at_execution():
+    from corpus_studio.platform.execution_config import preference_execution_configuration_hash_for
+    from corpus_studio.platform.runners import RunnerFailure, TrainingRunner
+
+    plan = _plan(_profile(cc_major=8), _report(), task_type="preference", objective_id="dpo_qlora")
+    pref = plan.resolved_preference_execution
+    assert pref is not None and plan.resolved_execution is None
+    # the resolver sealed a self-consistent config bound to the dpo_qlora objective + the DPO loss/data
+    assert pref.configuration_hash == preference_execution_configuration_hash_for(pref)
+    assert pref.objective_ref.id == "dpo_qlora"
+    assert pref.preference.objective == "dpo" and pref.data.schema_id == "preference"
+    assert pref.data.max_prompt_length < pref.data.max_length  # room for the response
+    # deferred #779 finding: device_map reconciles to exactly the one sealed compute device
+    assert len(pref.device_map) == 1
+    # refuse-at-execution: admitted at planning, the runner rejects it with a TYPED reason (not generic)
+    with pytest.raises(RunnerFailure, match="not yet executable"):
+        TrainingRunner(cpu_toy=False)._resolve_config(plan, "run-x")
 
 
 def test_native_windows_blackwell_host_forces_math_bf16_nf4_qlora():
