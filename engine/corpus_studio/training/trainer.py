@@ -2895,10 +2895,13 @@ def run_dpo_training(  # pragma: no cover - optional training-stack integration 
 ) -> dict[str, Any]:
     """The harness's DPO training primitive - the seq-4096-capable path trl/off-the-shelf-liger cannot do.
     ``pairs`` are ``{"prompt","chosen","rejected"}`` (the prompt already chat-templated). Fail-closes on
-    truncation BEFORE touching the GPU, then trains with the sequence-chunked loss. An exploratory
-    (uncommitted scratchpad) prototype measured 4B QLoRA seq 4096 at ~9.99 GiB with a correct DPO curve;
-    that is exploratory evidence, not a sealed/recorded result - the sealed run + milestone wheel remain
-    gated. Reference log-probs use the PEFT adapter disabled.
+    truncation BEFORE touching the GPU, then trains with the sequence-chunked loss. This HARDENED primitive
+    was GPU-validated (2026-08-04, Qwen3-4B nf4 + LoRA, 12 WBG pairs, seq 4096, RTX 5070): a textbook DPO
+    curve - loss 0.6931 (=log2) -> 0.28 monotonic, implicit reward margin 0 -> 11.2 (sane, versus the
+    PRE-shift-fix prototype's exploded ~1150 = a leaked objective), peak 9.49 GiB, held-out ranking
+    accuracy 1.0. That is EXPLORATORY/product evidence from a direct primitive call, NOT a sealed
+    platform-run - the config->args adapter + milestone wheel + a sealed run (which promotes preference_dpo
+    to workload_verified) remain gated. Reference log-probs use the PEFT adapter disabled.
 
     Sealed execution semantics are HONORED, not silently defaulted: ``beta`` / ``label_smoothing`` /
     ``gradient_accumulation_steps`` come from the plan, and the caller passes the sealed ``optimizer``
@@ -3066,8 +3069,8 @@ def run_dpo_training(  # pragma: no cover - optional training-stack integration 
                 if leaked:
                     raise TrainerError(f"DPO backward leaked gradient into {leaked} frozen parameter(s).")
                 checked = True
-            micro_loss += float(loss)
-            micro_margin += float(margin)
+            micro_loss += loss.item()  # .item() detaches; float() on a grad tensor warns
+            micro_margin += margin.item()
             micro_delta += float(chosen_len - rejected_len)
         grad_norms.append(float(torch.nn.utils.clip_grad_norm_(trainable, float("inf"))))
         optimizer.step()
