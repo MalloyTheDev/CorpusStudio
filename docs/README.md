@@ -36,11 +36,14 @@ full model lifecycle. Its surface is organized into **seven co-equal product are
 
 - [`TRAINING.md`](TRAINING.md) - the training surface overview.
 - [`TRAINING_SYSTEMS_ARCHITECTURE.md`](TRAINING_SYSTEMS_ARCHITECTURE.md) - the pluggable training-systems architecture (incl. Training Objectives).
+- [`TRAINING_HARNESS_EXPANSION.md`](TRAINING_HARNESS_EXPANSION.md) - the sequenced S0-S9 training-method + memory backlog (offline DPO, preference family, pretraining, distillation, reward/rollout/RL, memory, continual, pipelines).
+- [`LEARNING_PARADIGMS_AND_MEMORY.md`](LEARNING_PARADIGMS_AND_MEMORY.md) - the gated RL / memory-augmented / dreaming study track.
 - [`TRAINING_BACKEND_REGISTRY.md`](TRAINING_BACKEND_REGISTRY.md) - the training backend registry.
 - [`PRETRAINING_ARCHITECTURE.md`](PRETRAINING_ARCHITECTURE.md) - from-scratch / continued pretraining.
 - [`MOE_ARCHITECTURE.md`](MOE_ARCHITECTURE.md) - Mixture-of-Experts (incl. Static MoE Model Inspection + MoE Training Architecture).
 - [`PARAMETER_ACCOUNTING.md`](PARAMETER_ACCOUNTING.md) - parameter accounting.
 - [`CHECKPOINT_RESUME.md`](CHECKPOINT_RESUME.md) - exact checkpoint + resume lineage.
+- [`CHECKPOINT_RESUME_PLAN.md`](CHECKPOINT_RESUME_PLAN.md) - the phased checkpoint/resume wiring plan.
 - [`EFFECTIVE_EXECUTION_CONFIGURATION.md`](EFFECTIVE_EXECUTION_CONFIGURATION.md) - the sealed effective execution configuration.
 - [`RUN_PLAN_PHYSICAL_EXECUTION.md`](RUN_PLAN_PHYSICAL_EXECUTION.md) - the RunPlan physical-execution contract.
 - [`PLATFORM_RUN.md`](PLATFORM_RUN.md) - running a job through the headless platform.

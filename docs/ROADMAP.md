@@ -27,7 +27,7 @@ a **calibrator + watchdog** (predicted-vs-measured fit, spill/stall detection), 
 subprocess worker** that can KILL a hung run. Worker protocol 2.0 now binds the exact backend-manifest
 digest and environment/lock ref before dispatch, then fail-closes message order and terminal lineage.
 It is exercised by a **Tauri 2 + React** contract-first client (`apps/web`) the target UI; the
-WPF/Avalonia desktop is a retiring prototype (#545). A pre-Phase-9B lifecycle ran end to end on a real RTX 5070
+WPF/Avalonia desktop was removed (#545). A pre-Phase-9B lifecycle ran end to end on a real RTX 5070
 (Blackwell/sm_120) under native Windows/WDDM, including a real GPU QLoRA run. That historical run does
 not verify the new effective-execution contract. On the current native-Linux host, the managed
 `backend-corpus-studio` environment separately passed its minimal CUDA-allocation, 4-bit-construction,
@@ -136,7 +136,7 @@ input side. Ordered:
   backend support, populate active/resident parameter coordinates, or establish MoE runtime
   capability. See [`MODEL_TOKENIZER_CONTRACTS.md`](MODEL_TOKENIZER_CONTRACTS.md) and
   [`MOE_ARCHITECTURE.md`](MOE_ARCHITECTURE.md).
-- ✅ **TrainingObjective contract + registry foundation** — 29 hash-sealed, backend-independent
+- ✅ **TrainingObjective contract + registry foundation** — 30 hash-sealed, backend-independent
   definitions with dataset/label/mask/loss semantics, MoE-safe update scope/exposure rules, artifacts,
   resume/eval/hardware implications, and conservative dataset/model/backend compatibility axes. This
   does not yet wire an objective into `RunPlan` or add trainer implementations. See
@@ -186,12 +186,17 @@ input side. Ordered:
 - Smaller: dataset-version reorder detection and a normalized row identity. (Row-store GC,
   PII redaction on export, and the desktop gate-threshold editor now ship.)
 
-### Training Systems expansion (proposed — under review)
+### Training Systems expansion (P0 shipped; S0-S9 vertical in progress)
 
 Expand training from "fine-tuning support" into a complete, pluggable model-development system
 (pretraining, continued pretraining, full-parameter + adapter/PEFT fine-tuning, preference/RL
 post-training, distillation, dense + MoE, single-device + distributed, multiple framework/orchestrator
-adapters). The foundational contracts are already dense-safe / MoE-safe; the work is **additive**. See
+adapters). The foundational contracts are already dense-safe / MoE-safe; the work is **additive**.
+**Landed:** P0 through P0d (#745), the S1 fail-closed admission gate (#775), and the whole **S2 offline-DPO
+control plane** (data policy #778, objective+admission #779, resolver #782, CLI knobs #783) - a preference
+plan is admitted at planning and sealed, refused only at execution; the DPO worker (#781) is GPU-validated
+(exploratory). The forward plan is the S0-S9 backlog in
+[`TRAINING_HARNESS_EXPANSION.md`](TRAINING_HARNESS_EXPANSION.md). See also
 [`TRAINING_SYSTEMS_ARCHITECTURE.md`](TRAINING_SYSTEMS_ARCHITECTURE.md),
 [`PRETRAINING_ARCHITECTURE.md`](PRETRAINING_ARCHITECTURE.md),
 [`MOE_ARCHITECTURE.md`](MOE_ARCHITECTURE.md), and

@@ -3,7 +3,9 @@
 Single source of truth for what Corpus Studio actually does today. When another
 doc disagrees with this file, this file wins (and the other doc should be fixed).
 
-Last reconciled: 2026-07-29 — the bounded autonomous engineering loop was **extracted to a separate
+Last reconciled: 2026-08-04 — the offline **DPO / preference planning** vertical shipped (admit-at-planning
+-> sealed `ResolvedPreferenceExecutionConfiguration` -> refuse-at-execution; #775/#778/#779/#782/#783), see
+the entry below. Prior (2026-07-29) — the bounded autonomous engineering loop was **extracted to a separate
 repo (`cs-loop`, #729)**; what remains here is the product, the **assurance plane**
 (`scripts/assurance/`, `cs_assure`), and the IEEE research overlay. The 2026-07-18 engine
 bug/hardening cluster is merged (#731-#736: worker fail-closed on a bad stdout byte / failed spawn,

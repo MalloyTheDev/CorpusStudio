@@ -27,7 +27,7 @@ Responsibilities:
 ```bash
 cd engine
 python -m venv .venv
-.venv\Scripts\activate
+.venv/bin/activate
 pip install -e ".[dev]"
 pytest
 ```
