@@ -443,9 +443,20 @@ def test_preference_dpo_resolves_to_a_sealed_config_and_the_runner_refuses_it_at
     assert pref.data.max_prompt_length < pref.data.max_length  # room for the response
     # deferred #779 finding: device_map reconciles to exactly the one sealed compute device
     assert len(pref.device_map) == 1
-    # refuse-at-execution: admitted at planning, the runner rejects it with a TYPED reason (not generic)
+    # refuse-at-execution must be REACHABLE with a TYPED reason at the actual gates, not just the innermost
+    # _resolve_config: the dispatch lane selector AND the direct runner's first resolution step both refuse
+    # a preference plan before the generic "no ResolvedExecutionConfiguration" path.
+    from corpus_studio.platform.execution_config import (
+        ExecutionConfigurationError,
+        required_runner_lane,
+    )
+
+    with pytest.raises(ExecutionConfigurationError, match="not yet executable"):
+        required_runner_lane(plan)  # dispatch gate (shipping platform-run flow)
     with pytest.raises(RunnerFailure, match="not yet executable"):
-        TrainingRunner(cpu_toy=False)._resolve_config(plan, "run-x")
+        TrainingRunner(cpu_toy=False)._resolve_trainer(plan)  # direct runner, before _resolve_config
+    with pytest.raises(RunnerFailure, match="not yet executable"):
+        TrainingRunner(cpu_toy=False)._resolve_config(plan, "run-x")  # defense-in-depth
 
 
 def test_planner_refuses_a_preference_objective_on_a_non_preference_task():

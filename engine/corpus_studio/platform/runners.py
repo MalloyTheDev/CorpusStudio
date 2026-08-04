@@ -504,7 +504,21 @@ class TrainingRunner:
             backend_manifest_ref,
             get_backend,
         )
+        from corpus_studio.platform.execution_config import (  # noqa: PLC0415
+            PREFERENCE_NOT_EXECUTABLE_REASON,
+        )
 
+        if plan.resolved_execution is None and plan.resolved_preference_execution is not None:
+            # Refuse a sealed preference (DPO) plan with a TYPED reason at the FIRST resolution step on the
+            # direct-runner path (this runs before _resolve_config), so the refusal is reachable rather
+            # than surfacing the generic "backend does not implement the sealed execution contract" below.
+            raise RunnerFailure(
+                PREFERENCE_NOT_EXECUTABLE_REASON,
+                taxonomy=FailureTaxonomy.UNSUPPORTED_CONFIGURATION,
+                stage=StageMarker.env_loaded,
+                remediation="await the DPO worker milestone that promotes preference_dpo to "
+                "workload_verified; do not hand-edit the plan to the SFT lane",
+            )
         backend_id = plan.backend_ref.id
         backend = get_backend(backend_id)
         if backend is None:
@@ -552,6 +566,7 @@ class TrainingRunner:
     def _resolve_config(self, plan: RunPlan, run_id: str) -> TrainRunConfig:
         """Consume the sealed policy and derive only its declared run-scoped output path."""
         from corpus_studio.platform.execution_config import (  # noqa: PLC0415
+            PREFERENCE_NOT_EXECUTABLE_REASON,
             ExecutionConfigurationError,
             run_scoped_training_output,
             verify_execution_configuration_hash,
@@ -563,13 +578,11 @@ class TrainingRunner:
         execution = plan.resolved_execution
         if execution is None:
             if plan.resolved_preference_execution is not None:
-                # Admit-at-planning / refuse-at-EXECUTION: the resolver sealed a reviewable DPO config, but
-                # the 'preference_dpo' variant is contract_validated, not workload_verified. Refuse with a
-                # typed reason instead of the generic "no config" so the gate is legible.
+                # Defense-in-depth: _resolve_trainer already refuses a preference plan with this typed
+                # reason before this method runs; repeat it here so a direct _resolve_config call is legible
+                # too (admit-at-planning / refuse-at-execution).
                 raise RunnerFailure(
-                    "this is a sealed preference (DPO) plan - admitted at planning but not yet executable: "
-                    "'preference_dpo' is contract_validated, not workload_verified. The DPOTrainer worker "
-                    "branch, a workload-verified run, and the milestone wheel are the gated next step.",
+                    PREFERENCE_NOT_EXECUTABLE_REASON,
                     taxonomy=FailureTaxonomy.UNSUPPORTED_CONFIGURATION,
                     stage=StageMarker.env_loaded,
                     remediation="await the DPO worker milestone that promotes preference_dpo to "

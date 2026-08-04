@@ -288,6 +288,29 @@ def test_platform_plan_dataset_format_flows_through_the_cli(monkeypatch, tmp_pat
     assert "format" not in data
 
 
+def test_platform_plan_objective_flows_through_the_cli_for_a_preference_plan(monkeypatch, tmp_path):
+    # Reachability: a preference plan is requestable from the SHIPPING CLI via --objective, and lowers to
+    # a sealed preference execution config (admit-at-planning), not the SFT resolved_execution. Without the
+    # option, --task-type preference would always refuse as "no executable variant".
+    _ready_host(monkeypatch)
+    result = runner.invoke(
+        app,
+        [
+            *_platform_plan_args(tmp_path),
+            "--task-type",
+            "preference",
+            "--objective",
+            "dpo_qlora",
+            "--json",
+        ],
+    )
+    assert result.exit_code == 0, result.stdout
+    plan = json.loads(result.stdout)["run_plan"]
+    assert plan["resolved_preference_execution"] is not None
+    assert plan["resolved_execution"] is None
+    assert plan["resolved_preference_execution"]["objective_ref"]["id"] == "dpo_qlora"
+
+
 def test_platform_plan_allocator_policy_flows_through_the_cli(monkeypatch, tmp_path):
     # --allocator-policy + --max-split-size-mb seal the CUDA allocator config into the plan (so the
     # seq-4096 paged config no longer smuggles it via the dispatch env).

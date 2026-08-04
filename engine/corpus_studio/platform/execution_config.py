@@ -53,6 +53,13 @@ def run_scoped_training_output(
     return Path(config.output_dir) / "runs" / run_id / "artifacts" / "adapter"
 
 
+PREFERENCE_NOT_EXECUTABLE_REASON = (
+    "this is a sealed preference (DPO) plan - admitted at planning but not yet executable: "
+    "'preference_dpo' is contract_validated, not workload_verified. The DPOTrainer worker branch, a "
+    "workload-verified run, and the milestone wheel are the gated next step."
+)
+
+
 def required_runner_lane(plan: RunPlan) -> str:
     """Return the only runner lane allowed to consume ``plan``."""
 
@@ -63,6 +70,11 @@ def required_runner_lane(plan: RunPlan) -> str:
                 "resolved training plans require the first-party corpus_studio worker"
             )
         return "cpu_toy" if execution.runtime_mode == "cpu_toy" else "training"
+    if plan.resolved_preference_execution is not None:
+        # A sealed preference (DPO) plan is admitted at planning but refused at EXECUTION here - the
+        # earliest dispatch gate - with a typed reason, so the refusal is reachable through the shipping
+        # platform-run flow rather than surfacing the generic "no executable runner lane" below.
+        raise ExecutionConfigurationError(PREFERENCE_NOT_EXECUTABLE_REASON)
     if plan.backend_ref.id == "echo":
         if plan.task_type.value != "evaluation":
             raise ExecutionConfigurationError(
