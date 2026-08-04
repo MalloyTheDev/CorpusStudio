@@ -12,17 +12,25 @@ This revision (2026-08-04) folds in an external architecture review. Its two loa
 optimization** - are adopted below, because without them the harness drifts into a collection of
 *individually sealed but operationally disconnected* trainers with duplicated, inconsistent safety logic.
 
-## Where we are (measured)
-- **dense QLoRA-SFT** + **checkpoint/resume** proven end to end on real worker bytes (7B nf4,
-  bit-faithful continuation; `HOST_STATE.md`).
-- **S1 backend-scoped execution** shipped (#779): the `ResolvedExecutionConfiguration` lock is lifted
-  into per-variant sealed configs; a `preference_dpo` variant is admitted-fail-closed.
-- **S2 offline DPO**: control-plane merged; the worker's **sequence-chunked loss reaches seq 4096 on a
-  12 GB card** (measured 9.99 GiB, where trl / off-the-shelf liger cap at ~seq 1024) - GPU-validated,
-  correctness-hardening + sealed run + wheel remaining.
+## Where we are
+- **dense QLoRA-SFT** is the one `WORKLOAD_VERIFIED` tuple. **Checkpoint/resume** has a CPU
+  reference-loop **bitwise-equivalence proof** (seal/verify/admit + worker save/restore/coordinator); the
+  production `SFTTrainer` loop is **not yet wired** to the checkpoint coordinator and a **7B GPU resume is
+  a gated future step** (`docs/CHECKPOINT_RESUME_PLAN.md`) - do not read the CPU proof as a production 7B
+  claim.
+- **S1 admission gate** shipped (#775): a task with no executable variant is refused fail-closed. **S2
+  control-plane** merged (#778 `PreferenceDataPolicy`; #779 the `dpo_qlora` objective +
+  `ResolvedPreferenceExecutionConfiguration`); `preference_dpo` is declared at **`contract_validated`** -
+  admitted-then-refused-at-execution, **not executable**.
+- **S2 offline DPO worker**: the sequence-chunked log-prob is an **exploratory** primitive. An
+  uncommitted scratchpad prototype trained 4B QLoRA DPO at seq 4096 (~9.99 GiB, where trl / off-the-shelf
+  liger cap at ~seq 1024) - **exploratory evidence, not a recorded or sealed result** (it is absent from
+  `HOST_STATE.md`/`HANDOFF.md` and `preference_dpo` is not `WORKLOAD_VERIFIED`). A sealed run + milestone
+  wheel + promotion remain the gated milestone.
 
-The `SupportLevel` ladder is **tuple-scoped**: this proves *only* `dense_qlora_sft` (+ DPO execution, not
-yet promoted). Every paradigm below is `DECLARED`, not `WORKLOAD_VERIFIED`.
+The `SupportLevel` ladder is **tuple-scoped**: the one `WORKLOAD_VERIFIED` tuple is `dense_qlora_sft`.
+DPO is **expressible and admitted-fail-closed** but its execution is **unproven**; every paradigm below is
+`DECLARED`, not `WORKLOAD_VERIFIED`.
 
 ## Build-out model (how we work)
 - **DEV mode** - the repo + a dev env, iterating on every method with **no pinned worker wheel per code
@@ -68,8 +76,8 @@ risk already seen wiring the DPO truncation guard by hand.
 | # | Slice | New contract/system | Evidence gate (tuple) |
 |---|---|---|---|
 | **S0** | Objective-worker lifecycle kernel | `ObjectiveWorker` Protocol + shared helpers + objective-generic checkpoint/evidence | every variant proves the same lifecycle on cpu_toy |
-| **S1** | Backend-scoped execution | `resolved_execution` variants (P0) | ✅ done (#779) |
-| **S2a** | **Offline DPO** vertical slice | preference-pair data policy + sequence-chunked DPO worker (reference, no rollout) | DPO tuple `WORKLOAD_VERIFIED` on 4B seq 4096 |
+| **S1** | Admission gate + backend-scoped execution | fail-closed variant admission + `resolved_execution` variants (P0) | ✅ admission gate shipped (#775); `preference_dpo` at `contract_validated` (#778/#779) |
+| **S2a** | **Offline DPO** vertical slice | preference-pair data policy + sequence-chunked DPO worker (reference, no rollout) | ⛔ gated: worker unwired, `preference_dpo` at `contract_validated`. Gate = DPO tuple `WORKLOAD_VERIFIED` on 4B seq 4096 (sealed run + wheel) |
 | **S2b** | **Preference family** | IPO / KTO / ORPO - each its OWN objective + provenance (never a loss string under a `dpo` seal) | each variant's tuple |
 | **S3** | **Pretraining path** | **tokenizer lifecycle** (freeze before tokens, content-hash, token-accounting invalidation) + streaming per-rank data cursor + token budget + continued-pretraining data policy -> dense pretraining | continued-pretrain on a small corpus |
 | **S4a** | **Distillation** workers | teacher-serving reference + logit/sequence/rationale distillation loss | KD on 4B (teacher 7B) |
