@@ -898,6 +898,18 @@ def platform_plan(
         help="Training objective id (REQUIRED for --task-type preference, e.g. dpo_qlora; "
         "see 'training-objectives'). Ignored for sft/pretraining, which resolve by task.",
     ),
+    dpo_beta: float = typer.Option(
+        0.1, "--dpo-beta", help="DPO KL strength (preference plans only)."
+    ),
+    dpo_label_smoothing: float = typer.Option(
+        0.0, "--dpo-label-smoothing", help="cDPO label smoothing for noisy preferences (0 <= x < 0.5)."
+    ),
+    max_prompt_length: Optional[int] = typer.Option(
+        None,
+        "--max-prompt-length",
+        help="DPO prompt token cap (preference plans only). Defaults to half the sequence window; "
+        "must be below --sequence-len so the response has room.",
+    ),
     dataset_format: str = typer.Option("instruction", "--dataset-format", help="Row format: instruction (Alpaca) or chat (messages)."),
     output_dir: Optional[str] = typer.Option(
         None,
@@ -1077,6 +1089,9 @@ def platform_plan(
         dataset_content_sha256=dataset_digest,
         task_type=task_type,
         objective_id=objective,
+        preference_beta=dpo_beta,
+        preference_label_smoothing=dpo_label_smoothing,
+        preference_max_prompt_length=max_prompt_length,
         dataset_format=dataset_format,
         output_dir=output_dir,
         sequence_len=sequence_len,

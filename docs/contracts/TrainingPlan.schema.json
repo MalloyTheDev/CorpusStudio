@@ -441,6 +441,28 @@
           "title": "Output Dir",
           "type": "string"
         },
+        "preference_beta": {
+          "default": 0.1,
+          "title": "Preference Beta",
+          "type": "number"
+        },
+        "preference_label_smoothing": {
+          "default": 0.0,
+          "title": "Preference Label Smoothing",
+          "type": "number"
+        },
+        "preference_max_prompt_length": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Preference Max Prompt Length"
+        },
         "seed": {
           "default": 42,
           "title": "Seed",

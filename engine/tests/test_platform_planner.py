@@ -461,6 +461,36 @@ def test_preference_dpo_resolves_to_a_sealed_config_and_the_runner_refuses_it_at
         TrainingRunner(cpu_toy=False)._resolve_config(plan, "run-x")  # defense-in-depth
 
 
+def test_preference_resolver_threads_the_dpo_knobs():
+    # beta / label_smoothing / max_prompt_length are operator knobs, not fixed defaults - they flow from
+    # PlannerConstraints into the sealed preference config.
+    plan = _plan(
+        _profile(cc_major=8), _report(), task_type="preference", objective_id="dpo_qlora",
+        preference_beta=0.3, preference_label_smoothing=0.2, preference_max_prompt_length=1234)
+    pref = plan.resolved_preference_execution
+    assert pref.preference.beta == 0.3 and pref.preference.label_smoothing == 0.2
+    assert pref.data.max_prompt_length == 1234
+    # unset -> documented defaults (half the window for the prompt cap)
+    dpref = _plan(
+        _profile(cc_major=8), _report(), task_type="preference", objective_id="dpo_qlora"
+    ).resolved_preference_execution
+    assert dpref.preference.beta == 0.1 and dpref.preference.label_smoothing == 0.0
+    assert dpref.data.max_prompt_length == dpref.data.max_length // 2
+
+
+def test_preference_resolver_rejects_invalid_dpo_knobs():
+    # Fail-closed on out-of-range / non-finite knobs (a clean PlannerError, never a silent clamp).
+    base = dict(task_type="preference", objective_id="dpo_qlora")
+    for bad_beta in (0.0, -1.0, float("inf"), float("nan")):
+        with pytest.raises(PlannerError, match="preference_beta"):
+            _plan(_profile(cc_major=8), _report(), **base, preference_beta=bad_beta)
+    with pytest.raises(PlannerError, match="label_smoothing"):
+        _plan(_profile(cc_major=8), _report(), **base, preference_label_smoothing=0.5)
+    for bad_cap in (0, -5, 999999):  # < 1 or >= the sequence window
+        with pytest.raises(PlannerError, match="max_prompt_length"):
+            _plan(_profile(cc_major=8), _report(), **base, preference_max_prompt_length=bad_cap)
+
+
 def test_preference_resolver_refuses_an_incompatible_project_local_schema(monkeypatch):
     # A project-local 'preference' schema that makes a required pair field optional (or retypes it) is
     # rejected - the sealed chosen_rejected formatter needs prompt/chosen/rejected as required text.
