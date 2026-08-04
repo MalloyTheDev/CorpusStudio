@@ -2565,7 +2565,10 @@ def sequence_chunked_logprob(
     from torch.utils.checkpoint import checkpoint  # noqa: PLC0415
 
     def _chunk(h: Any, lab: Any, weight: Any) -> Any:
-        logp = F.log_softmax((h @ weight.t()).float(), dim=-1)
+        # Align to the head's device: under a device_map the final block and the output head can sit on
+        # different devices, so a raw h @ weight would fail. Score there, return to the accumulator device.
+        logp = F.log_softmax((h.to(weight.device) @ weight.t()).float(), dim=-1)
+        lab = lab.to(weight.device)
         token_logp = logp.gather(-1, lab.clamp(min=0).unsqueeze(-1)).squeeze(-1)
         return (token_logp * (lab != -100)).sum()
 
@@ -2574,7 +2577,7 @@ def sequence_chunked_logprob(
         total = total + checkpoint(
             _chunk, hidden[start : start + chunk_size], labels[start : start + chunk_size],
             lm_head_weight, use_reentrant=False,
-        )
+        ).to(total.device)
     if average_log_prob:
         return total / (labels != -100).sum().clamp(min=1).float()
     return total
@@ -2803,22 +2806,39 @@ def disable_dropout(model: Any) -> int:
 
 
 def _encode_preference_branch(
-    tokenizer: Any, prompt: str, response: str, seq_len: int
+    tokenizer: Any,
+    prompt: str,
+    response: str,
+    seq_len: int,
+    *,
+    max_prompt_length: int | None = None,
+    score_eos: bool = True,
 ) -> tuple[list[int], list[int], int]:
     """Encode one preference branch IDENTICALLY for training and held-out eval (so policy and reference
-    see the exact same tokenization/template): prompt tokens masked to -100, the response plus EOS scored,
+    see the exact same tokenization/template): prompt tokens masked to -100, the response scored,
     right-truncated then right-padded to ``seq_len``. Returns ``(input_ids, labels, content_len)`` - the
     content length (pre-pad) drives an explicit attention mask, so a tokenizer whose pad token equals its
     EOS token never masks the response's real trailing EOS. Fails closed on a missing EOS/pad id rather
-    than silently appending ``None``."""
+    than silently appending ``None``.
+
+    ``max_prompt_length`` left-truncates the prompt (keeping the most recent tokens) to honor the sealed
+    cap. ``score_eos`` controls whether the appended EOS is a loss-bearing label: the sealed ``dpo_qlora``
+    mask sets ``include_special_tokens=False``, so the worker passes ``score_eos=False`` and the EOS is
+    appended (well-formed sequence) but labeled ``-100`` - the primitive must not silently score a special
+    token the sealed objective excludes."""
     if tokenizer.eos_token_id is None:
         raise TrainerError("preference encoding requires the tokenizer to define an eos_token_id")
     if tokenizer.pad_token_id is None:
         raise TrainerError("preference encoding requires a pad_token_id (set tokenizer.pad_token = eos)")
     prompt_ids = tokenizer(prompt, add_special_tokens=False)["input_ids"]
-    response_ids = tokenizer(response, add_special_tokens=False)["input_ids"] + [tokenizer.eos_token_id]
+    if max_prompt_length is not None and len(prompt_ids) > max_prompt_length:
+        prompt_ids = prompt_ids[-max_prompt_length:]  # left-truncate: keep the most recent prompt context
+    response_body = tokenizer(response, add_special_tokens=False)["input_ids"]
+    response_ids = response_body + [tokenizer.eos_token_id]
+    # The EOS is always in the input (well-formed), but only scored when the sealed mask includes it.
+    response_labels = response_body + ([tokenizer.eos_token_id] if score_eos else [-100])
     ids = (prompt_ids + response_ids)[:seq_len]
-    labels = ([-100] * len(prompt_ids) + response_ids)[:seq_len]
+    labels = ([-100] * len(prompt_ids) + response_labels)[:seq_len]
     content_len = len(ids)
     labels = labels + [-100] * (seq_len - len(labels))
     ids = ids + [tokenizer.pad_token_id] * (seq_len - len(ids))
@@ -2865,6 +2885,8 @@ def run_dpo_training(  # pragma: no cover - optional training-stack integration 
     gradient_accumulation_steps: int = 1,
     pairs_per_microbatch: int = 1,
     max_prompt_length: int | None = None,
+    score_response_eos: bool = True,
+    gradient_checkpointing: bool = True,
     optimizer: Any = None,
     checkpoint_callback: Callable[[int], None] | None = None,
     checkpoint_every: int = 0,
@@ -2881,10 +2903,12 @@ def run_dpo_training(  # pragma: no cover - optional training-stack integration 
     Sealed execution semantics are HONORED, not silently defaulted: ``beta`` / ``label_smoothing`` /
     ``gradient_accumulation_steps`` come from the plan, and the caller passes the sealed ``optimizer``
     (e.g. paged 8-bit AdamW) - only when it is ``None`` does this build a plain AdamW as a dev convenience.
-    Each optimizer step accumulates ``gradient_accumulation_steps`` preference microbatches. The sealed
-    checkpoint cadence is honored via ``checkpoint_callback`` (invoked with the completed optimizer-step
-    count every ``checkpoint_every`` steps) - the primitive does not own the atomic save; the worker wires
-    it to the checkpoint coordinator.
+    Each optimizer step accumulates ``gradient_accumulation_steps`` preference microbatches.
+    ``max_prompt_length`` / ``score_response_eos`` / ``gradient_checkpointing`` are threaded from the seal.
+    ``max_steps`` is CONCRETE: a sealed ``schedule.num_train_epochs`` is converted to steps by the worker
+    adapter (which knows the dataset size), not here. The sealed checkpoint cadence is honored via
+    ``checkpoint_callback`` (invoked with the completed optimizer-step count every ``checkpoint_every``
+    steps) - the primitive does not own the atomic save; the worker wires it to the checkpoint coordinator.
 
     Constraints this primitive REFUSES rather than silently violating: (1) a sealed
     ``batching.micro_batch_size > 1`` (``pairs_per_microbatch``) - the seq-4096 memory envelope processes
@@ -2951,8 +2975,9 @@ def run_dpo_training(  # pragma: no cover - optional training-stack integration 
     ledger = refuse_preference_truncation(lengths, seq_len, truncation_allowed=truncation_allowed)
 
     backbone, lm_head_weight = _causal_backbone_and_head(model)
-    backbone.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
-    model.enable_input_require_grads()
+    if gradient_checkpointing:  # honor the sealed switch - it changes recomputation + memory behavior
+        backbone.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
+        model.enable_input_require_grads()
     model.config.use_cache = False
     trainable = [p for p in model.parameters() if p.requires_grad]
     if not trainable:
@@ -2997,9 +3022,11 @@ def run_dpo_training(  # pragma: no cover - optional training-stack integration 
             row = pairs[pair_cursor % len(pairs)]
             pair_cursor += 1
             chosen_ids, chosen_labels, chosen_len = _encode_preference_branch(
-                tokenizer, row["prompt"], row["chosen"], seq_len)
+                tokenizer, row["prompt"], row["chosen"], seq_len,
+                max_prompt_length=max_prompt_length, score_eos=score_response_eos)
             rejected_ids, rejected_labels, rejected_len = _encode_preference_branch(
-                tokenizer, row["prompt"], row["rejected"], seq_len)
+                tokenizer, row["prompt"], row["rejected"], seq_len,
+                max_prompt_length=max_prompt_length, score_eos=score_response_eos)
             input_ids = torch.tensor([chosen_ids, rejected_ids], device=device)
             labels = torch.tensor([chosen_labels, rejected_labels], device=device)
             # Attention mask from the true content length, not pad-token equality: when pad == eos (common)
@@ -3079,6 +3106,7 @@ def evaluate_preference_accuracy(  # pragma: no cover - optional training-stack 
     label_smoothing: float = 0.0,
     average_log_prob: bool = True,
     max_prompt_length: int | None = None,
+    score_response_eos: bool = True,
     truncation_allowed: bool = False,
     stage_callback: StageCallback | None = None,
 ) -> dict[str, Any]:
@@ -3088,17 +3116,19 @@ def evaluate_preference_accuracy(  # pragma: no cover - optional training-stack 
     A falling TRAINING loss is never the promotion gate; a measured held-out preference accuracy is. Never
     mutates weights: eval mode (restored on exit), no optimizer, no backward - a pure measurement.
 
-    Fail-closes on held-out truncation AND the sealed ``max_prompt_length`` exactly like training: a
-    silently cut held-out pair would corrupt the very metric the gate is measured on."""
+    Fail-closes on degenerate pairs, held-out truncation, AND the sealed ``max_prompt_length`` exactly
+    like training: a degenerate or silently cut held-out pair would corrupt the very metric the gate is
+    measured on."""
     import torch  # noqa: PLC0415
 
     def _stage(name: str, message: str) -> None:
         if stage_callback is not None:
             stage_callback(name, message)
 
-    # Same no-silent-truncation + prompt-length guards as training - the gate metric must not be measured
-    # on cut pairs.
+    # Same degenerate-pair + no-silent-truncation + prompt-length guards as training - the gate metric
+    # must not be measured on malformed or cut pairs.
     if pairs:
+        refuse_degenerate_preference_pairs(pairs)
         eval_lengths = [
             PreferencePairTokens(
                 prompt_tokens=len(tokenizer(p["prompt"], add_special_tokens=False)["input_ids"]),
@@ -3118,7 +3148,11 @@ def evaluate_preference_accuracy(  # pragma: no cover - optional training-stack 
 
     backbone, lm_head_weight = _causal_backbone_and_head(model)
     was_training = model.training
+    prior_use_cache = getattr(model.config, "use_cache", None)
     model.eval()  # eval() already neutralizes dropout for the forward without mutating its probabilities
+    # Disable KV caching for the scoring forwards: a fresh model defaults use_cache=True, which would
+    # materialize a full KV cache for both branches at seq_len (wasted memory on a standalone eval).
+    model.config.use_cache = False
     device = next(model.parameters()).device
     margins: list[float] = []
     losses: list[float] = []
@@ -3128,9 +3162,11 @@ def evaluate_preference_accuracy(  # pragma: no cover - optional training-stack 
         with torch.no_grad():
             for row in pairs:
                 chosen_ids, chosen_labels, chosen_len = _encode_preference_branch(
-                    tokenizer, row["prompt"], row["chosen"], seq_len)
+                    tokenizer, row["prompt"], row["chosen"], seq_len,
+                    max_prompt_length=max_prompt_length, score_eos=score_response_eos)
                 rejected_ids, rejected_labels, rejected_len = _encode_preference_branch(
-                    tokenizer, row["prompt"], row["rejected"], seq_len)
+                    tokenizer, row["prompt"], row["rejected"], seq_len,
+                    max_prompt_length=max_prompt_length, score_eos=score_response_eos)
                 input_ids = torch.tensor([chosen_ids, rejected_ids], device=device)
                 labels = torch.tensor([chosen_labels, rejected_labels], device=device)
                 attention_mask = torch.zeros_like(input_ids)
@@ -3161,6 +3197,8 @@ def evaluate_preference_accuracy(  # pragma: no cover - optional training-stack 
     finally:
         if was_training:
             model.train()
+        if prior_use_cache is not None:
+            model.config.use_cache = prior_use_cache
     n = len(pairs)
     return {
         "n": n,

@@ -467,6 +467,29 @@ def test_preference_pair_integrity_flags_empty_prompt():
         refuse_degenerate_preference_pairs([{"prompt": "", "chosen": "a", "rejected": "b"}])
 
 
+def test_encode_preference_branch_honors_prompt_cap_and_eos_masking():
+    from corpus_studio.training.trainer import _encode_preference_branch
+
+    class _Tok:
+        eos_token_id = 99
+        pad_token_id = 0
+
+        def __call__(self, text, add_special_tokens=False):
+            return {"input_ids": list(range(1, len(text.split()) + 1))}
+
+    tok = _Tok()
+    ids, labels, clen = _encode_preference_branch(tok, "a b c", "x y", seq_len=10)
+    assert clen == 6  # 3 prompt + 2 response + eos
+    assert labels[:3] == [-100, -100, -100]  # prompt masked
+    assert ids[5] == 99 and labels[5] == 99  # eos scored by default
+    # score_eos=False -> eos still in ids (well-formed) but masked in labels (sealed include_special=False)
+    ids2, labels2, _ = _encode_preference_branch(tok, "a b c", "x y", seq_len=10, score_eos=False)
+    assert ids2[5] == 99 and labels2[5] == -100
+    # max_prompt_length left-truncates the prompt, keeping the most recent tokens
+    ids3, labels3, clen3 = _encode_preference_branch(tok, "a b c", "x y", seq_len=10, max_prompt_length=2)
+    assert clen3 == 5 and ids3[:2] == [2, 3] and labels3[:2] == [-100, -100]
+
+
 def test_causal_backbone_and_head_resolves_layouts_and_fails_closed():
     from corpus_studio.training.trainer import _causal_backbone_and_head
 
