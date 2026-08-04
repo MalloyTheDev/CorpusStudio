@@ -1,5 +1,34 @@
 # CorpusStudio — Session Handoff
 
+**Last updated:** 2026-08-04 - the **offline DPO / preference-optimization vertical (S1 + S2)** is built
+out, and the **hardened DPO worker is GPU-validated**. Merged to `main` this session: **S1** fail-closed
+execution-variant admission wired into planning (#775), **S2a** the `PreferenceDataPolicy` data contract
+(#778), **S2b-2 control-plane** the coherent DPO slice - adaptation-parametric preference objectives +
+`dpo_qlora` + objective-aware admission + `RunPlan.resolved_preference_execution` (#779), the **S0-S9
+training-harness roadmap** restructure (#780), the **DPO resolver** - admit-at-planning -> seal a
+`ResolvedPreferenceExecutionConfiguration` -> refuse-at-execution, closing the 3 deferred #779 findings
+(#782), and the **DPO hyperparameter knobs** on the planner + CLI (`--dpo-beta`/`--dpo-label-smoothing`/
+`--max-prompt-length`, fail-closed validation) (#783). A user can now `platform-plan --task-type
+preference --objective dpo_qlora --sequence-len 4096 --dpo-beta ...` and get a fully-sealed, correct,
+configurable DPO plan.
+
+**The DPO WORKER (#781, feat/s2b2-dpo-worker) is pushed + CI-green + GPU-VALIDATED but UNMERGED (retained-
+human).** Its headline is a real latent-bug fix: the sequence-chunked log-prob was missing the causal
+next-token shift (each response token scored from a hidden state that had already ingested it - a leaked/
+misaligned objective), sealed in `preference_response_logprob`; plus dropout-off, fail-closed
+pair-integrity, bias-free-LoRA + reference-correctness guards, held-out-eval promotion gate, and honoring
+every sealed knob (optimizer/label-smoothing/grad-accum/micro-batch/checkpoint-cadence/EOS-mask). **GPU
+validation (2026-08-04, EXPLORATORY/product - a direct primitive call, NOT a sealed platform-run):**
+Qwen3-4B nf4 + LoRA, 12 WBG pairs, seq 4096, RTX 5070 -> textbook DPO curve loss 0.6931(=log2)->0.28
+monotonic, implicit reward margin 0->11.2 (SANE, versus the pre-shift-fix prototype's exploded ~1150),
+**peak 9.49 GiB**, held-out ranking accuracy **1.0**. This validates the whole #781 correctness effort on
+hardware; it does NOT flip `preference_dpo` to `workload_verified`. **Remaining for the SEALED DPO
+promotion (retained-human GPU/wheel):** a config->args worker adapter (sealed `ResolvedPreferenceExecution
+Configuration` -> `run_dpo_training` kwargs, wired into the runner) + build/pin the DPO worker wheel + a
+sealed `platform-run` at seq 4096 + promote `preference_dpo` -> `workload_verified` in
+`reference_execution_variants()`. Also still open + retained-human: **#774** checkpoint/resume Phase B
+(v9->v10 wheel + a measured GPU resume). Nothing this session changes the sealed IEEE ladder.
+
 **Last updated:** 2026-07-31 - a broad **control-plane hardening sweep** landed on top of the 2026-07-30
 v9 state: an enforced assurance-tier boundary (standard / verified / sealed_research), a fail-closed
 backend-tuple resolver wired into the TrainingPlan pre-check with the thin framework/orchestrator
@@ -396,6 +425,34 @@ regeneration drift checks) and Python CodeQL.
   flagged per role — the reason this migration off F: happened.
 
 ## 7. Immediate next actions (ranked)
+
+> **2026-08-04 update - the DPO / preference vertical is built + GPU-validated; the sealing is the gate.**
+> This session shipped S1 admission (#775) + the whole S2 DPO control plane (#778 data policy, #779
+> objective+admission+config, #782 resolver, #783 knobs, all MERGED) and the S0-S9 roadmap (#780), and
+> GPU-validated the hardened DPO worker (#781, unmerged). Ranked next work:
+> 1. **[retained-human GPU/wheel] SEAL the DPO promotion.** The worker is GPU-validated (correct curve,
+>    seq 4096, peak 9.49 GiB, held-out 1.0 - EXPLORATORY, a direct `run_dpo_training` call). To make
+>    `preference_dpo` executable + `workload_verified`: (a) a config->args adapter mapping a sealed
+>    `ResolvedPreferenceExecutionConfiguration` -> `run_dpo_training` kwargs, wired into the runner's DPO
+>    execution path; (b) build/pin the DPO worker wheel from #781's `trainer.py` + seal an env; (c) a
+>    sealed `platform-run` at seq 4096; (d) bump `preference_dpo` -> `workload_verified` in
+>    `reference_execution_variants()` so the S1 admission gate auto-allows execution. Part (a) is mostly
+>    control-plane and can be prepped on the #781 branch (which has both the config contract via rebase
+>    and `run_dpo_training`); (b)-(d) are the retained-human hardware/wheel steps.
+> 2. **[retained-human GPU/wheel] Checkpoint/resume Phase B/C (#774, open).** v9->v10 wheel rebuild + a
+>    measured GPU run that checkpoints and bitwise-resumes; the control-plane `admit_resume` /
+>    `verify_resumable_into` / `checkpoint-verify` machinery already exists.
+> 3. **[control-plane, self-mergeable] Next S-series slices** per `docs/TRAINING_HARNESS_EXPANSION.md`:
+>    S2b preference family (IPO/KTO/ORPO - each its OWN objective, an `UnpairedPreferenceDataPolicy` for
+>    KTO), or S0 the objective-worker lifecycle kernel (extract the enforced Protocol + shared safety
+>    helpers). Note: every DPO-config PR drew a Codex round of INPUT-VALIDATION P2s (no-silent-clamp /
+>    reject-non-finite / normalize-to-PlannerError) - build fail-closed validation in from the start.
+> 4. The 2026-07-31 items below (eval-artifact linkage S4c, preset expansion G7, web client #513) still
+>    stand.
+>
+> Managed GPU env: `backend-corpus-studio` (torch 2.11.0+cu128) ALREADY EXISTS at
+> `.../environment-manager/environments/backend-corpus-studio/` - no recreation needed for an exploratory
+> run. The DPO validation script is `scratchpad/validate_hardened_dpo.py`.
 
 > **2026-07-31 update - control-plane hardening sweep (assurance / eval-publish / training-systems).**
 > A broad run of clean, CI-green, self-merged control-plane slices landed on top of the 2026-07-30 state:
