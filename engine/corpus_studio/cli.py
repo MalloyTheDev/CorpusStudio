@@ -544,6 +544,12 @@ def platform_run(
         "--telemetry-interval-ms",
         help="[--telemetry] Requested sampler cadence in milliseconds (observed cadence is measured).",
     ),
+    resume_from: Optional[Path] = typer.Option(
+        None,
+        "--resume-from",
+        help="Resume from a sealed checkpoint directory: restore its exact lineage and continue "
+        "training in a fresh run. A tampered or incompatible checkpoint fails closed.",
+    ),
 ):
     """Execute a RunPlan through the headless run supervisor: stream RunEvents to stderr and produce
     a RunManifest on stdout. 'echo' is a dependency-light no-op that proves the supervisor without a
@@ -594,6 +600,30 @@ def platform_run(
         except ExecutionConfigurationError as exc:
             typer.echo(str(exc), err=True)
             raise typer.Exit(2) from exc
+
+    resume_request = None
+    if resume_from is not None:
+        if runner_name not in ("cpu_toy", "training"):
+            typer.echo(
+                "--resume-from applies only to a training run (--runner cpu_toy|training).", err=True
+            )
+            raise typer.Exit(2)
+        # Sealed-configuration resume is now supported: the execution-evidence tracker offsets for the
+        # resumed-from step and a resumed run records its lineage, validated end to end on a sealed 7B
+        # checkpoint->resume through the v10 worker wheel (Phase C). A resume needs a v10+ worker.
+        from corpus_studio.platform.checkpoint import CheckpointError, load_checkpoint_manifest
+        from corpus_studio.platform.contracts import CheckpointResumeRequest
+
+        try:
+            resume_manifest = load_checkpoint_manifest(resume_from)
+        except (CheckpointError, OSError, ValueError) as exc:
+            typer.echo(f"Invalid resume checkpoint: {exc}", err=True)
+            raise typer.Exit(2) from exc
+        resume_request = CheckpointResumeRequest(
+            checkpoint_id=resume_manifest.checkpoint_id,
+            checkpoint_manifest_hash=resume_manifest.checkpoint_manifest_hash,
+            checkpoint_dir=str(resume_from),
+        )
 
     managed_worker_argv = None
     telemetry_identity_overlay = None
@@ -703,6 +733,7 @@ def platform_run(
                 out_dir=out_dir,
                 worker_argv=managed_worker_argv,
                 telemetry=sampler,
+                resume=resume_request,
             )
         else:
             if runner_name == "echo":
@@ -712,7 +743,12 @@ def platform_run(
 
                 runner = TrainingRunner(cpu_toy=(runner_name == "cpu_toy"), max_steps=max_steps)
             result = execute_run(
-                plan, runner, run_id=run_identity, out_dir=out_dir, telemetry=sampler
+                plan,
+                runner,
+                run_id=run_identity,
+                out_dir=out_dir,
+                telemetry=sampler,
+                resume=resume_request,
             )
     finally:
         managed_lease.close()
@@ -942,6 +978,19 @@ def platform_plan(
         "weight/gradient/optimizer-state VRAM - the lever for long-sequence runs that are at the "
         "card's memory edge.",
     ),
+    checkpoint_cadence: Optional[int] = typer.Option(
+        None,
+        "--checkpoint-cadence",
+        min=1,
+        help="Seal an exact-lineage checkpoint every N optimizer steps (enables checkpointing). "
+        "Omit for a checkpoint-free run.",
+    ),
+    checkpoint_keep_last: Optional[int] = typer.Option(
+        None,
+        "--checkpoint-keep-last",
+        min=1,
+        help="Keep only the most recent N checkpoints (requires --checkpoint-cadence).",
+    ),
     lora_alpha: int = typer.Option(
         32, "--lora-alpha", min=1, help="LoRA alpha sealed into the plan (convention: 2*r)."
     ),
@@ -1100,6 +1149,8 @@ def platform_plan(
         micro_batch_size=micro_batch_size,
         lora_r=lora_r,
         lora_alpha=lora_alpha,
+        checkpoint_steps=checkpoint_cadence,
+        checkpoint_keep_last=checkpoint_keep_last,
         gradient_accumulation_steps=gradient_accumulation_steps,
         truncation_allowed=allow_truncation,
         chat_template_sha256=chat_template_sha256,

@@ -848,13 +848,22 @@ def test_resolved_execution_rejects_a_no_truncation_config_that_permits_truncati
         type(execution).model_validate(body)
 
 
-@pytest.mark.parametrize(
-    "checkpoint_overrides",
-    [{"checkpoint_steps": 50}, {"checkpoint_keep_last": 3}],
-)
-def test_planner_refuses_checkpoint_requests_without_resume_lineage(checkpoint_overrides):
-    with pytest.raises(PlannerError, match="resume compatibility and lineage"):
-        _plan(_profile(cc_major=8), _report(), **checkpoint_overrides)
+def test_planner_accepts_a_checkpoint_cadence():
+    # #486: a checkpoint cadence flows into a self-consistent checkpoint-enabled sealed plan (the
+    # CheckpointCoordinator writes an exact-lineage checkpoint every N steps; validated on a real
+    # cpu_toy SFTTrainer run).
+    plan = _plan(_profile(cc_major=8), _report(), checkpoint_steps=50, checkpoint_keep_last=3)
+    execution = plan.resolved_execution
+    assert execution is not None
+    assert execution.save_strategy == "steps"
+    assert execution.checkpoint_policy.cadence_optimizer_steps == 50
+    assert execution.checkpoint_policy.keep_last == 3
+
+
+def test_planner_refuses_retention_without_a_cadence():
+    # keep_last without a cadence is an inconsistent (disabled-but-retaining) policy - fail closed.
+    with pytest.raises(PlannerError, match="requires a checkpoint cadence"):
+        _plan(_profile(cc_major=8), _report(), checkpoint_keep_last=3)
 
 
 def test_invalid_optim_is_rejected():

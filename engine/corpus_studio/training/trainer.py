@@ -27,6 +27,7 @@ import json
 import math
 from numbers import Real
 import re
+import shutil
 import sys
 from pathlib import Path
 from typing import Any, Callable, Literal, cast
@@ -36,6 +37,8 @@ from pydantic import BaseModel, Field, model_validator
 from corpus_studio.importers.jsonl_importer import read_jsonl, read_jsonl_bytes
 from corpus_studio.platform.contracts import (
     AdapterExportStateEvidence,
+    CheckpointBoundIdentities,
+    CheckpointResumeRequest,
     GradientCoverageEvidence,
     OptimizerStepLossEvidence,
     TrainableStateChangeEvidence,
@@ -307,22 +310,6 @@ class TrainResult(BaseModel):
     checkpoints: list[str] = Field(default_factory=list)
     execution_evidence: TrainingExecutionEvidence | None = None
 
-
-def _require_checkpoint_free_execution(config: TrainRunConfig) -> None:
-    """Refuse every intermediate-checkpoint spelling on the in-process SFTTrainer path, including
-    unvalidated model copies. The SFTTrainer body stays checkpoint-free; exact-lineage checkpoint
-    writing/resume runs through :mod:`corpus_studio.training.checkpoint_io` (the reviewed engine proven
-    by the real-torch fresh-process equivalence test), which a long run binds on first authorization."""
-
-    if (
-        config.save_strategy != "no"
-        or config.save_steps is not None
-        or config.save_total_limit is not None
-    ):
-        raise TrainerError(
-            "intermediate checkpoints on the SFTTrainer path are unsupported; exact-lineage "
-            "checkpointing runs through corpus_studio.training.checkpoint_io"
-        )
 
 
 @dataclass(frozen=True)
@@ -830,16 +817,27 @@ def build_model_load_kwargs(
         if bitsandbytes_config_cls is None:
             raise TrainerError("quantized execution requires BitsAndBytesConfig")
         quantization_mode = config.quantization_mode or "nf4"
-        if quantization_mode != "nf4":
-            raise TrainerError(
-                f"the first-party resolved executor does not implement {quantization_mode!r} weights"
+        if quantization_mode == "int8":
+            # 8-bit (bitsandbytes LLM.int8()): a lighter-quantized frozen base than 4-bit. Pin the
+            # non-quantized modules (embeddings, norms, lm_head) to the requested compute dtype so they
+            # do not silently run at the model-default fp32 while the config declares a lower precision -
+            # mirrors the 4-bit path's bnb_4bit_compute_dtype.
+            kwargs["quantization_config"] = bitsandbytes_config_cls(load_in_8bit=True)
+            kwargs["torch_dtype"] = _torch_dtype(
+                torch_module, config.dequantization_dtype or config.weight_storage_dtype or "bf16"
             )
-        kwargs["quantization_config"] = bitsandbytes_config_cls(
-            load_in_4bit=True,
-            bnb_4bit_quant_type=quantization_mode,
-            bnb_4bit_compute_dtype=_torch_dtype(torch_module, config.dequantization_dtype),
-            bnb_4bit_use_double_quant=config.bnb_4bit_use_double_quant,
-        )
+        elif quantization_mode in ("nf4", "fp4"):
+            kwargs["quantization_config"] = bitsandbytes_config_cls(
+                load_in_4bit=True,
+                bnb_4bit_quant_type=quantization_mode,
+                bnb_4bit_compute_dtype=_torch_dtype(torch_module, config.dequantization_dtype),
+                bnb_4bit_use_double_quant=config.bnb_4bit_use_double_quant,
+            )
+        else:
+            raise TrainerError(
+                f"the first-party executor implements 4-bit (nf4/fp4) and 8-bit (int8) quantized "
+                f"weights, not {quantization_mode!r}"
+            )
     else:
         kwargs["torch_dtype"] = _torch_dtype(
             torch_module,
@@ -1800,14 +1798,20 @@ def verify_model_state_execution(
             f"trainable master-weight dtype deviation: observed {trainable_dtypes}, "
             f"expected {master_dtype}"
         )
-    if quantize:
+    if quantize and (config.quantization_mode or "nf4") == "int8":
+        # 8-bit (bitsandbytes LLM.int8()): verify the frozen base actually loaded as Linear8bitLt.
+        from bitsandbytes.nn import Linear8bitLt  # noqa: PLC0415
+
+        if not any(isinstance(module, Linear8bitLt) for module in model.modules()):
+            raise TrainerError("int8 execution loaded no Linear8bitLt modules")
+    elif quantize:
         if linear4bit_type is None:
             from bitsandbytes.nn import Linear4bit as BnbLinear4bit  # noqa: PLC0415
 
             linear4bit_type = BnbLinear4bit
         linear4bit = find_linear4bit_modules(model, linear4bit_type)
         if not linear4bit:
-            raise TrainerError("sealed NF4 execution loaded no Linear4bit modules")
+            raise TrainerError("4-bit execution loaded no Linear4bit modules")
         quant_types = {
             getattr(
                 getattr(getattr(module, "weight", None), "quant_state", None),
@@ -1817,7 +1821,7 @@ def verify_model_state_execution(
             or getattr(getattr(module, "weight", None), "quant_type", None)
             for module in linear4bit
         }
-        expected_quantization = config.quantization_mode
+        expected_quantization = config.quantization_mode or "nf4"
         if quant_types != {expected_quantization}:
             raise TrainerError(
                 f"quantized storage deviation: observed {quant_types}, "
@@ -1981,6 +1985,7 @@ class TrainingExecutionTracker:
         gradients: GradientObservationTracker,
         progress_callback: ProgressCallback | None,
         stage_callback: StageCallback | None,
+        resumed_from_step: int = 0,
     ) -> None:
         self.config = config
         self.torch_module = torch_module
@@ -1991,6 +1996,10 @@ class TrainingExecutionTracker:
         self.optimizer_parameter_ids: tuple[int, ...] = ()
         self.completed_steps: list[int] = []
         self.losses: dict[int, float] = {}
+        # A resumed run's first NEW optimizer step is ``resumed_from_step + 1`` (HF continues its
+        # global_step from the restored checkpoint), so the step-sequence + loss-coverage checks count
+        # from there. 0 for a from-scratch run leaves the original ``begin at 1`` behaviour unchanged.
+        self.resumed_from_step = resumed_from_step
 
     def _bound_optimizer_parameter_ids(
         self,
@@ -2083,7 +2092,7 @@ class TrainingExecutionTracker:
                 taxonomy=FailureTaxonomy.OPTIMIZER_FAILURE,
                 stage=StageMarker.optimizer_step,
             )
-        expected = len(self.completed_steps) + 1
+        expected = self.resumed_from_step + len(self.completed_steps) + 1
         if step != expected:
             raise TrainingEvidenceError(
                 f"optimizer-step sequence deviation: expected {expected}, observed {step}",
@@ -2144,7 +2153,7 @@ class TrainingExecutionTracker:
                 taxonomy=FailureTaxonomy.OPTIMIZER_FAILURE,
                 stage=StageMarker.optimizer_created,
             )
-        expected = list(range(1, steps + 1))
+        expected = list(range(self.resumed_from_step + 1, steps + 1))
         if self.completed_steps != expected:
             raise TrainingEvidenceError(
                 "completed optimizer-step evidence does not match trainer global_step",
@@ -2180,6 +2189,7 @@ class TrainingExecutionTracker:
             gradient_coverage=self.gradients.evidence(),
             optimizer_created=True,
             completed_optimizer_steps=steps,
+            resumed_from_step=self.resumed_from_step,
             step_losses=[
                 OptimizerStepLossEvidence(optimizer_step=step, loss=self.losses[step])
                 for step in expected
@@ -2323,8 +2333,9 @@ def expected_saved_adapter_config_sha256(model: Any, config: TrainRunConfig) -> 
 
 
 def build_training_kwargs(config: TrainRunConfig) -> dict[str, Any]:
-    """TRL ``SFTConfig`` kwargs from the run config, including the exact sealed save policy."""
-    _require_checkpoint_free_execution(config)
+    """TRL ``SFTConfig`` kwargs from the run config. The SFTConfig is ALWAYS HF-checkpoint-free
+    (``save_strategy="no"``): exact-lineage checkpoint writing is owned by the CheckpointCoordinator in
+    :func:`run_training`, never by SFTTrainer's own save, so the two never double-write."""
     kwargs: dict[str, Any] = {
         "output_dir": config.output_dir,
         "per_device_train_batch_size": config.micro_batch_size,
@@ -2342,7 +2353,15 @@ def build_training_kwargs(config: TrainRunConfig) -> dict[str, Any]:
         "logging_strategy": config.logging_strategy,
         "logging_steps": config.logging_steps,
         "logging_nan_inf_filter": config.logging_nan_inf_filter,
-        "save_strategy": config.save_strategy,
+        # Always HF-checkpoint-free; the CheckpointCoordinator owns exact-lineage checkpoint writing.
+        # NOTE (Phase-C seal reconciliation, Codex #D): the sealed `save_strategy` currently means the
+        # run's checkpoint POLICY ("steps" = the coordinator seals at a step cadence), while THIS is HF's
+        # own saver toggle - correctly "no" so HF and the coordinator never double-write. The two share a
+        # name but describe different layers. Reconciling them so the seal records the EFFECTIVE HF saver
+        # value (always "no") with the cadence living solely in `checkpoint_policy` is a planner/contract
+        # change carried by the Phase-C sealed-checkpoint slice; only the sealed path (which pins nf4) is
+        # affected, and it does not resume today.
+        "save_strategy": "no",
         "report_to": config.report_to,
         "dataset_text_field": config.dataset_text_field,
         "disable_tqdm": config.disable_tqdm,
@@ -2628,8 +2647,11 @@ def _prepare_training_texts(
 def resolve_run_plan(config: TrainRunConfig, report: Any) -> dict[str, Any]:
     """Decide device + quantization from the runtime report, or raise a clean :class:`TrainerError`.
 
-    CPU toy → CPU, no quantization (needs only ``cpu_toy_ready``). Real run → CUDA + 4-bit
-    (needs the full ``ready`` set: deps + GPU + bitsandbytes)."""
+    Quantization is precision-driven: ``quantization_mode == "none"`` (16-/32-bit LoRA on an
+    unquantized base) does not quantize, so it needs neither bitsandbytes nor the full ``ready`` set;
+    a quantized mode (nf4/fp4/int8) does. CPU toy → CPU, no quantization (needs only
+    ``cpu_toy_ready``). Real quantized run → CUDA + the full ``ready`` set (deps + GPU + bitsandbytes);
+    real unquantized run → CUDA + the CPU-toy dep set + a GPU (bitsandbytes not required)."""
     if config.cpu_toy:
         if not report.cpu_toy_ready:
             raise TrainerEnvironmentError(
@@ -2638,13 +2660,21 @@ def resolve_run_plan(config: TrainRunConfig, report: Any) -> dict[str, Any]:
             )
         return {"device": "cpu", "quantize": False}
 
-    if not report.ready:
+    quantize = config.quantization_mode != "none"
+    if quantize:
+        if not report.ready:
+            raise TrainerEnvironmentError(
+                "A quantized (4-bit/8-bit) GPU run needs the full [train] runtime + a CUDA GPU + "
+                f"bitsandbytes. Run 'corpus-studio train-check' to see what's missing. {INSTALL_HINT} "
+                "(or pass --cpu-toy to smoke-test the pipeline on CPU)."
+            )
+    elif not (report.cpu_toy_ready and report.gpu.available):
         raise TrainerEnvironmentError(
-            "A real QLoRA run needs the full [train] runtime + a CUDA GPU + bitsandbytes. "
-            f"Run 'corpus-studio train-check' to see what's missing. {INSTALL_HINT} "
-            "(or pass --cpu-toy to smoke-test the pipeline on CPU)."
+            "An unquantized (16-bit/32-bit) GPU run needs torch + transformers + peft + trl + "
+            "datasets + accelerate and a CUDA GPU. Run 'corpus-studio train-check' to see what's "
+            f"missing. {INSTALL_HINT} (or pass --cpu-toy to smoke-test the pipeline on CPU)."
         )
-    return {"device": "cuda", "quantize": True}
+    return {"device": "cuda", "quantize": quantize}
 
 
 # Blackwell (RTX 50-series) is sm_120 → compute-capability major 12. The fused FLASH SDPA backward
@@ -2698,6 +2728,10 @@ def run_training(  # pragma: no cover - optional training-stack integration
     progress_callback: ProgressCallback | None = None,
     stage_callback: StageCallback | None = None,
     token_callback: TokenCallback | None = None,
+    checkpoint_bound: CheckpointBoundIdentities | None = None,
+    source_run_id: str | None = None,
+    checkpoints_root: str | None = None,
+    resume: CheckpointResumeRequest | None = None,
 ) -> TrainResult:
     """Run the training. Lazy-imports the heavy stack; verified via the CPU toy path (a real GPU QLoRA
     can only be user-smoke-tested). Raises :class:`TrainerError` if the runtime can't run the request.
@@ -2711,8 +2745,17 @@ def run_training(  # pragma: no cover - optional training-stack integration
         if stage_callback is not None:
             stage_callback(name, message)
 
-    _require_checkpoint_free_execution(config)
-
+    checkpoint_policy = resolve_checkpoint_execution_policy(config)
+    if checkpoint_policy.enabled and (
+        checkpoint_bound is None or source_run_id is None or checkpoints_root is None
+    ):
+        # An unreachable control is not a control: a checkpoint-enabled run MUST have received the sealed
+        # bound identities + a source run id + a checkpoints root from the runner. Fail closed rather than
+        # silently run without writing the exact-lineage checkpoints the sealed policy requires.
+        raise TrainerError(
+            "a checkpoint-enabled run requires sealed checkpoint identities, a source run id, and a "
+            "checkpoints root; none may be derived inside the trainer"
+        )
     dataset_progress_bucket = 0
 
     def _dataset_progress(completed: int, total: int) -> None:
@@ -2943,6 +2986,13 @@ def run_training(  # pragma: no cover - optional training-stack integration
             use_gradient_checkpointing=config.gradient_checkpointing,
         )
         _stage("quantized", "prepared for 4-bit k-bit training")
+    elif config.gradient_checkpointing:
+        # Unquantized (16-/32-bit) LoRA: prepare_model_for_kbit_training does not run, so enable
+        # gradient checkpointing directly and make the frozen base pass gradients into the adapter
+        # (without enable_input_require_grads the checkpointed base yields no adapter gradient).
+        model.gradient_checkpointing_enable()
+        model.enable_input_require_grads()
+        _stage("unquantized", "enabled gradient checkpointing on the unquantized base")
     model = get_peft_model(model, LoraConfig(**build_lora_kwargs(config)))
     gradient_tracker = enforce_trainable_precision(model, torch, config)
     verify_model_state_execution(model, torch, config, quantize=quantize)
@@ -3056,14 +3106,122 @@ def run_training(  # pragma: no cover - optional training-stack integration
                 loss = float(logs["loss"])
                 progress_callback(step, total, loss)
 
+    # Exact-lineage checkpoint WRITING (#440/#486): when the sealed policy enables checkpointing, an
+    # on-step-end hook drives the reviewed CheckpointCoordinator - a sealed checkpoint every
+    # `cadence_optimizer_steps`, pruned to `keep_last`. A disabled policy attaches no callback, so a
+    # short run stays byte-identical to a no-checkpoint run. (Consuming a checkpoint to RESUME is a
+    # separate slice; this writes the checkpoints a `training-run-resume-prepare` can then admit.)
+    checkpoint_coordinator = None
+    if checkpoint_policy.enabled:
+        from datetime import datetime, timezone  # noqa: PLC0415
+
+        from corpus_studio.training.checkpoint_io import (  # noqa: PLC0415
+            CheckpointCoordinator,
+            capture_rng_state,
+        )
+
+        # All three were proven present at entry when the policy is enabled (fail-closed guard above).
+        assert checkpoint_bound is not None and source_run_id is not None and checkpoints_root is not None
+        checkpoint_coordinator = CheckpointCoordinator(
+            torch_module=torch,
+            checkpoints_root=checkpoints_root,
+            source_run_id=source_run_id,
+            bound=checkpoint_bound,
+            clock=lambda: datetime.now(timezone.utc).isoformat(),
+            cadence_optimizer_steps=checkpoint_policy.cadence_optimizer_steps,
+            keep_last=checkpoint_policy.keep_last,
+            # A resumed run's first checkpoint chains to the checkpoint it continued from, so the hash
+            # lineage crosses the resume boundary instead of restarting an orphan chain.
+            resume_parent=(
+                (resume.checkpoint_id, resume.checkpoint_manifest_hash) if resume is not None else None
+            ),
+        )
+
+    class _CheckpointCallback(TrainerCallback):  # type: ignore[misc]
+        """Writes a sealed exact-lineage checkpoint at the policy cadence. Observation-only w.r.t.
+        training: a checkpoint-write fault degrades to no checkpoint (logged to stderr) rather than
+        raising into the loop, so it can never alter the trajectory."""
+
+        def __init__(self) -> None:
+            # Exact cumulative microbatch count: HF fires on_substep_end for every non-boundary
+            # microbatch and on_step_end for the optimizer-step microbatch, so counting both is exact
+            # even when an epoch ends on a PARTIAL accumulation window - `global_step * grad_accum`
+            # overstates the consumed cursor there.
+            self._consumed_microsteps = 0
+            # The message of the first LOST checkpoint write, if any. A checkpoint-enabled run that
+            # dropped a required cadence write is not admissible as resumable (checked after training);
+            # kept here rather than raised so the write fault never alters the training trajectory.
+            self._write_failed: str | None = None
+
+        def on_substep_end(self, args: Any, state: Any, control: Any, **kwargs: Any) -> None:
+            self._consumed_microsteps += 1
+
+        def on_step_end(self, args: Any, state: Any, control: Any, **kwargs: Any) -> None:
+            self._consumed_microsteps += 1  # the optimizer-step microbatch (no on_substep_end fires)
+            if checkpoint_coordinator is None:
+                return
+            optimizer = kwargs.get("optimizer")
+            live_model = kwargs.get("model", model)
+            if optimizer is None:
+                return
+            # Seal HF's own TrainerState so a resume can round-trip it into the HF-layout checkpoint
+            # (best-effort metadata; a capture fault must not stop the checkpoint).
+            try:
+                import dataclasses  # noqa: PLC0415
+
+                hf_trainer_state: dict[str, Any] | None = dataclasses.asdict(state)
+            except Exception:  # noqa: BLE001
+                hf_trainer_state = None
+            try:
+                manifest = checkpoint_coordinator.maybe_checkpoint(
+                    global_optimizer_step=int(state.global_step),
+                    epoch=float(getattr(state, "epoch", 0.0) or 0.0),
+                    gradient_accumulation_steps=config.gradient_accumulation_steps,
+                    adapter_state=get_peft_model_state_dict(live_model),
+                    optimizer=optimizer,
+                    lr_scheduler=kwargs.get("lr_scheduler"),
+                    # include_numpy: HF's resume _load_rng_state requires a 'numpy' rng key.
+                    rng_state=capture_rng_state(torch, include_numpy=True),
+                    sampler_state={"consumed_optimizer_steps": int(state.global_step)},
+                    consumed_microsteps=self._consumed_microsteps,
+                    trainer_state=hf_trainer_state,
+                )
+                if manifest is not None:
+                    # Surface every sealed checkpoint in the run event stream so a long run's
+                    # resumability status is observable, not just inferable from disk.
+                    _stage(
+                        "checkpoint",
+                        f"sealed checkpoint {manifest.checkpoint_id} at optimizer step "
+                        f"{int(state.global_step)}",
+                    )
+            except Exception as exc:  # noqa: BLE001 - a checkpoint write must never break training.
+                # Surface the resumability loss in BOTH the run event stream AND captured stderr; never
+                # raise into the loop (a checkpoint fault must not alter the training trajectory). The
+                # lost write is remembered so terminal admission can fail a run that promised checkpoints.
+                if self._write_failed is None:
+                    self._write_failed = f"step {int(state.global_step)}: {exc}"
+                _stage(
+                    "checkpoint_warning",
+                    f"checkpoint write at optimizer step {int(state.global_step)} failed: {exc}",
+                )
+                print(
+                    f"[WARNING] checkpoint write at step {int(state.global_step)} failed: {exc}",
+                    file=sys.stderr,
+                )
+
     # The tokenizer arg was renamed `tokenizer` -> `processing_class`; pass it under whichever exists.
     import inspect  # noqa: PLC0415
 
+    callbacks: list[Any] = [_ProgressCallback()]
+    checkpoint_callback: Any = None
+    if checkpoint_coordinator is not None:
+        checkpoint_callback = _CheckpointCallback()
+        callbacks.append(checkpoint_callback)
     trainer_kwargs: dict[str, Any] = {
         "model": model,
         "args": sft_config,
         "train_dataset": dataset,
-        "callbacks": [_ProgressCallback()],
+        "callbacks": callbacks,
     }
     trainer_params = inspect.signature(SFTTrainer.__init__).parameters
     if config.execution_configuration_hash is not None:
@@ -3131,6 +3289,70 @@ def run_training(  # pragma: no cover - optional training-stack integration
         if execution_tracker is not None
         else None
     )
+    # Hybrid resume (#486): verify OUR sealed checkpoint (integrity + the exact pinned identity), then
+    # materialize an HF-layout checkpoint from the sealed files and let SFTTrainer's proven resume
+    # (optimizer / scheduler / RNG / data-cursor skip / step count) consume it. Verify-before-materialize:
+    # a tampered checkpoint fails closed and is never deserialized. Proven bitwise-faithful to HF's own.
+    resume_from_checkpoint: str | None = None
+    materialized_resume_dir: Path | None = None
+    if resume is not None:
+        from corpus_studio.platform.checkpoint import (  # noqa: PLC0415
+            verify_checkpoint_integrity,
+            verify_matches_request,
+        )
+        from corpus_studio.training.checkpoint_io import materialize_hf_checkpoint  # noqa: PLC0415
+
+        resume_manifest = verify_checkpoint_integrity(resume.checkpoint_dir)
+        verify_matches_request(resume_manifest, resume)
+        if execution_tracker is not None:
+            # A sealed resumed run's execution evidence counts from the resumed-from optimizer step: HF
+            # continues its global_step from the restored checkpoint, so the tracker's step-sequence +
+            # loss-coverage checks expect [resumed_from+1 .. schedule], not [1 .. new-steps].
+            execution_tracker.resumed_from_step = resume_manifest.state.global_optimizer_step
+        materialized_resume_dir = Path(config.output_dir).parent / "_resume_hf"
+        try:
+            resume_from_checkpoint = str(
+                materialize_hf_checkpoint(
+                    torch_module=torch,
+                    sealed_dir=resume.checkpoint_dir,
+                    hf_dir=materialized_resume_dir,
+                    peft_model=evidence_model,
+                )
+            )
+        except Exception:
+            # materialize_hf_checkpoint may create _resume_hf and copy the (large) optimizer state before
+            # rejecting an incomplete checkpoint (e.g. a missing scheduler). Do not leave that partial
+            # translation behind on the persistent run dir.
+            shutil.rmtree(materialized_resume_dir, ignore_errors=True)
+            materialized_resume_dir = None
+            raise
+        if execution_tracker is not None:
+            # Attribution (Codex #5): recapture the evidence 'before' snapshot from the RESTORED adapter,
+            # so the trainable/export deltas measure only THIS run's training - not the jump from the
+            # fresh pre-restore adapter to the parent's checkpoint. HF re-loads the same bytes inside
+            # train(); loading them into the evidence model here first makes the snapshot honest.
+            from peft import set_peft_model_state_dict  # noqa: PLC0415
+
+            from corpus_studio.training.checkpoint_io import ADAPTER_FILE  # noqa: PLC0415
+
+            sealed_adapter = torch.load(
+                str(Path(resume.checkpoint_dir) / ADAPTER_FILE), weights_only=False
+            )
+            set_peft_model_state_dict(evidence_model, sealed_adapter)
+            before_trainable_state = capture_trainable_state(
+                evidence_model, torch, stage=StageMarker.adapter_attached
+            )
+            before_export_state = capture_adapter_export_state(
+                get_peft_model_state_dict(evidence_model),
+                torch,
+                stage=StageMarker.adapter_attached,
+            )
+        _stage(
+            "resume",
+            f"resuming from checkpoint {resume.checkpoint_id} at optimizer step "
+            f"{resume_manifest.state.global_optimizer_step}",
+        )
+
     # Training frameworks print metrics/tqdm to STDOUT — and transformers can log to stdout during
     # SAVE too — so redirect the whole train+save block to stderr. Only the CLI's final JSON echo then
     # writes to stdout, keeping it the pure JSON result the desktop/WBG parses. Progress reaches stderr.
@@ -3138,10 +3360,30 @@ def run_training(  # pragma: no cover - optional training-stack integration
         torch,
         config,
     ):
-        train_output = trainer.train()
+        try:
+            train_output = trainer.train(resume_from_checkpoint=resume_from_checkpoint)
+        finally:
+            # The materialized HF checkpoint is only needed to seed SFTTrainer's restore; remove it once
+            # train() has consumed it (success or failure) so the persistent run dir does not accumulate
+            # a full translated checkpoint - the CheckpointCoordinator does not track it, so keep_last
+            # cannot prune it.
+            if materialized_resume_dir is not None:
+                shutil.rmtree(materialized_resume_dir, ignore_errors=True)
 
         steps = int(getattr(trainer.state, "global_step", 0) or 0)
         verify_completed_step_count(config, steps)
+        # A checkpoint-enabled run that LOST a required cadence write is not a clean success: the plan
+        # promised sealed checkpoints at this cadence and one was not published, so the run is not
+        # resumable as promised. Training itself completed (the callback never raised into the loop); the
+        # RUN fails terminal admission with a checkpoint taxonomy.
+        if checkpoint_callback is not None and checkpoint_callback._write_failed is not None:
+            raise TrainingEvidenceError(
+                "a required checkpoint write was lost during training "
+                f"({checkpoint_callback._write_failed}); the run is not admissible as resumable at the "
+                "sealed cadence",
+                taxonomy=FailureTaxonomy.CHECKPOINT_FAILURE,
+                stage=StageMarker.checkpoint,
+            )
         execution_evidence = None
         if execution_tracker is not None:
             if (
@@ -3175,7 +3417,14 @@ def run_training(  # pragma: no cover - optional training-stack integration
         try:
             trainer.save_model(str(output_dir))  # saves the LoRA adapter
             tokenizer.save_pretrained(str(output_dir))
-            checkpoints = _list_checkpoints(output_dir)
+            # Cadence checkpoints are written under the run-scoped checkpoints_root by the coordinator,
+            # not the adapter output dir; take the inventory from it so the run manifest records the
+            # checkpoints that were actually sealed (a glob of output_dir would report none).
+            checkpoints = (
+                [str(p) for p in checkpoint_coordinator.written_checkpoints]
+                if checkpoint_coordinator is not None
+                else _list_checkpoints(output_dir)
+            )
         except Exception as exc:  # noqa: BLE001 - normalize framework/filesystem export failures.
             raise TrainingEvidenceError(
                 f"final adapter serialization failed: {exc}",

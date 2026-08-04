@@ -32,10 +32,12 @@ from corpus_studio.platform.artifacts import build_artifact_manifest, write_arti
 from corpus_studio.platform.common import HashRef, MemoryMetrics, Ref, new_uuid7_id
 from corpus_studio.platform.contracts import (
     ArtifactManifest,
+    CheckpointResumeRequest,
     EventMetrics,
     FailureRecord,
     FitClassification,
     OptimizerStepLossEvidence,
+    ResumeLineage,
     RunEvent,
     RunManifest,
     RunPlan,
@@ -176,12 +178,16 @@ class RunContext:
         sink: RunEventSink,
         cancel: CancelToken,
         clock: Callable[[], str] = _now_iso,
+        resume: "CheckpointResumeRequest | None" = None,
     ) -> None:
         self.plan = plan
         self.run_id = run_id
         self._sink = sink
         self._cancel = cancel
         self._clock = clock
+        # The exact checkpoint to resume from, if this run was dispatched as a resume (#486). The runner
+        # verifies it and hands it to the first-party trainer; None is an ordinary fresh run.
+        self.resume = resume
         self._seq = 0
         # A runner may set the MEASURED fit (from the watchdog's observed peak) — the post-run
         # reconciliation of the calibrator's *predicted* fit. The supervisor records it on the manifest.
@@ -191,6 +197,9 @@ class RunContext:
         # only layer that may create TrainingSuccessEvidence or a proven native fit.
         self.measured_peak: MemoryMetrics | None = None
         self.training_execution_evidence: TrainingExecutionEvidence | None = None
+        # Run-scoped sealed checkpoints the trainer wrote (a checkpoint-enabled plan's inventory),
+        # surfaced onto the terminal manifest so a resumable run's checkpoints are recorded.
+        self.checkpoints: list[str] = []
 
     @property
     def cancelled(self) -> bool:
@@ -230,6 +239,11 @@ class RunContext:
 
     def emit_warning(self, message: str) -> RunEvent:
         return self._event("warning", message=message)
+
+    def emit_checkpoint_written(self, message: str) -> RunEvent:
+        # A sealed checkpoint is its own event type so a consumer can track resumability without
+        # pattern-matching stage messages; stage=checkpoint keeps it filterable either way.
+        return self._event("checkpoint_written", stage=StageMarker.checkpoint, message=message)
 
     def emit_artifact(self, artifact: ProducedArtifact) -> RunEvent:
         return self._event(
@@ -491,6 +505,7 @@ def execute_run(
     clock: Callable[[], str] = _now_iso,
     telemetry: TelemetryControl | None = None,
     warmup_steps: int = 2,
+    resume: CheckpointResumeRequest | None = None,
 ) -> SupervisedRun:
     """Execute ``plan`` through ``runner``, collecting the ``RunEvent`` stream and returning the
     terminal :class:`RunManifest`. Terminal classification is total: :class:`RunCancelled` →
@@ -500,10 +515,53 @@ def execute_run(
     is written atomically to ``<out_dir>/runs/<run_id>/RunManifest.json``. Events are appended to the
     returned list and, if ``sink`` is given, forwarded to it live."""
     rid = _sanitize_id(run_id or new_uuid7_id("run"))
+    # Resume admission (#486): a resumed run MUST mint a fresh id, never the parent's - otherwise it
+    # opens the PARENT's run-scoped record/artifact paths below and clobbers them. Read the parent
+    # checkpoint's identity up front so the fresh-id check + the recorded lineage are enforced even for a
+    # direct/protocol caller that reached this boundary without going through admit_resume. Integrity +
+    # compatibility stay the runner's/trainer's authority; here we only read identity for the check.
+    resume_lineage: ResumeLineage | None = None
+    resume_error: Exception | None = None
+    reuses_parent_id = False
+    if resume is not None:
+        from corpus_studio.platform.checkpoint import (  # noqa: PLC0415
+            CheckpointError,
+            load_checkpoint_manifest,
+        )
+
+        try:
+            parent_manifest = load_checkpoint_manifest(resume.checkpoint_dir)
+        except (CheckpointError, OSError) as exc:
+            # A manifest that verifies then vanishes (removed / permissions / I/O) between checks raises
+            # OSError, not CheckpointError; both defer to a failed manifest rather than an unclassified
+            # crash before the terminal classifier runs.
+            resume_error = exc
+        else:
+            if rid == parent_manifest.source_run_id:
+                reuses_parent_id = True
+                resume_error = CheckpointError(
+                    "a resumed run must mint a fresh run id, not reuse the parent source run id "
+                    f"{parent_manifest.source_run_id!r}",
+                    reason="ambiguous",
+                )
+            else:
+                resume_lineage = ResumeLineage(
+                    parent_run_id=parent_manifest.source_run_id,
+                    parent_checkpoint_id=parent_manifest.checkpoint_id,
+                    parent_checkpoint_hash=parent_manifest.checkpoint_manifest_hash,
+                    resumed_from_global_step=parent_manifest.state.global_optimizer_step,
+                )
     cancel = cancel or CancelToken()
     events: list[RunEvent] = []
     sink_errors: list[str] = []
-    record_dir = run_record_directory(out_dir, rid) if out_dir is not None else None
+    # Never open the record dir when the fresh-id check failed: that dir IS the parent's, and opening it
+    # (mkdir + events "w") would truncate the parent's record. A different resume error still uses the
+    # fresh rid, so its failed manifest can be written safely.
+    record_dir = (
+        run_record_directory(out_dir, rid)
+        if out_dir is not None and not reuses_parent_id
+        else None
+    )
     events_handle: Any = None
     if record_dir is not None:
         record_dir.mkdir(parents=True, exist_ok=True)
@@ -547,7 +605,7 @@ def execute_run(
                 if label not in sink_errors:
                     sink_errors.append(label)
 
-    ctx = RunContext(plan, rid, _collect, cancel, clock)
+    ctx = RunContext(plan, rid, _collect, cancel, clock, resume=resume)
     started = clock()
     plan_ref = Ref(id=plan.plan_id, hash=HashRef(value=plan.plan_hash))
 
@@ -559,6 +617,14 @@ def execute_run(
     training_success_evidence: TrainingSuccessEvidence | None = None
 
     try:
+        if resume_error is not None:
+            # A resume that failed admission above (unreadable parent manifest, or a fresh-id violation)
+            # fails closed here as an unsupported configuration - before any runner or dir work.
+            raise RunnerFailure(
+                f"resume is not admissible: {resume_error}",
+                taxonomy=FailureTaxonomy.UNSUPPORTED_CONFIGURATION,
+                stage=StageMarker.process_start,
+            ) from resume_error
         # Defense in depth: callers can reach this public library boundary without going through the
         # CLI or protocol worker. Never let a mutated plan reach a runner under its old seal.
         from corpus_studio.platform.planner import verify_run_plan_hash  # noqa: PLC0415
@@ -713,6 +779,10 @@ def execute_run(
         ),
         artifact_ids=artifact_ids,
         failure=failure,
+        checkpoints=ctx.checkpoints,
+        # A resumed run records the exact parent run + checkpoint it continued from - never a silent
+        # reuse of the parent identity. Present only when this execution resumed from a checkpoint.
+        resume_lineage=resume_lineage if state == "succeeded" else None,
         final_fit=ctx.final_fit,  # the MEASURED fit, when a runner captured one (via the watchdog)
         training_success_evidence=(
             training_success_evidence if state == "succeeded" else None

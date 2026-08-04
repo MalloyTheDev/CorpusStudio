@@ -891,6 +891,12 @@
           "title": "Optimizer Created",
           "type": "boolean"
         },
+        "resumed_from_step": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Resumed From Step",
+          "type": "integer"
+        },
         "step_losses": {
           "items": {
             "$ref": "#/$defs/OptimizerStepLossEvidence"

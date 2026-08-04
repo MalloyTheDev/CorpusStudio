@@ -99,6 +99,24 @@ def test_worker_rejects_a_well_formed_but_tampered_plan():
     assert "plan_hash" in msg["body"]["message"]
 
 
+def test_dispatch_line_carries_a_resume_request_when_present():
+    # #486: platform-run --resume-from reaches the worker through the run_dispatch body's `resume`
+    # field. A fresh (non-resume) dispatch omits the key entirely, so ordinary runs are unchanged.
+    from corpus_studio.platform.contracts import CheckpointResumeRequest
+
+    req = CheckpointResumeRequest(
+        checkpoint_id="run-parent01-ckpt-step-00000004",
+        checkpoint_manifest_hash="a" * 64,
+        checkpoint_dir="/some/checkpoint/dir",
+    )
+    with_resume = json.loads(_dispatch_line(_PLAN, "run-child", 30, req))["body"]
+    assert with_resume["resume"]["checkpoint_id"] == "run-parent01-ckpt-step-00000004"
+    assert with_resume["resume"]["checkpoint_manifest_hash"] == "a" * 64
+    assert with_resume["resume"]["checkpoint_dir"] == "/some/checkpoint/dir"
+    fresh = json.loads(_dispatch_line(_PLAN, "run-child", 30))["body"]
+    assert "resume" not in fresh
+
+
 def test_worker_events_survive_a_trainer_stdout_redirect(monkeypatch):
     # The real trainer wraps trainer.train() in redirect_stdout(sys.stderr). The protocol channel IS
     # stdout, so if the per-step sink looked up sys.stdout AT CALL TIME it would land on stderr during

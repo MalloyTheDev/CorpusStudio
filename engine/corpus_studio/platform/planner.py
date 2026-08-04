@@ -1336,18 +1336,20 @@ def build_run_plan(
         "supervised_token_accumulation_target": token_target,
         "fallback_grad_accumulation_steps": constraints.gradient_accumulation_steps,
     }
-    if (
-        constraints.checkpoint_steps is not None
-        or constraints.checkpoint_keep_last is not None
-    ):
+    # Exact-lineage checkpoint writing (#440/#486): a checkpoint cadence flows into the sealed policy;
+    # the CheckpointCoordinator writes a verifiable checkpoint every `checkpoint_steps` and keeps
+    # `checkpoint_keep_last`. `save_strategy` below becomes "steps" so the sealed contract stays
+    # self-consistent. A None cadence is the unchanged checkpoint-free policy.
+    checkpoint_enabled = constraints.checkpoint_steps is not None
+    if constraints.checkpoint_keep_last is not None and not checkpoint_enabled:
         raise PlannerError(
-            "the first-party sealed runner cannot write intermediate checkpoints until exact "
-            "resume compatibility and lineage are implemented"
+            "checkpoint retention (checkpoint_keep_last) requires a checkpoint cadence "
+            "(checkpoint_steps)"
         )
     checkpoint_policy = {
         "impl": checkpoint_impl,
-        "cadence_optimizer_steps": None,
-        "keep_last": None,
+        "cadence_optimizer_steps": constraints.checkpoint_steps,
+        "keep_last": constraints.checkpoint_keep_last,
         "reload_verify": False,
     }
     schedule = TrainingSchedule(
@@ -1458,6 +1460,10 @@ def build_run_plan(
                     "objective_ref": objective_ref.model_dump(mode="json"),
                     "loss_impl": loss_impl,
                     "data": data_policy.model_dump(mode="json"),
+                    # #486/#440 checkpoint writing is an SFT-worker capability: flip save_strategy to
+                    # "steps" only on this SFT seal (shared_fields keeps "no", so the DPO seal - which
+                    # has no checkpoint worker - stays byte-identical to its no-checkpoint baseline).
+                    "save_strategy": "steps" if checkpoint_enabled else "no",
                 }
             )
         except ValidationError as exc:

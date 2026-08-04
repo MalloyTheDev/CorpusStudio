@@ -22,7 +22,7 @@ import re
 import sys
 import time
 from collections.abc import Callable, Sequence
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from pydantic import ValidationError
 
@@ -339,6 +339,17 @@ class TrainingRunner:
             # the subprocess supervisor's silence timer. Real progress, not a liveness heartbeat.
             watchdog.beat()
             nonlocal last_stage
+            if name == "checkpoint":
+                # A sealed checkpoint write -> the typed checkpoint_written event, not a generic stage,
+                # so a consumer tracking resumability need not pattern-match stage messages.
+                last_stage = StageMarker.checkpoint
+                ctx.emit_checkpoint_written(message)
+                return
+            if name == "checkpoint_warning":
+                # A best-effort checkpoint write failed (training continues) -> a real warning event,
+                # not an "unrecognized progress stage" log that reads like a trainer typo.
+                ctx.emit_warning(message)
+                return
             marker, intentional_note = _classify_progress_name(name)
             if marker is None:
                 # Not a typed stage -> emit a LOG. A known intentional sub-stage note (precision_verified)
@@ -350,6 +361,51 @@ class TrainingRunner:
             last_stage = marker
             ctx.emit_stage(marker, message)
 
+        # Exact-lineage checkpoint writing + resume (#440/#486). Only the first-party sealed backend
+        # consumes these; a plain fresh run passes nothing (unchanged behavior).
+        from corpus_studio.platform.checkpoint import CheckpointError  # noqa: PLC0415
+
+        checkpoint_kwargs: dict[str, Any] = {}
+        if backend_label in ("corpus_studio", "cpu_toy"):
+            from pathlib import Path  # noqa: PLC0415
+
+            # RESUME: verify the checkpoint is a compatible resume source for THIS plan (the runner holds
+            # the plan; the trainer re-verifies integrity + the exact pin before it materializes), then
+            # hand the request to the first-party trainer. Threaded independently of the write cadence (a
+            # resume may continue with or without further writes). Fail closed on an incompatible resume.
+            if ctx.resume is not None:
+                from corpus_studio.platform.checkpoint import (  # noqa: PLC0415
+                    load_checkpoint_manifest,
+                    verify_resumable_into,
+                )
+
+                try:
+                    verify_resumable_into(
+                        load_checkpoint_manifest(ctx.resume.checkpoint_dir), ctx.plan
+                    )
+                except CheckpointError as exc:
+                    raise RunnerFailure(
+                        f"resume checkpoint is not a compatible source for this run: {exc}",
+                        taxonomy=FailureTaxonomy.UNSUPPORTED_CONFIGURATION,
+                        stage=StageMarker.process_start,
+                    ) from exc
+                checkpoint_kwargs["resume"] = ctx.resume
+            # WRITE: when the sealed policy sets a cadence, hand the plan-derived bound identities + a
+            # run-scoped checkpoints root so the CheckpointCoordinator seals a checkpoint at each cadence
+            # step. output_dir is .../runs/<run_id>/artifacts/adapter; checkpoints go to the run-scoped
+            # .../runs/<run_id>/checkpoints - a sibling of artifacts, never INSIDE the adapter export tree.
+            if execution.checkpoint_policy.cadence_optimizer_steps is not None:
+                from corpus_studio.platform.checkpoint import (  # noqa: PLC0415
+                    bound_identities_from_plan,
+                )
+
+                checkpoint_kwargs.update(
+                    {
+                        "checkpoint_bound": bound_identities_from_plan(ctx.plan),
+                        "source_run_id": ctx.run_id,
+                        "checkpoints_root": str(Path(config.output_dir).parent.parent / "checkpoints"),
+                    }
+                )
         try:
             with watchdog:
                 result = trainer_fn(
@@ -357,6 +413,7 @@ class TrainingRunner:
                     progress_callback=_progress,
                     stage_callback=_stage,
                     token_callback=_token_counts,
+                    **checkpoint_kwargs,
                 )
         except _CancelTraining:
             raise RunCancelled from None
@@ -391,6 +448,16 @@ class TrainingRunner:
                 stage=last_stage,
                 remediation="preserve the failed run and inspect the sealed execution contract",
             ) from exc
+        except CheckpointError as exc:
+            # The trainer re-verifies the resume checkpoint (integrity + the exact pin) before it
+            # materializes; a failure there means a tampered/incompatible source, not a generic runtime
+            # fault. Classify it so the terminal manifest names the checkpoint failure (CheckpointError
+            # is a ValueError, so without this it would fall through to the generic classifier as FAIL).
+            raise RunnerFailure(
+                f"resume checkpoint failed verification: {exc}",
+                taxonomy=FailureTaxonomy.UNSUPPORTED_CONFIGURATION,
+                stage=StageMarker.process_start,
+            ) from exc
         except Exception as exc:  # noqa: BLE001 — classify the runtime failure, don't leak it as FAIL
             taxonomy, remediation = classify_training_error(exc)
             raise RunnerFailure(
@@ -419,13 +486,21 @@ class TrainingRunner:
                     "step or a stall, likely a WDDM spill) — see the stderr watchdog note."
                 )
 
-        if result.checkpoints:
+        checkpointing_enabled = (
+            execution is not None
+            and execution.checkpoint_policy.cadence_optimizer_steps is not None
+        )
+        if result.checkpoints and not checkpointing_enabled:
+            # Checkpoints from a run whose sealed policy DISABLED saving is a first-party-worker bug.
             raise RunnerFailure(
                 "trainer produced intermediate checkpoints despite the sealed disabled save policy",
                 taxonomy=FailureTaxonomy.CHECKPOINT_FAILURE,
                 stage=StageMarker.export,
                 remediation="preserve the failed-run evidence and repair the first-party worker",
             )
+        # A checkpoint-enabled plan's inventory is expected; surface it on the terminal manifest so a
+        # long run's resumable checkpoints are recorded, not silently dropped.
+        ctx.checkpoints = list(result.checkpoints)
         try:
             verify_run_scoped_output_path(
                 execution,
@@ -613,19 +688,10 @@ class TrainingRunner:
                 stage=StageMarker.env_loaded,
                 remediation="create a derived RunPlan with a new execution hash",
             )
-        if (
-            execution.save_strategy != "no"
-            or execution.checkpoint_policy.cadence_optimizer_steps is not None
-            or execution.checkpoint_policy.keep_last is not None
-        ):
-            raise RunnerFailure(
-                "sealed intermediate checkpoints are unsupported until exact resume compatibility "
-                "and checkpoint lineage are implemented",
-                taxonomy=FailureTaxonomy.UNSUPPORTED_CONFIGURATION,
-                stage=StageMarker.process_start,
-                remediation="regenerate a checkpoint-free RunPlan; do not approve a long run until "
-                "sealed resume support exists",
-            )
+        # Exact-lineage checkpoint WRITING is now supported (the CheckpointCoordinator seals a verifiable
+        # checkpoint at each cadence step; validated on a real cpu_toy SFTTrainer run). The bound
+        # identities + checkpoints root are threaded to the trainer at dispatch above. (Consuming a
+        # checkpoint to RESUME execution is a separate slice; nothing dispatches a resume yet.)
         try:
             # The trainer owns one stable read/hash/capture of the dataset and parses those exact
             # bytes. Revalidating it here would create a redundant full-corpus pass.

@@ -803,11 +803,44 @@ def test_max_steps_override_is_refused_without_calling_the_trainer(monkeypatch):
     assert "config" not in capture
 
 
-def test_training_runner_refuses_legacy_sealed_step_checkpoint_plan(monkeypatch):
-    called = []
+def test_training_runner_threads_checkpoint_identities_for_a_step_checkpoint_plan(monkeypatch):
+    # #486: the runner no longer refuses a checkpoint plan - it builds the plan-derived bound identities
+    # + a run-scoped checkpoints root and threads them to the first-party trainer so the
+    # CheckpointCoordinator can write. Capture the threaded kwargs (then halt) to prove the wiring.
+    captured: dict = {}
+
+    def _capture(*_args, **kwargs):
+        captured.update(kwargs)
+        raise RuntimeError("stop after capturing the threaded checkpoint kwargs")
+
+    monkeypatch.setattr("corpus_studio.training.trainer.run_training", _capture)
+    plan = demo_training_plan()
+    execution_body = plan.resolved_execution.model_dump(mode="json")
+    execution_body["configuration_hash"] = "0" * 64
+    execution_body["save_strategy"] = "steps"
+    execution_body["checkpoint_policy"]["cadence_optimizer_steps"] = 1
+    execution_body["checkpoint_policy"]["keep_last"] = 1
+    execution = P.ResolvedExecutionConfiguration.model_validate(execution_body)
+    execution = execution.model_copy(
+        update={"configuration_hash": execution_configuration_hash_for(execution)}
+    )
+    body = plan.model_dump(mode="json")
+    body["resolved_execution"] = execution.model_dump(mode="json")
+    body["checkpoint_policy"] = execution.checkpoint_policy.model_dump(mode="json")
+
+    execute_run(_reseal(body), TrainingRunner(cpu_toy=True), clock=_CLOCK)
+
+    assert captured.get("checkpoint_bound") is not None
+    assert captured.get("source_run_id")
+    assert "checkpoints" in str(captured.get("checkpoints_root"))
+
+
+def test_checkpoint_enabled_run_admits_its_inventory_onto_the_manifest(monkeypatch):
+    # #486: a checkpoint-ENABLED plan whose trainer wrote checkpoints must be ADMITTED - the
+    # disabled-policy rejection only fires when checkpointing is off - and the run-scoped checkpoint
+    # inventory is surfaced on the terminal manifest instead of being silently dropped.
     monkeypatch.setattr(
-        "corpus_studio.training.trainer.run_training",
-        lambda *_args, **_kwargs: called.append(True),
+        "corpus_studio.training.trainer.run_training", _fake_run_training(2, checkpoints=True)
     )
     plan = demo_training_plan()
     execution_body = plan.resolved_execution.model_dump(mode="json")
@@ -824,16 +857,14 @@ def test_training_runner_refuses_legacy_sealed_step_checkpoint_plan(monkeypatch)
     body["checkpoint_policy"] = execution.checkpoint_policy.model_dump(mode="json")
 
     result = execute_run(_reseal(body), TrainingRunner(cpu_toy=True), clock=_CLOCK)
-
-    assert result.manifest.state == "failed"
-    assert result.manifest.failure is not None
-    assert result.manifest.failure.taxonomy == FailureTaxonomy.UNSUPPORTED_CONFIGURATION
-    assert result.manifest.failure.stage == StageMarker.process_start
-    assert "resume compatibility" in result.manifest.failure.message
-    assert called == []
+    assert result.manifest.state == "succeeded"
+    assert result.manifest.checkpoints  # the inventory is recorded, not silently dropped
 
 
 def test_training_runner_rejects_unvalidated_disabled_policy_fields(monkeypatch):
+    # A disabled (save_strategy="no") policy that still carries retention is inconsistent. In production
+    # such a plan fails JSON validation; a tampered one (model_copy bypasses it) is rejected as
+    # not-executable when the trainer config is derived, before run_training is ever reached.
     called = []
     monkeypatch.setattr(
         "corpus_studio.training.trainer.run_training",
@@ -861,8 +892,130 @@ def test_training_runner_rejects_unvalidated_disabled_policy_fields(monkeypatch)
     assert result.manifest.state == "failed"
     assert result.manifest.failure is not None
     assert result.manifest.failure.taxonomy == FailureTaxonomy.UNSUPPORTED_CONFIGURATION
-    assert "resume compatibility" in result.manifest.failure.message
+    assert "not executable" in result.manifest.failure.message
     assert called == []
+
+
+def test_training_runner_rejects_an_incompatible_resume(tmp_path, monkeypatch):
+    # #486 resume: the runner holds the plan, so it verifies the checkpoint is a compatible resume SOURCE
+    # (verify_resumable_into) and fails closed BEFORE run_training is reached. A dispatched resume whose
+    # checkpoint binds a different plan than the target run must be refused, not silently run from scratch.
+    from test_platform_checkpoint import _build_sealed_checkpoint  # noqa: PLC0415
+
+    from corpus_studio.platform.contracts import CheckpointResumeRequest  # noqa: PLC0415
+
+    called = []
+    monkeypatch.setattr(
+        "corpus_studio.training.trainer.run_training",
+        lambda *_a, **_k: called.append(True),
+    )
+    plan = demo_training_plan()  # the VALID target run (passes the runner's own plan-hash check)
+    # A checkpoint bound to a DIFFERENT plan (its bound plan_hash differs) is not a compatible source.
+    other = plan.model_copy(update={"plan_hash": "a" * 64})
+    sealed = _build_sealed_checkpoint(tmp_path / "c", plan=other)
+    request = CheckpointResumeRequest(
+        checkpoint_id=sealed.checkpoint_id,
+        checkpoint_manifest_hash=sealed.checkpoint_manifest_hash,
+        checkpoint_dir=str(tmp_path / "c"),
+    )
+    result = execute_run(plan, TrainingRunner(cpu_toy=True), resume=request, clock=_CLOCK)
+
+    assert result.manifest.state == "failed"
+    assert result.manifest.failure is not None
+    assert result.manifest.failure.taxonomy == FailureTaxonomy.UNSUPPORTED_CONFIGURATION
+    assert "not a compatible source" in result.manifest.failure.message
+    assert called == []  # fail closed BEFORE the trainer is invoked
+
+
+def test_trainer_side_resume_verification_failure_is_classified_as_a_checkpoint_failure(
+    tmp_path, monkeypatch
+):
+    # The runner's own pre-check passes (a compatible source), but the TRAINER re-verifies the checkpoint
+    # (integrity + the exact pin) before it materializes and raises CheckpointError. CheckpointError is a
+    # ValueError, not a TrainerError, so without an explicit handler it would fall through the generic
+    # classifier as FAIL; the runner names it an UNSUPPORTED_CONFIGURATION checkpoint failure instead.
+    from test_platform_checkpoint import _build_sealed_checkpoint  # noqa: PLC0415
+
+    from corpus_studio.platform.checkpoint import CheckpointError  # noqa: PLC0415
+    from corpus_studio.platform.contracts import CheckpointResumeRequest  # noqa: PLC0415
+
+    plan = demo_training_plan()
+    sealed = _build_sealed_checkpoint(tmp_path / "c", plan=plan)  # a COMPATIBLE source
+    request = CheckpointResumeRequest(
+        checkpoint_id=sealed.checkpoint_id,
+        checkpoint_manifest_hash=sealed.checkpoint_manifest_hash,
+        checkpoint_dir=str(tmp_path / "c"),
+    )
+
+    def _raise_checkpoint_error(*_a, **_k):
+        raise CheckpointError(
+            "restored bytes do not reproduce the sealed manifest hash", reason="hash_mismatch"
+        )
+
+    monkeypatch.setattr(
+        "corpus_studio.training.trainer.run_training", _raise_checkpoint_error
+    )
+    result = execute_run(plan, TrainingRunner(cpu_toy=True), resume=request, clock=_CLOCK)
+
+    assert result.manifest.state == "failed"
+    assert result.manifest.failure is not None
+    assert result.manifest.failure.taxonomy == FailureTaxonomy.UNSUPPORTED_CONFIGURATION
+    assert "failed verification" in result.manifest.failure.message
+
+
+def test_resume_reusing_the_parent_run_id_is_refused(tmp_path, monkeypatch):
+    # A resumed run MUST mint a fresh id. If a caller supplies run_id == the checkpoint's source_run_id,
+    # execute_run refuses it up front (before opening the parent's record/artifact paths, so they are
+    # never clobbered) and never invokes the trainer.
+    from test_platform_checkpoint import _build_sealed_checkpoint  # noqa: PLC0415
+
+    from corpus_studio.platform.contracts import CheckpointResumeRequest  # noqa: PLC0415
+
+    called = []
+    monkeypatch.setattr(
+        "corpus_studio.training.trainer.run_training", lambda *_a, **_k: called.append(True)
+    )
+    plan = demo_training_plan()
+    sealed = _build_sealed_checkpoint(tmp_path / "c", plan=plan)  # source_run_id == "run-parent01"
+    request = CheckpointResumeRequest(
+        checkpoint_id=sealed.checkpoint_id,
+        checkpoint_manifest_hash=sealed.checkpoint_manifest_hash,
+        checkpoint_dir=str(tmp_path / "c"),
+    )
+    result = execute_run(
+        plan, TrainingRunner(cpu_toy=True), run_id="run-parent01", resume=request, clock=_CLOCK
+    )
+    assert result.manifest.state == "failed"
+    assert result.manifest.failure is not None
+    assert result.manifest.failure.taxonomy == FailureTaxonomy.UNSUPPORTED_CONFIGURATION
+    assert "fresh run id" in result.manifest.failure.message
+    assert called == []  # fail closed before the trainer runs
+
+
+def test_successful_resume_records_the_parent_lineage_on_the_manifest(tmp_path, monkeypatch):
+    # A run that successfully resumes records the exact parent run + checkpoint + continued-from step on
+    # its terminal manifest - never a silent reuse of the parent identity (#486 provenance).
+    from test_platform_checkpoint import _build_sealed_checkpoint  # noqa: PLC0415
+
+    from corpus_studio.platform.contracts import CheckpointResumeRequest  # noqa: PLC0415
+
+    plan = demo_training_plan()
+    sealed = _build_sealed_checkpoint(tmp_path / "c", plan=plan)
+    request = CheckpointResumeRequest(
+        checkpoint_id=sealed.checkpoint_id,
+        checkpoint_manifest_hash=sealed.checkpoint_manifest_hash,
+        checkpoint_dir=str(tmp_path / "c"),
+    )
+
+    # The demo plan seals a 2-step schedule; the success stand-in absorbs the threaded resume kwarg.
+    monkeypatch.setattr("corpus_studio.training.trainer.run_training", _fake_run_training(2))
+    result = execute_run(plan, TrainingRunner(cpu_toy=True), resume=request, clock=_CLOCK)
+    assert result.manifest.state == "succeeded"
+    lineage = result.manifest.resume_lineage
+    assert lineage is not None
+    assert lineage.parent_run_id == sealed.source_run_id
+    assert lineage.parent_checkpoint_id == sealed.checkpoint_id
+    assert lineage.parent_checkpoint_hash == sealed.checkpoint_manifest_hash
 
 
 @pytest.mark.parametrize(
@@ -1022,6 +1175,37 @@ def test_runner_streams_setup_stage_events_from_the_trainer(monkeypatch):
     assert "model_loaded" in stages
     assert "adapter_attached" in stages
     assert "optimizer_created" in stages
+
+
+def test_runner_emits_typed_checkpoint_and_warning_events(monkeypatch):
+    # A sealed checkpoint write -> the typed checkpoint_written event; a best-effort checkpoint FAILURE
+    # -> a warning event. Neither is downgraded to an "unrecognized progress stage" log, so a consumer
+    # can track resumability without pattern-matching stage messages (#486 observability).
+    def _trainer(config, *, progress_callback=None, stage_callback=None, **_kw):
+        if stage_callback is not None:
+            stage_callback("checkpoint", "sealed checkpoint run-x-ckpt-step-00000004 at optimizer step 4")
+            stage_callback("checkpoint_warning", "checkpoint write at optimizer step 6 failed: disk full")
+        if progress_callback is not None:
+            progress_callback(1, 1, 0.5)
+        adapter_path = _write_fake_adapter(config.output_dir)
+        return TrainResult(
+            output_dir=config.output_dir,
+            adapter_path=adapter_path,
+            base_model=config.base_model,
+            cpu_toy=True,
+            steps=1,
+            execution_evidence=_execution_evidence(1, {1: 0.5}),
+        )
+
+    monkeypatch.setattr("corpus_studio.training.trainer.run_training", _trainer)
+    result = execute_run(demo_training_plan(), TrainingRunner(cpu_toy=True), clock=_CLOCK)
+    types = [e.event_type for e in result.events]
+    assert "checkpoint_written" in types
+    ckpt = next(e for e in result.events if e.event_type == "checkpoint_written")
+    assert ckpt.stage is not None and ckpt.stage.value == "checkpoint"
+    warning = next(e for e in result.events if e.event_type == "warning")
+    assert "failed" in (warning.message or "")
+    assert not any("unrecognized progress stage" in (e.message or "") for e in result.events)
 
 
 def test_runner_records_the_measured_fit_from_the_watchdog(monkeypatch):
