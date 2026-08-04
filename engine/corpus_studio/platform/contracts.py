@@ -3914,6 +3914,257 @@ class ResolvedExecutionConfiguration(ContractModel):
         return self
 
 
+class ReferenceModelBinding(ContractModel):
+    """The frozen reference policy an offline DPO run scores its trainable policy against.
+
+    Only ``frozen_base`` is sealed in this slice: the reference IS the same quantized base with the
+    trainable PEFT adapter disabled, so TRL computes reference log-probs by turning the adapter off and
+    no second model is loaded - nothing beyond the already-sealed base/adapter needs an execution-input
+    binding. Chaining a previously-trained adapter as the reference (a future ``prior_adapter`` mode) is
+    deferred to the worker slice, where it must carry its OWN immutable ``ExecutionInputBinding``
+    (location + content digest) so its bytes are covered by the execution-input verification path - a
+    bare hash ref would not be loadable or verifiable. ``precompute_ref_log_probs`` caches the reference
+    log-probs once (a memory/throughput trade the worker honors verbatim)."""
+
+    mode: Literal["frozen_base"] = "frozen_base"
+    precompute_ref_log_probs: bool = False
+
+
+class PreferenceOptimizationSpec(ContractModel):
+    """The offline preference-optimization loss (TRL ``DPOConfig``): the KL strength ``beta``, the
+    ``loss_type`` variant, conservative ``label_smoothing`` for noisy preferences, and the frozen
+    reference binding. Kept off :class:`PreferenceDataPolicy` (which is only the data contract) so the
+    data policy stays reusable by a non-DPO preference method later."""
+
+    objective: Literal["dpo"] = "dpo"
+    beta: float = Field(default=0.1, gt=0)
+    # Only the canonical DPO sigmoid loss is sealed here. Other preference losses (e.g. hinge, IPO) are
+    # DISTINCT objectives in the catalog - adding one means adding its objective + provenance, not just
+    # a loss string under an ``objective="dpo"`` seal - so they are deferred, not silently mislabeled.
+    loss_type: Literal["sigmoid"] = "sigmoid"
+    label_smoothing: float = Field(default=0.0, ge=0, lt=0.5)
+    reference_model: ReferenceModelBinding
+
+
+class ResolvedPreferenceExecutionConfiguration(ContractModel):
+    """The hash-sealed configuration for an offline preference-optimization (DPO) run - the sibling of
+    :class:`ResolvedExecutionConfiguration` for the ``preference_dpo`` execution variant.
+
+    The dense-QLoRA-SFT seal is byte-locked two ways (its own ``configuration_hash`` AND a committed
+    semantic golden over its full field set), so DPO's execution semantics live on THIS separate
+    contract, never as new fields on the SFT config. It reuses every shared execution sub-spec
+    (placement / precision / attention / adapter / optimizer / sequence / batching / checkpoint /
+    schedule / trainer interface) and adds only what DPO needs: a :class:`PreferenceDataPolicy` (never
+    the SFT ``TrainingDataPolicy``) and a :class:`PreferenceOptimizationSpec` (beta / loss / reference).
+
+    Carried on ``RunPlan.resolved_preference_execution`` (a plan holds EITHER the SFT config OR this
+    one, never both). The matching adapter-based ``dpo_qlora`` objective exists and the admission gate
+    binds the ``preference_dpo`` variant to it; the resolver (a later control-plane step) populates
+    ``objective_ref`` with that objective's sealed identity - the pure contract cannot dereference the
+    registry itself. What remains gated is EXECUTION: the ``DPOTrainer`` branch, a workload-verified 4B
+    run, and the milestone wheel that promotes ``preference_dpo`` to ``workload_verified``.
+    ``trainer_interface`` is reused as an execution-shaped placeholder; the exact ``DPOConfig`` trainer
+    surface (distinct from ``SFTConfig``) is sealed with the ``DPOTrainer`` branch, since the contract is
+    not yet executable."""
+
+    contract_version: CONTRACT_VERSION_LITERAL = "1.0.0"
+    configuration_id: str = Field(pattern=_ID)
+    configuration_hash: str = Field(pattern=SHA256_PATTERN)
+    backend_ref: Ref
+    environment_ref: Ref
+    environment_binding: Literal["profile_snapshot", "managed_lock"]
+    capability_report_ref: Ref
+    inputs: ExecutionInputs
+    objective_ref: Ref
+    runtime_mode: Literal["training", "cpu_toy"]
+    precision: PrecisionExecutionPolicy
+    attention: AttentionExecutionPolicy
+    device_map: list[DeviceMapEntry] = Field(min_length=1)
+    adapter: AdapterSpec
+    optimizer: OptimizerSpec
+    sequence: SequenceSpec
+    batching: BatchingSpec
+    checkpoint_policy: CheckpointPolicy
+    schedule: TrainingSchedule
+    data: PreferenceDataPolicy
+    preference: PreferenceOptimizationSpec
+    trainer_interface: TrainerInterfacePolicy
+    export_format: ExportFormat
+    trust_remote_code: Literal[False] = False
+    use_safetensors: Literal[True] = True
+    bnb_4bit_use_double_quant: bool
+    adapter_task_type: Literal["CAUSAL_LM"] = "CAUSAL_LM"
+    save_strategy: Literal["no", "steps"] = "steps"
+    gradient_checkpointing: bool = True
+    output_dir: str = Field(min_length=1)
+    output_layout: Literal["run_scoped_v1"] = "run_scoped_v1"
+    seed: int = Field(default=42, ge=0)
+    data_seed: int = Field(default=42, ge=0)
+
+    @model_validator(mode="after")
+    def _validate_preference_configuration(self) -> ResolvedPreferenceExecutionConfiguration:
+        # Shared safety invariants are enforced independently here rather than by refactoring the
+        # byte-locked SFT validator - the two seals stay decoupled so a change to one can never perturb
+        # the other's hash.
+        for label, ref in (
+            ("backend_ref", self.backend_ref),
+            ("environment_ref", self.environment_ref),
+            ("capability_report_ref", self.capability_report_ref),
+            ("objective_ref", self.objective_ref),
+        ):
+            if not _is_pinned_ref(ref):
+                raise ValueError(f"resolved preference execution {label} must be hash-pinned")
+        # This config seals first-party trainer behavior; a RunPlan that carries it additionally enforces
+        # the runner lane, but the seal itself refuses a non-corpus_studio backend so a standalone config
+        # can never name a wrong (e.g. echo) backend.
+        if self.backend_ref.id != "corpus_studio":
+            raise ValueError(
+                "resolved preference execution requires the first-party corpus_studio worker backend"
+            )
+        # The only admitted preference shape is QLoRA-DPO, so the seal must bind the dpo_qlora objective -
+        # a config whose loss semantics disagree with its objective lineage is refused. This is the id
+        # check the pure contract can make; verifying objective_ref.hash against the sealed catalog is the
+        # resolver/runner's job (the DPO resolver milestone wires it, as the SFT path already does).
+        if self.objective_ref.id != "dpo_qlora":
+            raise ValueError(
+                "preference execution must bind the 'dpo_qlora' objective (the only admitted preference "
+                "shape)"
+            )
+        environment_hash = self.environment_ref.hash
+        assert environment_hash is not None and environment_hash.value is not None
+        if (
+            self.environment_binding == "profile_snapshot"
+            and self.environment_ref.id != environment_hash.value
+        ):
+            raise ValueError("profile-snapshot environment identity must be its content hash")
+        if (
+            self.environment_binding == "managed_lock"
+            and self.environment_ref.id == environment_hash.value
+        ):
+            raise ValueError("managed-lock environment identity must name the managed environment")
+        keys = [item.module for item in self.device_map]
+        if keys != sorted(set(keys)) or "" not in keys:
+            raise ValueError("device_map must be sorted, unique, and bind the root module")
+        if self.runtime_mode == "cpu_toy" and self.device_map != [
+            DeviceMapEntry(module="", device="cpu")
+        ]:
+            raise ValueError("cpu_toy execution must bind the entire model to CPU")
+        # The dpo_qlora objective this seal binds requires the qlora adaptation over a 4-bit base
+        # (int4/nf4). Restrict the seal to exactly that: the reference is the frozen 4-bit base with the
+        # PEFT adapter disabled. Full-parameter DPO and plain LoRA/DoRA (or any non-4-bit base) have no
+        # admitting objective and are refused - not left contract-valid-but-unadmittable.
+        if self.adapter.method != AdapterMethod.qlora:
+            raise ValueError("QLoRA-DPO requires the qlora adapter method")
+        if self.precision.quantized_storage_format not in {
+            QuantizationMode.int4,
+            QuantizationMode.nf4,
+        }:
+            raise ValueError("QLoRA-DPO requires a 4-bit quantized base (int4 or nf4)")
+        if any(
+            value is None
+            for value in (
+                self.adapter.lora_r,
+                self.adapter.lora_alpha,
+                self.adapter.lora_dropout,
+                self.adapter.target_modules,
+                self.adapter.bias,
+            )
+        ):
+            raise ValueError("LoRA-family execution must seal every adapter default")
+        if self.precision.master_weight_dtype is None:
+            raise ValueError("LoRA-family execution must seal the trainable master-weight dtype")
+        if (
+            self.precision.quantized_storage_format == QuantizationMode.none
+            and self.precision.weight_storage_dtype != self.precision.forward_compute_dtype
+        ):
+            raise ValueError(
+                "the first-party unquantized trainer requires weight and forward dtypes to match"
+            )
+        if (
+            self.precision.quantized_storage_format != QuantizationMode.none
+            and self.precision.dequantization_dtype != self.precision.forward_compute_dtype
+        ):
+            raise ValueError(
+                "the first-party quantized trainer requires dequantization and forward dtypes to match"
+            )
+        if self.batching.fallback_grad_accumulation_steps is None:
+            raise ValueError("the first-party trainer requires exact gradient accumulation")
+        expected_token_target = (
+            self.sequence.max_sequence_len
+            * self.batching.micro_batch_size
+            * self.batching.fallback_grad_accumulation_steps
+        )
+        if self.batching.supervised_token_accumulation_target != expected_token_target:
+            raise ValueError(
+                "the fixed-microbatch trainer requires its advisory token target to be derived exactly"
+            )
+        if self.sequence.buckets:
+            raise ValueError("the first-party trainer does not implement sequence buckets")
+        # DPO renders discrete prompt+chosen / prompt+rejected pairs; it never packs sequences.
+        if self.sequence.packing:
+            raise ValueError("preference optimization does not pack sequences")
+        # The sealed DPO length budget must fit the sealed sequence window (PreferenceDataPolicy already
+        # guarantees max_prompt_length < max_length).
+        if self.data.max_length > self.sequence.max_sequence_len:
+            raise ValueError("data.max_length must fit within the sealed sequence length")
+        # No-silent-truncation cross-check (same contradiction the SFT sibling refuses): a config that
+        # declares over-length pairs make it invalid yet permits truncation at runtime would silently
+        # truncate a preference pair.
+        if not self.sequence.truncation_allowed and self.data.truncation_policy == "allow":
+            raise ValueError(
+                "sequence.truncation_allowed is False but data.truncation_policy is 'allow' - a config "
+                "that declares no truncation yet permits it at runtime would silently truncate"
+            )
+        # One reproducible sample order: the preference data policy's seed and the top-level execution
+        # data seed must agree, so a worker cannot honor two different orderings.
+        if self.data.data_seed != self.data_seed:
+            raise ValueError(
+                "the preference data_seed and the top-level data_seed must match for one reproducible "
+                "sample order"
+            )
+        if any(
+            value is None
+            for value in (
+                self.optimizer.weight_decay,
+                self.optimizer.lr_scheduler,
+                self.optimizer.warmup_ratio,
+            )
+        ):
+            raise ValueError("the first-party trainer requires all optimizer defaults")
+        if self.checkpoint_policy.cadence_seconds is not None:
+            raise ValueError("the first-party trainer does not implement time-based checkpoints")
+        if self.checkpoint_policy.reload_verify:
+            raise ValueError(
+                "the first-party trainer does not implement checkpoint reload verification"
+            )
+        if self.checkpoint_policy.impl != CheckpointImpl.adapter_only:
+            raise ValueError("the first-party trainer implements adapter-only checkpoints")
+        if self.save_strategy == "steps":
+            if self.checkpoint_policy.cadence_optimizer_steps is None:
+                raise ValueError("step checkpointing requires an optimizer-step cadence")
+        elif (
+            self.checkpoint_policy.cadence_optimizer_steps is not None
+            or self.checkpoint_policy.keep_last is not None
+        ):
+            raise ValueError("disabled checkpointing cannot carry cadence or retention settings")
+        quantized = self.precision.quantized_storage_format != QuantizationMode.none
+        if not quantized and self.bnb_4bit_use_double_quant:
+            raise ValueError("double quantization is invalid for unquantized execution")
+        if self.export_format != ExportFormat.adapter_peft:
+            raise ValueError("the first-party resolved executor emits PEFT adapters only")
+        external_package = self.attention.flash_attention_package
+        if external_package is not None:
+            exact_packages = {
+                (item.name.lower(), item.version)
+                for item in self.trainer_interface.package_versions
+            }
+            if (external_package.name.lower(), external_package.version) not in exact_packages:
+                raise ValueError(
+                    "external FlashAttention must be included in exact trainer package versions"
+                )
+        return self
+
+
 class EvalSchedule(ContractModel):
     before_run: bool = True
     after_run: bool = True
@@ -4327,6 +4578,12 @@ class RunPlan(ContractModel):
     # sealed, typed resolved_execution contract below.
     training_config_snapshot: JsonObject = Field(default_factory=dict)
     resolved_execution: ResolvedExecutionConfiguration | None = None
+    # The preference-optimization (DPO) sibling seal. A plan carries EITHER this or resolved_execution,
+    # never both. Excluded from the plan serialization when unset, so adding it does NOT perturb the
+    # plan_hash of existing SFT plans (the hash is over the model dump, which omits the excluded field).
+    resolved_preference_execution: ResolvedPreferenceExecutionConfiguration | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     # Pins the parameter evidence the planner consumed; it does not manufacture missing counts.
     parameter_accounting_ref: Ref | None = None
     # ``None`` identifies a legacy plan. The planner always emits a fully resolved spec for new plans.
@@ -4338,6 +4595,12 @@ class RunPlan(ContractModel):
             self.parameter_accounting_ref
         ):
             raise ValueError("parameter_accounting_ref must pin the sealed report hash")
+        # A plan carries exactly one execution authority - checked before the per-config summary
+        # cross-checks so a double-authority plan fails on THAT, not on an incidental summary mismatch.
+        if self.resolved_execution is not None and self.resolved_preference_execution is not None:
+            raise ValueError(
+                "a RunPlan carries either the SFT or the preference execution config, never both"
+            )
         execution = self.resolved_execution
         if execution is not None:
             expected_hash = _canonical_contract_sha256(
@@ -4389,6 +4652,73 @@ class RunPlan(ContractModel):
                 or execution.output_dir != self.export.output_dir
             ):
                 raise ValueError("resolved export format/output must match the RunPlan summary")
+        preference = self.resolved_preference_execution
+        if preference is not None:
+            expected_preference_hash = _canonical_contract_sha256(
+                preference.model_dump(mode="json", exclude={"configuration_hash"})
+            )
+            if preference.configuration_hash != expected_preference_hash:
+                raise ValueError(
+                    "resolved_preference_execution configuration_hash does not match its body"
+                )
+            if self.training_config_snapshot:
+                raise ValueError("new resolved plans cannot carry a second trainer-config authority")
+            if preference.backend_ref != self.backend_ref:
+                raise ValueError("resolved preference execution backend_ref must match the RunPlan")
+            if preference.environment_ref != self.environment_ref:
+                raise ValueError(
+                    "resolved preference execution environment_ref must match the RunPlan"
+                )
+            if preference.inputs.dataset.ref != self.dataset_ref:
+                raise ValueError("resolved preference execution dataset ref must match the RunPlan")
+            if preference.inputs.model.location != self.base_model:
+                raise ValueError(
+                    "resolved preference execution model location must match base_model"
+                )
+            # The DPO seal belongs on a preference plan, and its summaries must not contradict the seal a
+            # future worker consumes (mirror the SFT cross-checks; the DPO loss lives on preference, so
+            # there is no loss_impl summary to compare).
+            if self.task_type != TaskType.preference:
+                raise ValueError("a resolved preference execution requires a preference RunPlan")
+            if preference.precision.forward_compute_dtype != self.precision:
+                raise ValueError("resolved preference forward precision must match the RunPlan summary")
+            if preference.precision.quantized_storage_format != self.quantization:
+                raise ValueError("resolved preference quantization must match the RunPlan summary")
+            # The DPO loss is the plan's loss: a preference plan whose loss summary still reads a
+            # supervised loss (e.g. cross_entropy inherited from an SFT plan) contradicts the seal.
+            if self.loss_impl != LossImpl.dpo:
+                raise ValueError("a resolved preference (DPO) execution requires the 'dpo' loss summary")
+            for label, resolved, summary in (
+                ("adapter", preference.adapter, self.adapter),
+                ("optimizer", preference.optimizer, self.optimizer),
+                ("sequence", preference.sequence, self.sequence),
+                ("batching", preference.batching, self.batching),
+                ("checkpoint", preference.checkpoint_policy, self.checkpoint_policy),
+            ):
+                if resolved != summary:
+                    raise ValueError(
+                        f"resolved preference {label} policy must match the RunPlan summary"
+                    )
+            preference_attention_summary = {
+                AttentionKernel.eager: AttentionImpl.eager,
+                AttentionKernel.torch_sdpa_math: AttentionImpl.math,
+                AttentionKernel.torch_sdpa_flash: AttentionImpl.sdpa,
+                AttentionKernel.torch_sdpa_mem_efficient: AttentionImpl.sdpa,
+                AttentionKernel.flash_attention_2: AttentionImpl.flash_attention_2,
+                AttentionKernel.flash_attention_3: AttentionImpl.flash_attention_3,
+                AttentionKernel.xformers: AttentionImpl.xformers,
+            }[preference.attention.effective_backend_required]
+            if preference_attention_summary != self.attention_backend:
+                raise ValueError("resolved preference attention policy must match the RunPlan summary")
+            if preference.seed != self.seed or (
+                preference.gradient_checkpointing != self.gradient_checkpointing
+            ):
+                raise ValueError("resolved preference seed/checkpointing must match the RunPlan summary")
+            if (
+                preference.export_format != self.export.format
+                or preference.output_dir != self.export.output_dir
+            ):
+                raise ValueError("resolved preference export format/output must match the RunPlan summary")
         if self.physical_execution is None:
             return self
         if (
@@ -5547,6 +5877,8 @@ class TrainingPlanParameters(ContractModel):
     tokenizer_content_sha256: str | None = None
     dataset_content_sha256: str | None = None
     task_type: str = "sft"
+    # The specific training objective (required for a preference task; see PlannerConstraints).
+    objective_id: str | None = None
     dataset_format: str = "instruction"
     adapter_method: str | None = None
     lora_r: int = 16

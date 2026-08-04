@@ -301,7 +301,44 @@ export type SequenceLengthField = "max_seq_length" | "max_length";
 export type TokenizerParameter = "tokenizer" | "processing_class";
 export type TrustRemoteCode = false;
 export type UseSafetensors = true;
+export type AdapterTaskType1 = "CAUSAL_LM";
+export type Bnb4BitUseDoubleQuant1 = boolean;
+export type ConfigurationHash1 = string;
+export type ConfigurationId1 = string;
+export type ContractVersion2 = "1.0.0";
+export type ChatTemplateSha2561 = string | null;
+export type ContractVersion3 = "1.0.0";
+export type DataSeed1 = number;
+export type FormatterId1 = string;
+export type FormatterSha2561 = string;
+export type MaxLength = number;
+export type MaxPromptLength = number;
+export type PairSchema = "chosen_rejected" | "preference_pair";
+export type SchemaId = string;
+export type SchemaSha256 = string;
+export type SchemaVersion = string;
+export type TruncationPolicy1 = "refuse" | "allow";
+export type DataSeed2 = number;
+/**
+ * @minItems 1
+ */
+export type DeviceMap1 = [DeviceMapEntry, ...DeviceMapEntry[]];
+export type EnvironmentBinding1 = "profile_snapshot" | "managed_lock";
+export type GradientCheckpointing2 = boolean;
+export type OutputDir2 = string;
+export type OutputLayout1 = "run_scoped_v1";
+export type Beta = number;
+export type LabelSmoothing = number;
+export type LossType = "sigmoid";
+export type Objective = "dpo";
+export type Mode = "frozen_base";
+export type PrecomputeRefLogProbs = boolean;
+export type RuntimeMode1 = "training" | "cpu_toy";
+export type SaveStrategy1 = "no" | "steps";
 export type Seed1 = number;
+export type TrustRemoteCode1 = false;
+export type UseSafetensors1 = true;
+export type Seed2 = number;
 export type TaskType =
   | "sft"
   | "pretraining"
@@ -348,7 +385,8 @@ export interface RunPlan {
   precision: PrecisionMode;
   quantization: QuantizationMode;
   resolved_execution?: ResolvedExecutionConfiguration | null;
-  seed?: Seed1;
+  resolved_preference_execution?: ResolvedPreferenceExecutionConfiguration | null;
+  seed?: Seed2;
   sequence: SequenceSpec;
   task_type: TaskType;
   training_config_snapshot?: TrainingConfigSnapshot;
@@ -691,6 +729,116 @@ export interface TrainerInterfacePolicy {
   required_sft_config_fields: RequiredSftConfigFields;
   sequence_length_field: SequenceLengthField;
   tokenizer_parameter: TokenizerParameter;
+}
+/**
+ * The hash-sealed configuration for an offline preference-optimization (DPO) run - the sibling of
+ * :class:`ResolvedExecutionConfiguration` for the ``preference_dpo`` execution variant.
+ *
+ * The dense-QLoRA-SFT seal is byte-locked two ways (its own ``configuration_hash`` AND a committed
+ * semantic golden over its full field set), so DPO's execution semantics live on THIS separate
+ * contract, never as new fields on the SFT config. It reuses every shared execution sub-spec
+ * (placement / precision / attention / adapter / optimizer / sequence / batching / checkpoint /
+ * schedule / trainer interface) and adds only what DPO needs: a :class:`PreferenceDataPolicy` (never
+ * the SFT ``TrainingDataPolicy``) and a :class:`PreferenceOptimizationSpec` (beta / loss / reference).
+ *
+ * Carried on ``RunPlan.resolved_preference_execution`` (a plan holds EITHER the SFT config OR this
+ * one, never both). The matching adapter-based ``dpo_qlora`` objective exists and the admission gate
+ * binds the ``preference_dpo`` variant to it; the resolver (a later control-plane step) populates
+ * ``objective_ref`` with that objective's sealed identity - the pure contract cannot dereference the
+ * registry itself. What remains gated is EXECUTION: the ``DPOTrainer`` branch, a workload-verified 4B
+ * run, and the milestone wheel that promotes ``preference_dpo`` to ``workload_verified``.
+ * ``trainer_interface`` is reused as an execution-shaped placeholder; the exact ``DPOConfig`` trainer
+ * surface (distinct from ``SFTConfig``) is sealed with the ``DPOTrainer`` branch, since the contract is
+ * not yet executable.
+ */
+export interface ResolvedPreferenceExecutionConfiguration {
+  adapter: AdapterSpec;
+  adapter_task_type?: AdapterTaskType1;
+  attention: AttentionExecutionPolicy;
+  backend_ref: Ref;
+  batching: BatchingSpec;
+  bnb_4bit_use_double_quant: Bnb4BitUseDoubleQuant1;
+  capability_report_ref: Ref;
+  checkpoint_policy: CheckpointPolicy;
+  configuration_hash: ConfigurationHash1;
+  configuration_id: ConfigurationId1;
+  contract_version?: ContractVersion2;
+  data: PreferenceDataPolicy;
+  data_seed?: DataSeed2;
+  device_map: DeviceMap1;
+  environment_binding: EnvironmentBinding1;
+  environment_ref: Ref;
+  export_format: ExportFormat;
+  gradient_checkpointing?: GradientCheckpointing2;
+  inputs: ExecutionInputs;
+  objective_ref: Ref;
+  optimizer: OptimizerSpec;
+  output_dir: OutputDir2;
+  output_layout?: OutputLayout1;
+  precision: PrecisionExecutionPolicy;
+  preference: PreferenceOptimizationSpec;
+  runtime_mode: RuntimeMode1;
+  save_strategy?: SaveStrategy1;
+  schedule: TrainingSchedule;
+  seed?: Seed1;
+  sequence: SequenceSpec;
+  trainer_interface: TrainerInterfacePolicy;
+  trust_remote_code?: TrustRemoteCode1;
+  use_safetensors?: UseSafetensors1;
+}
+/**
+ * Additive, dense/MoE-safe preference-pair data policy (S2 / DPO), PARALLEL to the SFT-only
+ * ``TrainingDataPolicy`` - never reuse the SFT contract for preference pairs. It seals the RESOLVED
+ * dataset schema identity - ``schema_id`` + ``schema_version`` + ``schema_sha256`` (the content digest
+ * of the resolved schema) - so a consumer fails closed on a row-layout change even when a project-local
+ * schema shadows the builtin and edits fields without bumping the version; plus the pair render layout,
+ * formatter + chat template, and the DPO prompt/response length budget - so a preference run formats
+ * every pair identically and refuses (never silently truncates) an over-length prompt or response. The
+ * reference model + DPO loss hyperparameters live on the DPO execution seal (a separate worker slice),
+ * not here - this is only the data contract.
+ */
+export interface PreferenceDataPolicy {
+  chat_template_sha256?: ChatTemplateSha2561;
+  contract_version?: ContractVersion3;
+  data_seed?: DataSeed1;
+  formatter_id: FormatterId1;
+  formatter_sha256: FormatterSha2561;
+  max_length: MaxLength;
+  max_prompt_length: MaxPromptLength;
+  pair_schema?: PairSchema;
+  schema_id: SchemaId;
+  schema_sha256: SchemaSha256;
+  schema_version: SchemaVersion;
+  truncation_policy?: TruncationPolicy1;
+}
+/**
+ * The offline preference-optimization loss (TRL ``DPOConfig``): the KL strength ``beta``, the
+ * ``loss_type`` variant, conservative ``label_smoothing`` for noisy preferences, and the frozen
+ * reference binding. Kept off :class:`PreferenceDataPolicy` (which is only the data contract) so the
+ * data policy stays reusable by a non-DPO preference method later.
+ */
+export interface PreferenceOptimizationSpec {
+  beta?: Beta;
+  label_smoothing?: LabelSmoothing;
+  loss_type?: LossType;
+  objective?: Objective;
+  reference_model: ReferenceModelBinding;
+}
+/**
+ * The frozen reference policy an offline DPO run scores its trainable policy against.
+ *
+ * Only ``frozen_base`` is sealed in this slice: the reference IS the same quantized base with the
+ * trainable PEFT adapter disabled, so TRL computes reference log-probs by turning the adapter off and
+ * no second model is loaded - nothing beyond the already-sealed base/adapter needs an execution-input
+ * binding. Chaining a previously-trained adapter as the reference (a future ``prior_adapter`` mode) is
+ * deferred to the worker slice, where it must carry its OWN immutable ``ExecutionInputBinding``
+ * (location + content digest) so its bytes are covered by the execution-input verification path - a
+ * bare hash ref would not be loadable or verifiable. ``precompute_ref_log_probs`` caches the reference
+ * log-probs once (a memory/throughput trade the worker honors verbatim).
+ */
+export interface ReferenceModelBinding {
+  mode?: Mode;
+  precompute_ref_log_probs?: PrecomputeRefLogProbs;
 }
 export interface TrainingConfigSnapshot {
   [k: string]: unknown;

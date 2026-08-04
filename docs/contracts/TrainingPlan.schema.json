@@ -419,6 +419,18 @@
           "title": "Num Train Epochs",
           "type": "number"
         },
+        "objective_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Objective Id"
+        },
         "optim": {
           "default": "adamw_torch",
           "title": "Optim",

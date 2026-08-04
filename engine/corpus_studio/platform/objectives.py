@@ -491,9 +491,24 @@ def _pretraining_objective(objective_id: str, display_name: str, continued: bool
 
 
 def _preference_objective(
-    objective_id: str, display_name: str, loss_impl: str, loss_kind: str
+    objective_id: str,
+    display_name: str,
+    loss_impl: str,
+    loss_kind: str,
+    *,
+    adaptations: list[str] | None = None,
+    update: dict[str, object] | None = None,
+    quantizations: list[str] | None = None,
 ) -> TrainingObjective:
-    reference = objective_id in {"dpo", "ipo"}
+    # Adaptation is a SEPARATE axis from the objective: the same preference loss can be trained
+    # full-parameter or through an adapter (QLoRA-DPO). The defaults reproduce the full-parameter
+    # construction exactly, so the existing dpo/ipo/kto/orpo objectives stay byte-identical.
+    adaptations = adaptations or []
+    update = update if update is not None else _full_update()
+    artifact_kind = "adapter" if adaptations and "full_finetune" not in adaptations else "full_model"
+    # DPO/IPO score against a frozen reference policy; keyed on the loss so an adapter variant that
+    # reuses the DPO loss (dpo_qlora) inherits the reference requirement.
+    reference = loss_impl in {"dpo", "ipo"}
     label_construction = (
         "Split each pair into desirable and undesirable signed examples for the KTO target."
         if objective_id == "kto"
@@ -563,12 +578,16 @@ def _preference_objective(
         masks=masks,
         losses=losses,
         model=_model(_CAUSAL_MODEL, reference=reference),
-        adaptations=[],
-        update=_full_update(),
+        adaptations=adaptations,
+        update=update,
         backend=_backend(
-            "preference", losses=[loss_impl], capabilities=[f"preference_{objective_id}"]
+            "preference",
+            losses=[loss_impl],
+            adapters=adaptations,
+            quantizations=quantizations,
+            capabilities=[f"preference_{objective_id}"],
         ),
-        artifacts=_artifacts("checkpoint", "full_model", "provenance_manifest"),
+        artifacts=_artifacts("checkpoint", artifact_kind, "provenance_manifest"),
         evaluation=_evaluation("heldout_preference_accuracy", "reward_margin"),
         limitations=[
             "Both built-in backend manifests currently declare SFT only.",
@@ -980,6 +999,15 @@ def _build_catalog() -> tuple[TrainingObjective, ...]:
             mask_construction="Mask every token outside assistant response spans.",
         ),
         _preference_objective("dpo", "DPO", "dpo", "preference"),
+        _preference_objective(
+            "dpo_qlora",
+            "DPO (QLoRA)",
+            "dpo",
+            "preference",
+            adaptations=["qlora"],
+            update=_adapter_update(),
+            quantizations=["int4", "nf4"],
+        ),
         _preference_objective("ipo", "IPO", "ipo", "preference"),
         _preference_objective("kto", "KTO", "kto", "preference"),
         _preference_objective("orpo", "ORPO", "orpo", "odds_ratio"),
@@ -1027,8 +1055,8 @@ def _build_catalog() -> tuple[TrainingObjective, ...]:
     keys = [(item.objective_id, item.objective_version) for item in ordered]
     if len(keys) != len(set(keys)):  # pragma: no cover - static catalog construction guard
         raise ValueError("duplicate objective id/version in built-in registry")
-    if len(ordered) != 29:  # pragma: no cover - guards the requested catalog surface
-        raise ValueError(f"expected 29 built-in objectives, got {len(ordered)}")
+    if len(ordered) != 30:  # pragma: no cover - guards the requested catalog surface
+        raise ValueError(f"expected 30 built-in objectives, got {len(ordered)}")
     return ordered
 
 

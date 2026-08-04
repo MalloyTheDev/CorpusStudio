@@ -769,6 +769,9 @@ class ExecutionVariantKind(str, Enum):
     dense_full_finetune = "dense_full_finetune"
     pretraining = "pretraining"
     moe = "moe"
+    # Offline DPO (S2b-2): a QLoRA preference-optimization shape - a CAUSAL_LM PEFT adapter over a frozen
+    # reference model, one preference-pair dataset. No rollout / no reward model (that is the RL slice).
+    preference_dpo = "preference_dpo"
 
 
 class ExecutionVariantSupport(str, Enum):

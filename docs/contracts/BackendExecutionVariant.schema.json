@@ -6,7 +6,8 @@
         "dense_qlora_sft",
         "dense_full_finetune",
         "pretraining",
-        "moe"
+        "moe",
+        "preference_dpo"
       ],
       "title": "ExecutionVariantKind",
       "type": "string"

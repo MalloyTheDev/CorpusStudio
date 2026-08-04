@@ -132,6 +132,10 @@ class PlannerConstraints:
     tokenizer_content_sha256: str | None = None
     dataset_content_sha256: str | None = None
     task_type: str = "sft"
+    # The specific training objective. Required for a preference task (DPO/IPO/KTO/ORPO are distinct and
+    # not interchangeable); the harness maps only built ones and refuses the rest fail-closed. SFT
+    # resolves its objective from the adapter method, so this stays optional there.
+    objective_id: str | None = None
     dataset_format: str = "instruction"
     adapter_method: str | None = None  # None → auto: qlora when quantized, else lora
     lora_r: int = 16
@@ -841,10 +845,18 @@ def build_run_plan(
         observation.scope.kind.value in {"expert_group", "expert_set", "router"}
         for observation in parameter_accounting.observations
     )
+    # A preference request resolves by its EXPLICIT objective, not the task alone (DPO/IPO/KTO/ORPO
+    # differ). The caller names it via constraints.objective_id; admission maps only the built ones
+    # (dpo_qlora -> preference_dpo, declared at contract_validated so it is refused at execution until
+    # the worker lands) and refuses the rest fail-closed. SFT/pretraining resolve by task alone.
+    admission_objective_id = (
+        constraints.objective_id if constraints.task_type == TaskType.preference.value else None
+    )
     try:
         admit_task_execution_variant(
             TaskType(constraints.task_type),
             is_moe=plan_targets_moe,
+            objective_id=admission_objective_id,
             declared_variants=reference_execution_variants(),
         )
     except ExecutionVariantRefused as exc:

@@ -252,10 +252,47 @@ def test_task_maps_to_an_execution_variant_shape_and_admits_fail_closed():
     assert execution_variant_kind_for_task(TaskType.pretraining) == ExecutionVariantKind.pretraining
     with pytest.raises(ExecutionVariantRefused, match="below the required"):
         admit_task_execution_variant(TaskType.pretraining, declared_variants=declared)
-    # preference -> NO executable shape yet: refused.
+    # preference WITHOUT a recognized objective -> no shape: refused (it resolves by objective, not task).
     assert execution_variant_kind_for_task(TaskType.preference) is None
     with pytest.raises(ExecutionVariantRefused, match="no executable execution variant"):
         admit_task_execution_variant(TaskType.preference, declared_variants=declared)
+
+
+def test_preference_resolves_by_its_specific_objective_not_the_task():
+    declared = reference_execution_variants()
+    # Only the QLoRA-DPO objective has a built (PEFT) shape; DPO/IPO/KTO/ORPO are NOT interchangeable, so
+    # a task-level 'preference -> DPO' mapping would mis-claim the others.
+    assert (
+        execution_variant_kind_for_task(TaskType.preference, objective_id="dpo_qlora")
+        == ExecutionVariantKind.preference_dpo
+    )
+    for oid in ("dpo", "ipo", "kto", "orpo", "unknown"):
+        assert execution_variant_kind_for_task(TaskType.preference, objective_id=oid) is None
+    # a MoE preference request has no built shape: it is refused, NOT routed to the generic moe variant
+    # (the preference-objective rule is applied before MoE routing).
+    assert (
+        execution_variant_kind_for_task(
+            TaskType.preference, objective_id="dpo_qlora", is_moe=True
+        )
+        is None
+    )
+    # dpo_qlora is declared at contract_validated: admitted at that bar, refused below workload_verified.
+    admitted = admit_task_execution_variant(
+        TaskType.preference,
+        objective_id="dpo_qlora",
+        declared_variants=declared,
+        required_support=ExecutionVariantSupport.contract_validated,
+    )
+    assert admitted.variant_kind == ExecutionVariantKind.preference_dpo
+    with pytest.raises(ExecutionVariantRefused, match="below the required 'workload_verified'"):
+        admit_task_execution_variant(
+            TaskType.preference, objective_id="dpo_qlora", declared_variants=declared
+        )
+    # an unrecognized/unbuilt preference objective is refused as no-variant.
+    with pytest.raises(ExecutionVariantRefused, match="no executable execution variant"):
+        admit_task_execution_variant(
+            TaskType.preference, objective_id="ipo", declared_variants=declared
+        )
 
 
 def test_moe_topology_routes_to_the_declared_only_shape_regardless_of_task():
