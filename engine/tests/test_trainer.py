@@ -35,15 +35,21 @@ from corpus_studio.training.trainer import (
     TrainRunConfig,
     ExampleTokenSpan,
     PreferencePairTokens,
+    PreferencePairIntegrityIssue,
     analyze_preference_truncation,
     analyze_truncation,
     apply_attention_execution_policy,
     build_lora_kwargs,
     compute_token_coverage,
+    disable_dropout,
     dpo_preference_loss,
+    preference_pair_integrity_issues,
     preference_pair_spans,
+    preference_response_logprob,
+    refuse_degenerate_preference_pairs,
     refuse_preference_truncation,
     sequence_chunked_logprob,
+    summarize_preference_evidence,
     token_coverage_refusal,
     build_model_load_kwargs,
     build_training_kwargs,
@@ -352,6 +358,116 @@ def test_dpo_preference_loss_is_log2_at_zero_margin_and_falls_as_the_margin_rise
     better, _ = dpo_preference_loss(
         torch.tensor(2.0), torch.tensor(-1.0), torch.tensor(0.0), torch.tensor(0.0), beta=0.1)
     assert float(better) < math.log(2)
+
+
+def test_preference_response_logprob_applies_the_causal_next_token_shift():
+    # The sealed DPO scoring must be the STANDARD next-token log-prob: hidden[i] predicts labels[i+1]
+    # (HF/TRL get_batch_logps: logits[:-1] vs labels[1:]). Without the shift, each target token is scored
+    # from a hidden state that has already ingested it - a leak that trains DPO on a misaligned objective.
+    torch = pytest.importorskip("torch")
+    import torch.nn.functional as F
+
+    torch.manual_seed(1)
+    seq, hidden_dim, vocab = 12, 6, 20
+    hidden = torch.randn(seq, hidden_dim, dtype=torch.float32)
+    lm_head = torch.randn(vocab, hidden_dim, dtype=torch.float32)
+    labels = torch.randint(0, vocab, (seq,))
+    labels[:4] = -100  # prompt masked; only the response tail is scored
+    shifted = labels[1:]
+    logp = F.log_softmax(hidden[:-1] @ lm_head.t(), dim=-1)
+    tok = logp.gather(-1, shifted.clamp(min=0).unsqueeze(-1)).squeeze(-1)
+    manual_shifted_sum = (tok * (shifted != -100)).sum()
+    assert torch.allclose(
+        preference_response_logprob(hidden, labels, lm_head, chunk_size=3, average_log_prob=False),
+        manual_shifted_sum, atol=1e-4)
+    # ...and it must DIFFER from the unshifted (target-leaking) score the pre-fix worker computed
+    unshifted = sequence_chunked_logprob(hidden, labels, lm_head, chunk_size=3, average_log_prob=False)
+    assert not torch.allclose(manual_shifted_sum, unshifted, atol=1e-4)
+
+
+def test_sequence_chunked_logprob_gradient_matches_the_direct_computation():
+    # The gradient-checkpointed sequence chunking (the seq-4096 memory lever) must not corrupt gradients:
+    # the grad through the chunked path must equal the grad through the full-logits path.
+    torch = pytest.importorskip("torch")
+    import torch.nn.functional as F
+
+    torch.manual_seed(2)
+    seq, hidden_dim, vocab = 16, 5, 24
+    lm_head = torch.randn(vocab, hidden_dim)
+    labels = torch.randint(0, vocab, (seq,))
+    labels[:3] = -100
+
+    def direct(states):
+        logp = F.log_softmax(states @ lm_head.t(), dim=-1)
+        tok = logp.gather(-1, labels.clamp(min=0).unsqueeze(-1)).squeeze(-1)
+        return (tok * (labels != -100)).sum()
+
+    base = torch.randn(seq, hidden_dim)
+    h_direct = base.clone().requires_grad_(True)
+    h_chunked = base.clone().requires_grad_(True)
+    direct(h_direct).backward()
+    sequence_chunked_logprob(h_chunked, labels, lm_head, chunk_size=4, average_log_prob=False).backward()
+    assert h_direct.grad is not None and h_chunked.grad is not None
+    assert torch.allclose(h_direct.grad, h_chunked.grad, atol=1e-4)
+
+
+def test_disable_dropout_zeroes_every_dropout_module_and_is_idempotent():
+    torch = pytest.importorskip("torch")
+
+    model = torch.nn.Sequential(
+        torch.nn.Linear(4, 4),
+        torch.nn.Dropout(0.3),
+        torch.nn.Sequential(torch.nn.Dropout(0.5), torch.nn.Linear(4, 4)),
+    )
+    assert disable_dropout(model) == 2  # both active dropout modules neutralized
+    assert all(m.p == 0.0 for m in model.modules() if isinstance(m, torch.nn.Dropout))
+    assert disable_dropout(model) == 0  # idempotent: nothing left to neutralize
+
+
+def test_preference_pair_integrity_flags_empty_identical_duplicate_and_contradiction():
+    pairs = [
+        {"prompt": "p1", "chosen": "A", "rejected": "B"},       # 0: clean
+        {"prompt": "p1", "chosen": "B", "rejected": "A"},       # 1: reversed -> contradiction of 0
+        {"prompt": "p2", "chosen": "same", "rejected": "same"},  # 2: identical
+        {"prompt": "p3", "chosen": "", "rejected": "ok"},        # 3: empty chosen
+        {"prompt": "p4", "chosen": "ok", "rejected": "   "},     # 4: whitespace-only rejected
+        {"prompt": "p1", "chosen": "A", "rejected": "B"},        # 5: exact duplicate of 0
+    ]
+    flagged = {(i.index, i.kind) for i in preference_pair_integrity_issues(pairs)}
+    assert {(1, "contradiction"), (2, "identical"), (3, "empty_chosen"),
+            (4, "empty_rejected"), (5, "duplicate")} <= flagged
+    assert not any(i.index == 0 for i in preference_pair_integrity_issues(pairs))  # the clean pair is silent
+    assert all(isinstance(i, PreferencePairIntegrityIssue) for i in preference_pair_integrity_issues(pairs))
+
+
+def test_refuse_degenerate_preference_pairs_fails_closed_and_respects_overrides():
+    with pytest.raises(TrainerError, match="degenerate"):
+        refuse_degenerate_preference_pairs([{"prompt": "p", "chosen": "x", "rejected": "x"}])
+    dup = [
+        {"prompt": "p", "chosen": "a", "rejected": "b"},
+        {"prompt": "p", "chosen": "a", "rejected": "b"},
+    ]
+    with pytest.raises(TrainerError):
+        refuse_degenerate_preference_pairs(dup)  # duplicates fail closed by default
+    assert any(i.kind == "duplicate" for i in refuse_degenerate_preference_pairs(dup, allow_duplicates=True))
+    # an empty response is fatal even when duplicates/contradictions are allowed
+    with pytest.raises(TrainerError):
+        refuse_degenerate_preference_pairs(
+            [{"prompt": "p", "chosen": "", "rejected": "b"}],
+            allow_duplicates=True, allow_contradictions=True)
+    assert refuse_degenerate_preference_pairs([{"prompt": "p", "chosen": "a", "rejected": "b"}]) == []
+
+
+def test_summarize_preference_evidence_reports_accuracy_finiteness_and_length_correlation():
+    ev = summarize_preference_evidence(
+        losses=[0.7, 0.5, 0.3], margins=[0.1, 0.4, 0.7], length_deltas=[1.0, 2.0, 3.0])
+    assert ev["steps"] == 3 and ev["all_finite"] is True
+    assert ev["preference_accuracy"] == 1.0 and ev["final_margin"] == 0.7
+    # margins rise linearly with the length delta -> r == 1.0, the length-bias reward-hacking smell
+    assert ev["length_reward_correlation"] == pytest.approx(1.0)
+    bad = summarize_preference_evidence(losses=[float("nan")], margins=[0.0])
+    assert bad["all_finite"] is False and bad["preference_accuracy"] == 0.0  # margin 0 is not > 0
+    assert "length_reward_correlation" not in summarize_preference_evidence([0.1], [0.2])
 
 
 # --- token-coverage ledger (the no-silent-truncation foundation for the full validated run) ---
