@@ -458,6 +458,67 @@ def test_refuse_degenerate_preference_pairs_fails_closed_and_respects_overrides(
     assert refuse_degenerate_preference_pairs([{"prompt": "p", "chosen": "a", "rejected": "b"}]) == []
 
 
+def test_preference_pair_integrity_flags_empty_prompt():
+    # An empty/whitespace prompt leaves the response unconditioned (the next-token shift drops the first
+    # response token) - fatal, alongside empty responses.
+    assert any(i.kind == "empty_prompt"
+               for i in preference_pair_integrity_issues([{"prompt": "  ", "chosen": "a", "rejected": "b"}]))
+    with pytest.raises(TrainerError, match="degenerate"):
+        refuse_degenerate_preference_pairs([{"prompt": "", "chosen": "a", "rejected": "b"}])
+
+
+def test_causal_backbone_and_head_resolves_layouts_and_fails_closed():
+    from corpus_studio.training.trainer import _causal_backbone_and_head
+
+    backbone = object()
+
+    class _Head:
+        weight = "W"
+
+    class _Model:
+        def __init__(self, base):
+            self._base = base
+
+        def get_base_model(self):
+            return self._base
+
+    class _LlamaLike:  # .model + .lm_head
+        model = backbone
+        lm_head = _Head()
+
+    class _GPT2Like:  # .transformer + get_output_embeddings() fallback
+        transformer = backbone
+
+        def get_output_embeddings(self):
+            return _Head()
+
+    class _Unknown:  # no recognized backbone attr
+        pass
+
+    b1, w1 = _causal_backbone_and_head(_Model(_LlamaLike()))
+    assert b1 is backbone and w1 == "W"
+    b2, w2 = _causal_backbone_and_head(_Model(_GPT2Like()))
+    assert b2 is backbone and w2 == "W"
+    with pytest.raises(TrainerError):
+        _causal_backbone_and_head(_Model(_Unknown()))
+
+
+def test_dpo_preference_loss_label_smoothing_keeps_a_floor_for_confident_predictions():
+    torch = pytest.importorskip("torch")
+    import math
+
+    zero = torch.tensor(0.0)
+    # at a zero margin the loss is log 2 regardless of label smoothing (symmetric)
+    base, _ = dpo_preference_loss(zero, zero, zero, zero, beta=0.1, label_smoothing=0.0)
+    smoothed, _ = dpo_preference_loss(zero, zero, zero, zero, beta=0.1, label_smoothing=0.1)
+    assert abs(float(base) - math.log(2)) < 1e-5 and abs(float(smoothed) - math.log(2)) < 1e-5
+    # for a strongly-preferred pair, cDPO smoothing keeps a nonzero loss floor instead of collapsing to ~0
+    big = torch.tensor(50.0)
+    hard0, _ = dpo_preference_loss(big, zero, zero, zero, beta=0.1, label_smoothing=0.0)
+    hard, _ = dpo_preference_loss(big, zero, zero, zero, beta=0.1, label_smoothing=0.1)
+    assert float(hard) > float(hard0)
+
+
 def test_summarize_preference_evidence_reports_accuracy_finiteness_and_length_correlation():
     ev = summarize_preference_evidence(
         losses=[0.7, 0.5, 0.3], margins=[0.1, 0.4, 0.7], length_deltas=[1.0, 2.0, 3.0])

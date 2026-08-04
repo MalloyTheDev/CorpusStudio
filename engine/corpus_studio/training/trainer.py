@@ -2611,15 +2611,22 @@ def dpo_preference_loss(
     ref_rejected_logp: Any,
     *,
     beta: float = 0.1,
+    label_smoothing: float = 0.0,
 ) -> tuple[Any, Any]:
     """The DPO sigmoid loss and the implicit reward margin from the four (chunked) response log-probs.
     The reference log-probs are constants (computed once with the PEFT adapter disabled, under no_grad).
-    At a zero margin the loss is exactly ``-log sigmoid(0) == log 2``; it decreases as the policy learns
-    to prefer chosen over rejected (the margin rises). ``loss_type='sigmoid'`` is the canonical DPO."""
+    At a zero margin and ``label_smoothing == 0`` the loss is exactly ``-log sigmoid(0) == log 2``; it
+    decreases as the policy learns to prefer chosen over rejected (the margin rises). ``loss_type='sigmoid'``
+    is the canonical DPO. ``label_smoothing`` (cDPO) assumes the preference label is flipped with that
+    probability, so a sealed non-zero value is HONORED here rather than silently dropped:
+    ``-(1-e)*logsig(beta*m) - e*logsig(-beta*m)``."""
     import torch.nn.functional as F  # noqa: PLC0415
 
     reward_margin = (policy_chosen_logp - ref_chosen_logp) - (policy_rejected_logp - ref_rejected_logp)
-    loss = -F.logsigmoid(beta * reward_margin)
+    loss = (
+        -F.logsigmoid(beta * reward_margin) * (1.0 - label_smoothing)
+        - F.logsigmoid(-beta * reward_margin) * label_smoothing
+    )
     return loss, reward_margin
 
 
@@ -2645,7 +2652,7 @@ class PreferencePairIntegrityIssue(BaseModel):
     detail: str
 
 
-_FATAL_PAIR_ISSUES = frozenset({"empty_chosen", "empty_rejected", "identical"})
+_FATAL_PAIR_ISSUES = frozenset({"empty_prompt", "empty_chosen", "empty_rejected", "identical"})
 
 
 def preference_pair_integrity_issues(
@@ -2657,6 +2664,8 @@ def preference_pair_integrity_issues(
     - ``empty_chosen`` / ``empty_rejected`` - a blank response is zero supervised tokens on that branch,
       so its length-normalized log-prob divides by zero -> NaN (the exact degeneracy the WBG seq-512 probe
       hit when the prompt consumed the whole window);
+    - ``empty_prompt`` - a blank prompt leaves the response unconditioned; the causal next-token shift then
+      drops the first response token (nothing precedes it), and a chat-templated prompt is never empty;
     - ``identical`` - ``chosen == rejected`` makes the implicit reward margin 0 by construction: a step
       with no gradient and nothing to prefer;
     - ``duplicate`` - the same ``(prompt, chosen, rejected)`` repeated over-counts one comparison;
@@ -2672,6 +2681,10 @@ def preference_pair_integrity_issues(
         prompt = pair.get("prompt", "")
         chosen = pair.get("chosen", "")
         rejected = pair.get("rejected", "")
+        if not prompt.strip():
+            issues.append(PreferencePairIntegrityIssue(
+                index=index, kind="empty_prompt",
+                detail="prompt is empty/whitespace - the response would be unconditioned"))
         if not chosen.strip():
             issues.append(PreferencePairIntegrityIssue(
                 index=index, kind="empty_chosen",
@@ -2812,6 +2825,31 @@ def _encode_preference_branch(
     return ids, labels, content_len
 
 
+def _causal_backbone_and_head(model: Any) -> tuple[Any, Any]:
+    """Locate the decoder backbone (the module whose forward returns ``last_hidden_state``) and the LM
+    head weight of a PEFT-wrapped causal model, tolerant of architecture naming - ``.model`` (Llama/Qwen),
+    ``.transformer`` (GPT-2/Falcon), ``.gpt_neox`` (NeoX) - and a tied/untied head via ``.lm_head`` or
+    ``get_output_embeddings()``. The backbone is called WITHOUT the head so the sequence-chunked log-prob
+    applies the head itself. Fails closed with a clear :class:`TrainerError` instead of an
+    ``AttributeError`` on an unrecognized layout."""
+    base = model.get_base_model()
+    backbone = next(
+        (getattr(base, attr) for attr in ("model", "transformer", "gpt_neox")
+         if getattr(base, attr, None) is not None),
+        None,
+    )
+    head = getattr(base, "lm_head", None)
+    if head is None and hasattr(base, "get_output_embeddings"):
+        head = base.get_output_embeddings()
+    if backbone is None or head is None or getattr(head, "weight", None) is None:
+        raise TrainerError(
+            "DPO worker could not locate a decoder backbone + LM head on this model architecture; the "
+            "sequence-chunked log-prob needs a hidden-state backbone (.model/.transformer/.gpt_neox) and "
+            "an lm_head."
+        )
+    return backbone, head.weight
+
+
 def run_dpo_training(  # pragma: no cover - optional training-stack integration (exploratory; sealed GPU run gated)
     model: Any,
     tokenizer: Any,
@@ -2820,9 +2858,13 @@ def run_dpo_training(  # pragma: no cover - optional training-stack integration 
     seq_len: int,
     chunk_size: int = 512,
     beta: float = 0.1,
+    label_smoothing: float = 0.0,
     average_log_prob: bool = True,
     learning_rate: float = 5e-5,
     max_steps: int,
+    gradient_accumulation_steps: int = 1,
+    max_prompt_length: int | None = None,
+    optimizer: Any = None,
     truncation_allowed: bool = False,
     stage_callback: StageCallback | None = None,
 ) -> dict[str, Any]:
@@ -2833,11 +2875,26 @@ def run_dpo_training(  # pragma: no cover - optional training-stack integration 
     that is exploratory evidence, not a sealed/recorded result - the sealed run + milestone wheel remain
     gated. Reference log-probs use the PEFT adapter disabled.
 
+    Sealed execution semantics are HONORED, not silently defaulted: ``beta`` / ``label_smoothing`` /
+    ``gradient_accumulation_steps`` come from the plan, and the caller passes the sealed ``optimizer``
+    (e.g. paged 8-bit AdamW) - only when it is ``None`` does this build a plain AdamW as a dev convenience.
+    Each optimizer step accumulates ``gradient_accumulation_steps`` preference microbatches. The sealed
+    ``adapter.lora_dropout`` should be 0 for DPO; :func:`disable_dropout` is a runtime backstop and the
+    count it neutralizes is surfaced in the evidence.
+
     Consumed by the platform DPO worker (a thin adapter maps a sealed
     ``ResolvedPreferenceExecutionConfiguration`` to these arguments). Returns an evidence bundle (per-step
     loss + implicit reward margin, preference accuracy, finiteness, grad norm, length/reward correlation,
     peak VRAM)."""
     import torch  # noqa: PLC0415
+
+    if not pairs:
+        raise TrainerError("DPO training requires at least one preference pair (got an empty set).")
+    if max_steps < 1:
+        raise TrainerError(f"DPO training requires max_steps >= 1 (got {max_steps}).")
+    if gradient_accumulation_steps < 1:
+        raise TrainerError(
+            f"gradient_accumulation_steps must be >= 1 (got {gradient_accumulation_steps}).")
 
     def _stage(name: str, message: str) -> None:
         if stage_callback is not None:
@@ -2849,8 +2906,8 @@ def run_dpo_training(  # pragma: no cover - optional training-stack integration 
         )
 
     # Fail-closed data preflight over EVERY pair, before any GPU weights are touched: (1) no degenerate
-    # pair (empty/identical/duplicate/contradiction) that would NaN or waste a step, (2) no silent
-    # truncation of either branch.
+    # pair (empty/identical/duplicate/contradiction) that would NaN or waste a step, (2) the sealed
+    # max_prompt_length, (3) no silent truncation of either branch.
     _stage("data_integrity", f"checking {len(pairs)} preference pairs for degenerate/duplicate rows")
     integrity_issues = refuse_degenerate_preference_pairs(pairs)
     _stage("truncation_analysis", f"tokenizing {len(pairs)} preference pairs for the coverage ledger")
@@ -2862,15 +2919,28 @@ def run_dpo_training(  # pragma: no cover - optional training-stack integration 
         )
         for p in pairs
     ]
+    if max_prompt_length is not None:
+        over = [i for i, length in enumerate(lengths) if length.prompt_tokens > max_prompt_length]
+        if over and not truncation_allowed:
+            raise TrainerError(
+                f"{len(over)} pair(s) exceed the sealed max_prompt_length={max_prompt_length} "
+                f"(first at index {over[0]}); the prompt would be cut - split or re-encode the data, or "
+                f"seal a lossy policy."
+            )
     ledger = refuse_preference_truncation(lengths, seq_len, truncation_allowed=truncation_allowed)
 
-    lm_head_weight = model.get_base_model().lm_head.weight
-    transformer = model.get_base_model().model
-    transformer.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
+    backbone, lm_head_weight = _causal_backbone_and_head(model)
+    backbone.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
     model.enable_input_require_grads()
     model.config.use_cache = False
     trainable = [p for p in model.parameters() if p.requires_grad]
-    optimizer = torch.optim.AdamW(trainable, lr=learning_rate)
+    if not trainable:
+        raise TrainerError(
+            "DPO policy has no trainable parameters - attach a PEFT adapter before training (a base with "
+            "no adapter has nothing to optimize and no implicit-reward anchor)."
+        )
+    if optimizer is None:
+        optimizer = torch.optim.AdamW(trainable, lr=learning_rate)
     device = next(model.parameters()).device
 
     _stage("training", f"sequence-chunked DPO at seq_len={seq_len}, chunk={chunk_size}")
@@ -2883,54 +2953,67 @@ def run_dpo_training(  # pragma: no cover - optional training-stack integration 
     margins: list[float] = []
     grad_norms: list[float] = []
     length_deltas: list[float] = []
+    checked = False
+    pair_cursor = 0
     for step in range(max_steps):
-        row = pairs[step % len(pairs)]
-        chosen_ids, chosen_labels, chosen_len = _encode_preference_branch(
-            tokenizer, row["prompt"], row["chosen"], seq_len)
-        rejected_ids, rejected_labels, rejected_len = _encode_preference_branch(
-            tokenizer, row["prompt"], row["rejected"], seq_len)
-        input_ids = torch.tensor([chosen_ids, rejected_ids], device=device)
-        labels = torch.tensor([chosen_labels, rejected_labels], device=device)
-        # Attention mask from the true content length, not pad-token equality: when pad_token == eos_token
-        # (common) the equality test would wrongly mask the response's real trailing EOS.
-        attention_mask = torch.zeros_like(input_ids)
-        attention_mask[0, :chosen_len] = 1
-        attention_mask[1, :rejected_len] = 1
-        policy = transformer(input_ids=input_ids, attention_mask=attention_mask).last_hidden_state
-        policy_chosen = _response_logprob(policy[0], labels[0])
-        policy_rejected = _response_logprob(policy[1], labels[1])
-        with torch.no_grad(), model.disable_adapter():
-            reference = transformer(input_ids=input_ids, attention_mask=attention_mask).last_hidden_state
-            ref_chosen = _response_logprob(reference[0], labels[0])
-            ref_rejected = _response_logprob(reference[1], labels[1])
-        if step == 0:
-            # Reference-correctness, proven once and cheaply: the adapter must actually alter the forward
-            # (else disable_adapter is a no-op and policy == reference), the reference must not carry grad,
-            # and the trainable policy path must.
-            if torch.allclose(policy, reference):
+        optimizer.zero_grad()
+        micro_loss = 0.0
+        micro_margin = 0.0
+        micro_delta = 0.0
+        for _micro in range(gradient_accumulation_steps):
+            row = pairs[pair_cursor % len(pairs)]
+            pair_cursor += 1
+            chosen_ids, chosen_labels, chosen_len = _encode_preference_branch(
+                tokenizer, row["prompt"], row["chosen"], seq_len)
+            rejected_ids, rejected_labels, rejected_len = _encode_preference_branch(
+                tokenizer, row["prompt"], row["rejected"], seq_len)
+            input_ids = torch.tensor([chosen_ids, rejected_ids], device=device)
+            labels = torch.tensor([chosen_labels, rejected_labels], device=device)
+            # Attention mask from the true content length, not pad-token equality: when pad == eos (common)
+            # the equality test would wrongly mask the response's real trailing EOS.
+            attention_mask = torch.zeros_like(input_ids)
+            attention_mask[0, :chosen_len] = 1
+            attention_mask[1, :rejected_len] = 1
+            policy = backbone(input_ids=input_ids, attention_mask=attention_mask).last_hidden_state
+            policy_chosen = _response_logprob(policy[0], labels[0])
+            policy_rejected = _response_logprob(policy[1], labels[1])
+            with torch.no_grad(), model.disable_adapter():
+                reference = backbone(input_ids=input_ids, attention_mask=attention_mask).last_hidden_state
+                ref_chosen = _response_logprob(reference[0], labels[0])
+                ref_rejected = _response_logprob(reference[1], labels[1])
+            if not checked:
+                # Reference-correctness, proven once and cheaply. NOTE: policy == reference on a FRESH
+                # adapter is EXPECTED (PEFT inits the LoRA B matrices to zero -> zero delta), so an
+                # output-equality assertion would false-positive; instead require a trainable adapter, no
+                # grad on the reference, and grad on the policy.
+                if ref_chosen.requires_grad or ref_rejected.requires_grad:
+                    raise TrainerError("DPO reference log-probs require grad - the frozen reference leaked into autograd.")
+                if not policy_chosen.requires_grad:
+                    raise TrainerError("DPO policy log-probs do not require grad - the adapter is not trainable.")
+            loss, margin = dpo_preference_loss(
+                policy_chosen, policy_rejected, ref_chosen, ref_rejected,
+                beta=beta, label_smoothing=label_smoothing,
+            )
+            if not bool(torch.isfinite(loss)) or not bool(torch.isfinite(margin)):
                 raise TrainerError(
-                    "DPO reference == policy on step 0 - disable_adapter() did not change the forward, so "
-                    "the implicit reward has no anchor (check the PEFT wrapping)."
+                    f"DPO produced a non-finite loss/margin at step {step} - refusing to update the "
+                    f"adapter (check data, precision, or beta)."
                 )
-            if ref_chosen.requires_grad or ref_rejected.requires_grad:
-                raise TrainerError("DPO reference log-probs require grad - the frozen reference leaked into autograd.")
-            if not policy_chosen.requires_grad:
-                raise TrainerError("DPO policy log-probs do not require grad - the adapter is not trainable.")
-        loss, margin = dpo_preference_loss(
-            policy_chosen, policy_rejected, ref_chosen, ref_rejected, beta=beta
-        )
-        loss.backward()
-        if step == 0:
-            # No gradient may reach a frozen (reference/base) parameter; only the adapter trains.
-            leaked = sum(1 for p in model.parameters() if p.grad is not None and not p.requires_grad)
-            if leaked:
-                raise TrainerError(f"DPO backward leaked gradient into {leaked} frozen parameter(s).")
+            (loss / gradient_accumulation_steps).backward()
+            if not checked:
+                # No gradient may reach a frozen (reference/base) parameter; only the adapter trains.
+                leaked = sum(1 for p in model.parameters() if p.grad is not None and not p.requires_grad)
+                if leaked:
+                    raise TrainerError(f"DPO backward leaked gradient into {leaked} frozen parameter(s).")
+                checked = True
+            micro_loss += float(loss)
+            micro_margin += float(margin)
+            micro_delta += float(chosen_len - rejected_len)
         grad_norms.append(float(torch.nn.utils.clip_grad_norm_(trainable, float("inf"))))
         optimizer.step()
-        optimizer.zero_grad()
-        losses.append(float(loss))
-        margins.append(float(margin))
-        length_deltas.append(float(chosen_len - rejected_len))
+        losses.append(micro_loss / gradient_accumulation_steps)
+        margins.append(micro_margin / gradient_accumulation_steps)
+        length_deltas.append(micro_delta / gradient_accumulation_steps)
     peak_gib = (
         torch.cuda.max_memory_allocated() / (1024**3) if torch.cuda.is_available() else 0.0
     )
@@ -2956,22 +3039,38 @@ def evaluate_preference_accuracy(  # pragma: no cover - optional training-stack 
     seq_len: int,
     chunk_size: int = 512,
     beta: float = 0.1,
+    label_smoothing: float = 0.0,
     average_log_prob: bool = True,
+    truncation_allowed: bool = False,
     stage_callback: StageCallback | None = None,
 ) -> dict[str, Any]:
     """Held-out preference evaluation - the DPO PROMOTION GATE. Under ``no_grad``, score each held-out
     pair's implicit reward margin with the SAME sealed encoding + shifted log-prob as training, and report
     the fraction the model ranks correctly (chosen over rejected), the mean margin, and the mean DPO loss.
     A falling TRAINING loss is never the promotion gate; a measured held-out preference accuracy is. Never
-    mutates weights: eval mode (restored on exit), no optimizer, no backward - a pure measurement."""
+    mutates weights: eval mode (restored on exit), no optimizer, no backward - a pure measurement.
+
+    Fail-closes on held-out truncation exactly like training: a silently cut held-out response would
+    corrupt the very metric the gate is measured on."""
     import torch  # noqa: PLC0415
 
     def _stage(name: str, message: str) -> None:
         if stage_callback is not None:
             stage_callback(name, message)
 
-    lm_head_weight = model.get_base_model().lm_head.weight
-    transformer = model.get_base_model().model
+    # Same no-silent-truncation guard as training - the gate metric must not be measured on cut pairs.
+    if pairs:
+        eval_lengths = [
+            PreferencePairTokens(
+                prompt_tokens=len(tokenizer(p["prompt"], add_special_tokens=False)["input_ids"]),
+                chosen_response_tokens=len(tokenizer(p["chosen"], add_special_tokens=False)["input_ids"]) + 1,
+                rejected_response_tokens=len(tokenizer(p["rejected"], add_special_tokens=False)["input_ids"]) + 1,
+            )
+            for p in pairs
+        ]
+        refuse_preference_truncation(eval_lengths, seq_len, truncation_allowed=truncation_allowed)
+
+    backbone, lm_head_weight = _causal_backbone_and_head(model)
     was_training = model.training
     model.eval()  # eval() already neutralizes dropout for the forward without mutating its probabilities
     device = next(model.parameters()).device
@@ -2991,7 +3090,7 @@ def evaluate_preference_accuracy(  # pragma: no cover - optional training-stack 
                 attention_mask = torch.zeros_like(input_ids)
                 attention_mask[0, :chosen_len] = 1
                 attention_mask[1, :rejected_len] = 1
-                policy = transformer(input_ids=input_ids, attention_mask=attention_mask).last_hidden_state
+                policy = backbone(input_ids=input_ids, attention_mask=attention_mask).last_hidden_state
                 pol_chosen = preference_response_logprob(
                     policy[0], labels[0], lm_head_weight, chunk_size=chunk_size,
                     average_log_prob=average_log_prob)
@@ -2999,7 +3098,7 @@ def evaluate_preference_accuracy(  # pragma: no cover - optional training-stack 
                     policy[1], labels[1], lm_head_weight, chunk_size=chunk_size,
                     average_log_prob=average_log_prob)
                 with model.disable_adapter():
-                    reference = transformer(
+                    reference = backbone(
                         input_ids=input_ids, attention_mask=attention_mask).last_hidden_state
                     ref_chosen = preference_response_logprob(
                         reference[0], labels[0], lm_head_weight, chunk_size=chunk_size,
@@ -3008,7 +3107,8 @@ def evaluate_preference_accuracy(  # pragma: no cover - optional training-stack 
                         reference[1], labels[1], lm_head_weight, chunk_size=chunk_size,
                         average_log_prob=average_log_prob)
                 loss, margin = dpo_preference_loss(
-                    pol_chosen, pol_rejected, ref_chosen, ref_rejected, beta=beta)
+                    pol_chosen, pol_rejected, ref_chosen, ref_rejected,
+                    beta=beta, label_smoothing=label_smoothing)
                 margins.append(float(margin))
                 losses.append(float(loss))
                 correct += int(float(margin) > 0.0)
