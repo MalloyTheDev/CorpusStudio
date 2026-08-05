@@ -1,6 +1,7 @@
 from pathlib import Path
 import contextlib
 import json
+import math
 import os
 import sqlite3
 import sys
@@ -1152,11 +1153,27 @@ def platform_plan(
 
             try:
                 arch_bytes = architecture_config.read_bytes()
-            except OSError as exc:
+                arch_config_json = json.loads(arch_bytes)
+            except (OSError, ValueError) as exc:
                 typer.echo(f"cannot read --architecture-config: {exc}", err=True)
                 raise typer.Exit(2) from exc
             pretraining_arch_ref_id = str(architecture_config)
             pretraining_arch_ref_sha256 = hashlib.sha256(arch_bytes).hexdigest()
+            # The architecture config's vocab_size IS the model's embedding size: default --init-vocab-size
+            # to it, and refuse an explicit value that contradicts it (a silent mismatch = a broken model).
+            arch_vocab = (
+                arch_config_json.get("vocab_size") if isinstance(arch_config_json, dict) else None
+            )
+            if isinstance(arch_vocab, int) and not isinstance(arch_vocab, bool) and arch_vocab > 0:
+                if init_vocab_size is None:
+                    init_vocab_size = arch_vocab
+                elif init_vocab_size != arch_vocab:
+                    typer.echo(
+                        f"--init-vocab-size {init_vocab_size} contradicts the architecture config's "
+                        f"vocab_size {arch_vocab}",
+                        err=True,
+                    )
+                    raise typer.Exit(2)
     constraints = PlannerConstraints(
         base_model=base_model,
         model_revision=model_revision,
@@ -1562,8 +1579,9 @@ def _parse_param_count(text: str) -> int:
     elif cleaned.endswith("B"):
         multiplier, cleaned = 1_000_000_000, cleaned[:-1]
     value = float(cleaned) * multiplier
-    if value <= 0:
-        raise ValueError("must be a positive parameter count (e.g. 125M, 1B)")
+    # Reject NaN / inf (e.g. '1e999' overflows to inf): int(inf) would raise an uncaught OverflowError.
+    if not math.isfinite(value) or value <= 0:
+        raise ValueError("must be a finite positive parameter count (e.g. 125M, 1B)")
     return int(value)
 
 
@@ -1652,7 +1670,11 @@ def create_model(
                 err=True,
             )
     if out is not None:
-        out.write_text(json.dumps(built.config, indent=2), encoding="utf-8")
+        try:
+            out.write_text(json.dumps(built.config, indent=2), encoding="utf-8")
+        except OSError as exc:
+            typer.echo(f"cannot write --out: {exc}", err=True)
+            raise typer.Exit(2) from exc
     if json_out:
         typer.echo(
             json.dumps(

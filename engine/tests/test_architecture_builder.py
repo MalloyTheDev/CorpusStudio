@@ -129,3 +129,20 @@ def test_create_model_cli_solves_a_param_target():
 def test_create_model_cli_rejects_two_modes():
     result = _runner.invoke(app, ["create-model", "--preset", "small", "--params", "125M"])
     assert result.exit_code == 2
+
+
+def test_create_model_cli_rejects_non_finite_params():
+    # AUDIT fix: '1e999' overflows to inf; int(inf) would raise an uncaught OverflowError - now a clean
+    # fail-closed exit (never a traceback).
+    for bad in ("inf", "1e999", "nan", "-5"):
+        result = _runner.invoke(app, ["create-model", "--params", bad])
+        assert result.exit_code == 2, f"{bad}: {result.output}"
+
+
+def test_create_model_cli_reports_an_unwritable_out_path(tmp_path):
+    # AUDIT fix: a --out path whose parent does not exist raised an uncaught FileNotFoundError - now a
+    # clean typed error.
+    bad = tmp_path / "missing-dir" / "config.json"
+    result = _runner.invoke(app, ["create-model", "--preset", "small", "--out", str(bad)])
+    assert result.exit_code == 2
+    assert "cannot write --out" in result.output
