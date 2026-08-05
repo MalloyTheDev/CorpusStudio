@@ -5499,6 +5499,34 @@ class GradientCoverageEvidence(ContractModel):
         return self
 
 
+def _validate_safetensors_export_change(
+    *,
+    before_sha256: str,
+    after_sha256: str,
+    tensor_count: int,
+    tensor_names: list[str],
+    changed_tensor_count: int,
+    changed_tensor_names: list[str],
+    noun: str,
+    activity: str,
+) -> None:
+    """Shared fail-closed checks for a safetensors export-state identity, so the adapter and full-model
+    sibling evidence models cannot drift. ``noun`` ('adapter' / 'model') + ``activity`` ('training' /
+    'pretraining') reproduce each model's exact messages; the checks themselves are identical."""
+    if before_sha256 == after_sha256:
+        raise ValueError(f"{noun} export state must change during successful {activity}")
+    if tensor_names != sorted(set(tensor_names)):
+        raise ValueError(f"{noun} export tensor names must be sorted and unique")
+    if tensor_count != len(tensor_names):
+        raise ValueError(f"{noun} export tensor count must match its complete name inventory")
+    if changed_tensor_names != sorted(set(changed_tensor_names)):
+        raise ValueError(f"changed {noun} export names must be sorted and unique")
+    if changed_tensor_count != len(changed_tensor_names):
+        raise ValueError(f"changed {noun} export count must match its name inventory")
+    if not set(changed_tensor_names).issubset(tensor_names):
+        raise ValueError(f"changed {noun} export names must belong to the export inventory")
+
+
 class AdapterExportStateEvidence(ContractModel):
     """Canonical identity for the exact PEFT state expected in adapter_model.safetensors."""
 
@@ -5515,18 +5543,16 @@ class AdapterExportStateEvidence(ContractModel):
 
     @model_validator(mode="after")
     def _proved_export_change(self) -> AdapterExportStateEvidence:
-        if self.before_sha256 == self.after_sha256:
-            raise ValueError("adapter export state must change during successful training")
-        if self.tensor_names != sorted(set(self.tensor_names)):
-            raise ValueError("adapter export tensor names must be sorted and unique")
-        if self.tensor_count != len(self.tensor_names):
-            raise ValueError("adapter export tensor count must match its complete name inventory")
-        if self.changed_tensor_names != sorted(set(self.changed_tensor_names)):
-            raise ValueError("changed adapter export names must be sorted and unique")
-        if self.changed_tensor_count != len(self.changed_tensor_names):
-            raise ValueError("changed adapter export count must match its name inventory")
-        if not set(self.changed_tensor_names).issubset(self.tensor_names):
-            raise ValueError("changed adapter export names must belong to the export inventory")
+        _validate_safetensors_export_change(
+            before_sha256=self.before_sha256,
+            after_sha256=self.after_sha256,
+            tensor_count=self.tensor_count,
+            tensor_names=self.tensor_names,
+            changed_tensor_count=self.changed_tensor_count,
+            changed_tensor_names=self.changed_tensor_names,
+            noun="adapter",
+            activity="training",
+        )
         return self
 
 
@@ -5580,6 +5606,99 @@ class TrainingSuccessEvidence(ContractModel):
     measured_peak: MemoryMetrics | None = None
 
 
+class FullModelExportStateEvidence(ContractModel):
+    """Canonical identity for the exact full-parameter model state expected in model.safetensors.
+
+    The full-parameter sibling of :class:`AdapterExportStateEvidence`: from-scratch / continued
+    pretraining exports the WHOLE model (model.safetensors), not a PEFT adapter, so the pinned config is
+    the model config (``model_config_semantic_sha256``), never an adapter config. Dense- and MoE-safe:
+    the tensor inventory is a plain name/hash set, so a MoE model simply carries more expert tensors."""
+
+    hash_algorithm: Literal["sha256-safetensors-tensor-state-v1"] = (
+        "sha256-safetensors-tensor-state-v1"
+    )
+    before_sha256: str = Field(pattern=SHA256_PATTERN)
+    after_sha256: str = Field(pattern=SHA256_PATTERN)
+    tensor_count: int = Field(ge=1)
+    tensor_names: list[str] = Field(min_length=1)
+    changed_tensor_count: int = Field(ge=1)
+    changed_tensor_names: list[str] = Field(min_length=1)
+    model_config_semantic_sha256: str = Field(pattern=SHA256_PATTERN)
+
+    @model_validator(mode="after")
+    def _proved_export_change(self) -> FullModelExportStateEvidence:
+        _validate_safetensors_export_change(
+            before_sha256=self.before_sha256,
+            after_sha256=self.after_sha256,
+            tensor_count=self.tensor_count,
+            tensor_names=self.tensor_names,
+            changed_tensor_count=self.changed_tensor_count,
+            changed_tensor_names=self.changed_tensor_names,
+            noun="model",
+            activity="pretraining",
+        )
+        return self
+
+
+class PretrainingExecutionEvidence(ContractModel):
+    """Trainer-side proof produced before a full-parameter pretraining model is admitted as a success.
+
+    The full-parameter sibling of :class:`TrainingExecutionEvidence`. It REUSES the generic, adapter-free
+    evidence pieces - :class:`TrainableStateChangeEvidence` (here the trainable set is the COMPLETE
+    parameter inventory, not an adapter), :class:`GradientCoverageEvidence`, and
+    :class:`OptimizerStepLossEvidence` - and swaps the adapter export for the full-model export
+    (:class:`FullModelExportStateEvidence`). None of these are part of the sealed execution config, so the
+    reuse cannot perturb the byte-locked SFT / pretraining seals."""
+
+    trainable_state: TrainableStateChangeEvidence
+    model_export_state: FullModelExportStateEvidence
+    gradient_coverage: GradientCoverageEvidence
+    optimizer_created: Literal[True]
+    completed_optimizer_steps: int = Field(ge=1)
+    step_losses: list[OptimizerStepLossEvidence] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _one_loss_per_completed_step(self) -> PretrainingExecutionEvidence:
+        observed_steps = [item.optimizer_step for item in self.step_losses]
+        expected_steps = list(range(1, self.completed_optimizer_steps + 1))
+        if observed_steps != expected_steps:
+            raise ValueError(
+                "step_losses must contain exactly one ordered finite loss for every completed step"
+            )
+        changed = set(self.trainable_state.changed_tensor_names)
+        observed_gradients = set(self.gradient_coverage.observed_tensor_names)
+        if (
+            self.gradient_coverage.eligible_tensor_names
+            != self.trainable_state.trainable_tensor_names
+        ):
+            raise ValueError(
+                "gradient eligibility must equal the complete trainable-state inventory"
+            )
+        if not changed.intersection(observed_gradients):
+            raise ValueError(
+                "at least one changed trainable tensor must have an observed materialized gradient"
+            )
+        if self.model_export_state.tensor_count != self.trainable_state.trainable_tensor_count:
+            raise ValueError(
+                "model export tensor count must equal the complete trainable-state inventory"
+            )
+        return self
+
+
+class PretrainingSuccessEvidence(ContractModel):
+    """All gates required before a resolved from-scratch / continued pretraining run may be called
+    successful. The full-parameter sibling of :class:`TrainingSuccessEvidence` - it verifies the exported
+    model bytes (model.safetensors), not an adapter."""
+
+    execution: PretrainingExecutionEvidence
+    output_path_verified: Literal[True]
+    model_bytes_verified: Literal[True]
+    artifact_integrity_verified: Literal[True]
+    model_safetensors_sha256: str = Field(pattern=SHA256_PATTERN)
+    model_config_sha256: str = Field(pattern=SHA256_PATTERN)
+    measured_peak: MemoryMetrics | None = None
+
+
 class RunManifest(ContractModel):
     """A single run INSTANCE: the crash-safe durable record of one execution of a RunPlan.
     Formalizes run_registry.TrainingRunRecord almost field-for-field + its state machine (terminal =
@@ -5612,10 +5731,30 @@ class RunManifest(ContractModel):
     # Post-run fit reconciliation from observed peak memory (planned NATIVE_SAFE, or a spill?).
     final_fit: FitClassification | None = None
     training_success_evidence: TrainingSuccessEvidence | None = None
+    # The full-parameter pretraining sibling of training_success_evidence: present on a succeeded
+    # from-scratch / continued pretraining run (model.safetensors export), mutually exclusive with the
+    # adapter evidence above. Absent until the (gated) pretraining worker capture lands.
+    pretraining_success_evidence: PretrainingSuccessEvidence | None = None
     # Present only on a run that resumed from a parent checkpoint - explicit parent-run + parent-
     # checkpoint provenance for a fresh run identity (#440). Absent for an ordinary from-scratch run.
     resume_lineage: ResumeLineage | None = None
     notes: str = ""
+
+    @model_validator(mode="after")
+    def _one_success_evidence_family(self) -> RunManifest:
+        # A run is EITHER an adapter (SFT/DPO) success or a full-model pretraining success, never both -
+        # they describe incompatible artifacts (adapter_model.safetensors vs model.safetensors). Enforce
+        # the invariant the field docs assert rather than leaving conflict resolution to callers. At most
+        # one may be set; a prepared / running / failed run carries neither.
+        if (
+            self.training_success_evidence is not None
+            and self.pretraining_success_evidence is not None
+        ):
+            raise ValueError(
+                "a run carries at most one success-evidence family: adapter "
+                "(training_success_evidence) XOR full-model (pretraining_success_evidence)"
+            )
+        return self
 
     @field_validator("parameter_accounting_refs")
     @classmethod

@@ -118,6 +118,56 @@ export type FinishedAt = string | null;
 export type Notes = string;
 export type OutputDir = string;
 export type ParameterAccountingRefs = Ref[];
+export type ArtifactIntegrityVerified = true;
+export type CompletedOptimizerSteps = number;
+export type EligibleTensorCount = number;
+/**
+ * @minItems 1
+ */
+export type EligibleTensorNames = [string, ...string[]];
+export type ObservedTensorCount = number;
+/**
+ * @minItems 1
+ */
+export type ObservedTensorNames = [string, ...string[]];
+export type AfterSha256 = string;
+export type BeforeSha256 = string;
+export type ChangedTensorCount = number;
+/**
+ * @minItems 1
+ */
+export type ChangedTensorNames = [string, ...string[]];
+export type HashAlgorithm = "sha256-safetensors-tensor-state-v1";
+export type ModelConfigSemanticSha256 = string;
+export type TensorCount = number;
+/**
+ * @minItems 1
+ */
+export type TensorNames = [string, ...string[]];
+export type OptimizerCreated = true;
+/**
+ * @minItems 1
+ */
+export type StepLosses = [OptimizerStepLossEvidence, ...OptimizerStepLossEvidence[]];
+export type Loss = number;
+export type OptimizerStep = number;
+export type AfterSha2561 = string;
+export type BeforeSha2561 = string;
+export type ChangedTensorCount1 = number;
+/**
+ * @minItems 1
+ */
+export type ChangedTensorNames1 = [string, ...string[]];
+export type HashAlgorithm1 = "sha256-trainable-state-v1";
+export type TrainableTensorCount = number;
+/**
+ * @minItems 1
+ */
+export type TrainableTensorNames = [string, ...string[]];
+export type ModelBytesVerified = true;
+export type ModelConfigSha256 = string;
+export type ModelSafetensorsSha256 = string;
+export type OutputPathVerified = true;
 export type Argv = string[];
 export type ExitCode1 = number | null;
 export type Pid = number | null;
@@ -139,53 +189,28 @@ export type Target = string;
 export type AdapterBytesVerified = true;
 export type AdapterConfigSha256 = string;
 export type AdapterSafetensorsSha256 = string;
-export type ArtifactIntegrityVerified = true;
+export type ArtifactIntegrityVerified1 = true;
 export type AdapterConfigSemanticSha256 = string;
-export type AfterSha256 = string;
-export type BeforeSha256 = string;
-export type ChangedTensorCount = number;
+export type AfterSha2562 = string;
+export type BeforeSha2562 = string;
+export type ChangedTensorCount2 = number;
 /**
  * @minItems 1
  */
-export type ChangedTensorNames = [string, ...string[]];
-export type HashAlgorithm = "sha256-safetensors-tensor-state-v1";
-export type TensorCount = number;
+export type ChangedTensorNames2 = [string, ...string[]];
+export type HashAlgorithm2 = "sha256-safetensors-tensor-state-v1";
+export type TensorCount1 = number;
 /**
  * @minItems 1
  */
-export type TensorNames = [string, ...string[]];
-export type CompletedOptimizerSteps = number;
-export type EligibleTensorCount = number;
+export type TensorNames1 = [string, ...string[]];
+export type CompletedOptimizerSteps1 = number;
+export type OptimizerCreated1 = true;
 /**
  * @minItems 1
  */
-export type EligibleTensorNames = [string, ...string[]];
-export type ObservedTensorCount = number;
-/**
- * @minItems 1
- */
-export type ObservedTensorNames = [string, ...string[]];
-export type OptimizerCreated = true;
-/**
- * @minItems 1
- */
-export type StepLosses = [OptimizerStepLossEvidence, ...OptimizerStepLossEvidence[]];
-export type Loss = number;
-export type OptimizerStep = number;
-export type AfterSha2561 = string;
-export type BeforeSha2561 = string;
-export type ChangedTensorCount1 = number;
-/**
- * @minItems 1
- */
-export type ChangedTensorNames1 = [string, ...string[]];
-export type HashAlgorithm1 = "sha256-trainable-state-v1";
-export type TrainableTensorCount = number;
-/**
- * @minItems 1
- */
-export type TrainableTensorNames = [string, ...string[]];
-export type OutputPathVerified = true;
+export type StepLosses1 = [OptimizerStepLossEvidence, ...OptimizerStepLossEvidence[]];
+export type OutputPathVerified1 = true;
 export type UpdatedAt = string;
 
 /**
@@ -210,6 +235,7 @@ export interface RunManifest {
   output_dir?: OutputDir;
   parameter_accounting_refs?: ParameterAccountingRefs;
   plan_ref: Ref;
+  pretraining_success_evidence?: PretrainingSuccessEvidence | null;
   process?: RunProcessInfo | null;
   reproducibility?: RunReproducibility | null;
   resume_lineage?: ResumeLineage | null;
@@ -296,6 +322,84 @@ export interface MemoryMetrics {
   torch_reserved_bytes?: TorchReservedBytes;
 }
 /**
+ * All gates required before a resolved from-scratch / continued pretraining run may be called
+ * successful. The full-parameter sibling of :class:`TrainingSuccessEvidence` - it verifies the exported
+ * model bytes (model.safetensors), not an adapter.
+ */
+export interface PretrainingSuccessEvidence {
+  artifact_integrity_verified: ArtifactIntegrityVerified;
+  execution: PretrainingExecutionEvidence;
+  measured_peak?: MemoryMetrics | null;
+  model_bytes_verified: ModelBytesVerified;
+  model_config_sha256: ModelConfigSha256;
+  model_safetensors_sha256: ModelSafetensorsSha256;
+  output_path_verified: OutputPathVerified;
+}
+/**
+ * Trainer-side proof produced before a full-parameter pretraining model is admitted as a success.
+ *
+ * The full-parameter sibling of :class:`TrainingExecutionEvidence`. It REUSES the generic, adapter-free
+ * evidence pieces - :class:`TrainableStateChangeEvidence` (here the trainable set is the COMPLETE
+ * parameter inventory, not an adapter), :class:`GradientCoverageEvidence`, and
+ * :class:`OptimizerStepLossEvidence` - and swaps the adapter export for the full-model export
+ * (:class:`FullModelExportStateEvidence`). None of these are part of the sealed execution config, so the
+ * reuse cannot perturb the byte-locked SFT / pretraining seals.
+ */
+export interface PretrainingExecutionEvidence {
+  completed_optimizer_steps: CompletedOptimizerSteps;
+  gradient_coverage: GradientCoverageEvidence;
+  model_export_state: FullModelExportStateEvidence;
+  optimizer_created: OptimizerCreated;
+  step_losses: StepLosses;
+  trainable_state: TrainableStateChangeEvidence;
+}
+/**
+ * Observed materialized adapter gradients without claiming unused tensors had gradients.
+ */
+export interface GradientCoverageEvidence {
+  eligible_tensor_count: EligibleTensorCount;
+  eligible_tensor_names: EligibleTensorNames;
+  observed_tensor_count: ObservedTensorCount;
+  observed_tensor_names: ObservedTensorNames;
+}
+/**
+ * Canonical identity for the exact full-parameter model state expected in model.safetensors.
+ *
+ * The full-parameter sibling of :class:`AdapterExportStateEvidence`: from-scratch / continued
+ * pretraining exports the WHOLE model (model.safetensors), not a PEFT adapter, so the pinned config is
+ * the model config (``model_config_semantic_sha256``), never an adapter config. Dense- and MoE-safe:
+ * the tensor inventory is a plain name/hash set, so a MoE model simply carries more expert tensors.
+ */
+export interface FullModelExportStateEvidence {
+  after_sha256: AfterSha256;
+  before_sha256: BeforeSha256;
+  changed_tensor_count: ChangedTensorCount;
+  changed_tensor_names: ChangedTensorNames;
+  hash_algorithm?: HashAlgorithm;
+  model_config_semantic_sha256: ModelConfigSemanticSha256;
+  tensor_count: TensorCount;
+  tensor_names: TensorNames;
+}
+/**
+ * One finite loss bound to exactly one completed optimizer step.
+ */
+export interface OptimizerStepLossEvidence {
+  loss: Loss;
+  optimizer_step: OptimizerStep;
+}
+/**
+ * Canonical before/after identity for the complete trainable adapter state.
+ */
+export interface TrainableStateChangeEvidence {
+  after_sha256: AfterSha2561;
+  before_sha256: BeforeSha2561;
+  changed_tensor_count: ChangedTensorCount1;
+  changed_tensor_names: ChangedTensorNames1;
+  hash_algorithm?: HashAlgorithm1;
+  trainable_tensor_count: TrainableTensorCount;
+  trainable_tensor_names: TrainableTensorNames;
+}
+/**
  * Process identity so a recycled pid is never mistaken for a live run. A 'running' record whose
  * pid is not alive reconciles to 'interrupted' (run_registry.reconcile_running_records).
  */
@@ -334,20 +438,20 @@ export interface TrainingSuccessEvidence {
   adapter_bytes_verified: AdapterBytesVerified;
   adapter_config_sha256: AdapterConfigSha256;
   adapter_safetensors_sha256: AdapterSafetensorsSha256;
-  artifact_integrity_verified: ArtifactIntegrityVerified;
+  artifact_integrity_verified: ArtifactIntegrityVerified1;
   execution: TrainingExecutionEvidence;
   measured_peak?: MemoryMetrics | null;
-  output_path_verified: OutputPathVerified;
+  output_path_verified: OutputPathVerified1;
 }
 /**
  * Trainer-side proof produced before adapter export is admitted as a success.
  */
 export interface TrainingExecutionEvidence {
   adapter_export_state: AdapterExportStateEvidence;
-  completed_optimizer_steps: CompletedOptimizerSteps;
+  completed_optimizer_steps: CompletedOptimizerSteps1;
   gradient_coverage: GradientCoverageEvidence;
-  optimizer_created: OptimizerCreated;
-  step_losses: StepLosses;
+  optimizer_created: OptimizerCreated1;
+  step_losses: StepLosses1;
   trainable_state: TrainableStateChangeEvidence;
 }
 /**
@@ -355,39 +459,11 @@ export interface TrainingExecutionEvidence {
  */
 export interface AdapterExportStateEvidence {
   adapter_config_semantic_sha256: AdapterConfigSemanticSha256;
-  after_sha256: AfterSha256;
-  before_sha256: BeforeSha256;
-  changed_tensor_count: ChangedTensorCount;
-  changed_tensor_names: ChangedTensorNames;
-  hash_algorithm?: HashAlgorithm;
-  tensor_count: TensorCount;
-  tensor_names: TensorNames;
-}
-/**
- * Observed materialized adapter gradients without claiming unused tensors had gradients.
- */
-export interface GradientCoverageEvidence {
-  eligible_tensor_count: EligibleTensorCount;
-  eligible_tensor_names: EligibleTensorNames;
-  observed_tensor_count: ObservedTensorCount;
-  observed_tensor_names: ObservedTensorNames;
-}
-/**
- * One finite loss bound to exactly one completed optimizer step.
- */
-export interface OptimizerStepLossEvidence {
-  loss: Loss;
-  optimizer_step: OptimizerStep;
-}
-/**
- * Canonical before/after identity for the complete trainable adapter state.
- */
-export interface TrainableStateChangeEvidence {
-  after_sha256: AfterSha2561;
-  before_sha256: BeforeSha2561;
-  changed_tensor_count: ChangedTensorCount1;
-  changed_tensor_names: ChangedTensorNames1;
-  hash_algorithm?: HashAlgorithm1;
-  trainable_tensor_count: TrainableTensorCount;
-  trainable_tensor_names: TrainableTensorNames;
+  after_sha256: AfterSha2562;
+  before_sha256: BeforeSha2562;
+  changed_tensor_count: ChangedTensorCount2;
+  changed_tensor_names: ChangedTensorNames2;
+  hash_algorithm?: HashAlgorithm2;
+  tensor_count: TensorCount1;
+  tensor_names: TensorNames1;
 }
