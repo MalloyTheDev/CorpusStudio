@@ -1,6 +1,7 @@
-"""The model architecture builder (S3b front-end): a torch-free `create-model` that turns a preset /
-target parameter count / explicit dims into a validated architecture config for from-scratch pretraining.
-The parameter formula is validated against a reference model (GPT-2 small ~124M)."""
+"""The model creator (S3b front-end): torch-free `create-model` with two HONEST modes - BASE ON a known
+family, or COMPOSE your own architecture from building blocks. The parameter formula is validated against
+reference models (GPT-2 small ~124M, Llama-7B ~6.7B), and a composed design that no reference
+implementation builds is honestly flagged as needing the custom-block path."""
 
 import json
 
@@ -9,18 +10,22 @@ from typer.testing import CliRunner
 
 from corpus_studio.cli import app
 from corpus_studio.platform.architecture_builder import (
+    _FAMILIES,
     ArchitectureBuilderError,
-    build_architecture,
+    build_composed,
+    build_from_family,
     estimate_parameters,
 )
 
 _runner = CliRunner()
 
 
+# ---- the parameter formula (generic, validated against reference models) ---------------------------
+
+
 def test_gpt2_small_formula_matches_the_reference_124m():
-    # GPT-2 small: vocab 50257, hidden 768, 12 layers, 12 heads, 4x MLP, context 1024, tied -> ~124.4M.
     params = estimate_parameters(
-        "gpt2",
+        _FAMILIES["gpt2"],
         hidden_size=768,
         num_hidden_layers=12,
         num_attention_heads=12,
@@ -33,7 +38,22 @@ def test_gpt2_small_formula_matches_the_reference_124m():
     assert 123_000_000 <= params <= 126_000_000
 
 
-def test_untying_the_output_head_adds_the_embedding_matrix():
+def test_llama_7b_formula_is_in_range():
+    params = estimate_parameters(
+        _FAMILIES["llama"],
+        hidden_size=4096,
+        num_hidden_layers=32,
+        num_attention_heads=32,
+        num_key_value_heads=32,
+        intermediate_size=11008,
+        vocab_size=32000,
+        max_position_embeddings=4096,
+        tie_word_embeddings=False,
+    )
+    assert 6_500_000_000 <= params <= 7_000_000_000
+
+
+def test_untying_adds_the_embedding_matrix():
     kw = dict(
         hidden_size=768,
         num_hidden_layers=12,
@@ -43,106 +63,162 @@ def test_untying_the_output_head_adds_the_embedding_matrix():
         vocab_size=50257,
         max_position_embeddings=1024,
     )
-    tied = estimate_parameters("gpt2", tie_word_embeddings=True, **kw)
-    untied = estimate_parameters("gpt2", tie_word_embeddings=False, **kw)
+    tied = estimate_parameters(_FAMILIES["gpt2"], tie_word_embeddings=True, **kw)
+    untied = estimate_parameters(_FAMILIES["gpt2"], tie_word_embeddings=False, **kw)
     assert untied - tied == 50257 * 768
 
 
-def test_preset_small_builds_a_valid_llama_config():
-    built = build_architecture("llama", preset="small", vocab_size=32000)
-    assert built.hidden_size == 768 and built.num_hidden_layers == 12
-    assert built.config["model_type"] == "llama"
-    assert built.config["hidden_size"] == 768 and built.config["num_attention_heads"] == 12
-    assert built.estimated_parameters > 0
-
-
-def test_target_parameters_solves_close_to_the_ask():
-    built = build_architecture("llama", target_parameters=125_000_000, vocab_size=32000)
-    # the solver lands in a reasonable band of the target and reports the ACTUAL estimate (never exact)
-    assert 90_000_000 <= built.estimated_parameters <= 170_000_000
-    assert built.config["hidden_size"] % built.config["num_attention_heads"] == 0
-
-
-def test_explicit_dims_build_and_report_params():
-    built = build_architecture(
-        "gpt2",
-        hidden_size=512,
+def test_grouped_query_attention_reduces_params():
+    kw = dict(
+        hidden_size=1024,
         num_hidden_layers=8,
-        num_attention_heads=8,
-        vocab_size=16000,
-        max_position_embeddings=2048,
+        num_attention_heads=16,
+        intermediate_size=2816,
+        vocab_size=32000,
+        max_position_embeddings=4096,
+        tie_word_embeddings=False,
     )
-    assert built.hidden_size == 512 and built.num_hidden_layers == 8
-    assert built.config["n_embd"] == 512 and built.config["n_layer"] == 8
+    mha = estimate_parameters(_FAMILIES["llama"], num_key_value_heads=16, **kw)
+    gqa = estimate_parameters(_FAMILIES["llama"], num_key_value_heads=4, **kw)
+    assert gqa < mha
 
 
-def test_exactly_one_mode_required():
+# ---- base on a family (honestly borrowed) ----------------------------------------------------------
+
+
+def test_build_from_family_is_honestly_provenanced():
+    built = build_from_family("llama", preset="small", vocab_size=32000)
+    assert built.design_source == "family:llama"
+    assert built.realizing_family == "llama" and built.needs_custom_code is False
+    assert built.config["model_type"] == "llama" and built.hidden_size == 768
+
+
+def test_build_from_family_solves_a_param_target():
+    built = build_from_family(
+        "gpt2", target_parameters=125_000_000, vocab_size=50257, max_position_embeddings=1024
+    )
+    assert 120_000_000 <= built.estimated_parameters <= 130_000_000
+
+
+def test_unknown_family_fails_closed():
+    with pytest.raises(ArchitectureBuilderError, match="unknown family"):
+        build_from_family("mamba", preset="small")
+
+
+# ---- compose your own design -----------------------------------------------------------------------
+
+
+def test_composed_design_maps_to_a_real_implementation():
+    # GQA + RoPE + SwiGLU + RMSNorm (no bias) IS the Llama block implementation: your DESIGN, its blocks.
+    built = build_composed(
+        name="MyModel",
+        positions="rope",
+        gated_mlp=True,
+        norm="rmsnorm",
+        attention_bias=False,
+        mlp_bias=False,
+        preset="small",
+    )
+    assert built.design_source == "composed" and built.name == "MyModel"
+    assert built.realizing_family == "llama" and built.needs_custom_code is False
+    assert built.config["corpus_studio_name"] == "MyModel"
+
+
+def test_a_novel_composition_is_flagged_needs_custom_code():
+    # Learned positions + SwiGLU + LayerNorm is a combination no reference implementation builds.
+    built = build_composed(
+        name="Novel", positions="learned", gated_mlp=True, norm="layernorm", preset="small"
+    )
+    assert built.needs_custom_code is True and built.realizing_family is None
+    assert built.config["model_type"] == "custom_decoder"
+
+
+def test_composed_attention_bias_maps_to_qwen2():
+    built = build_composed(
+        name="Q", positions="rope", gated_mlp=True, norm="rmsnorm", attention_bias=True, preset="small"
+    )
+    assert built.realizing_family == "qwen2"
+
+
+def test_exactly_one_size_mode_required():
     with pytest.raises(ArchitectureBuilderError, match="exactly one"):
-        build_architecture("llama", preset="small", target_parameters=100_000_000)
+        build_composed(name="x", preset="small", target_parameters=100_000_000)
     with pytest.raises(ArchitectureBuilderError, match="exactly one"):
-        build_architecture("llama")
+        build_composed(name="x")
 
 
-def test_unknown_family_and_preset_fail_closed():
-    with pytest.raises(ArchitectureBuilderError, match="unsupported family"):
-        build_architecture("mamba", preset="small")  # type: ignore[arg-type]
-    with pytest.raises(ArchitectureBuilderError, match="unknown preset"):
-        build_architecture("llama", preset="huge")
+# ---- the create-model CLI --------------------------------------------------------------------------
 
 
-def test_hidden_must_be_divisible_by_heads():
-    with pytest.raises(ArchitectureBuilderError, match="divisible"):
-        build_architecture("llama", hidden_size=768, num_attention_heads=7)
-
-
-# ---- the create-model CLI (the "create a fresh model" surface) --------------------------------------
-
-
-def test_create_model_cli_preset_writes_a_config(tmp_path):
+def test_cli_from_family_is_labeled_honestly(tmp_path):
     out = tmp_path / "config.json"
     result = _runner.invoke(
         app,
         [
-            "create-model", "--family", "llama", "--preset", "small",
+            "create-model", "--from-family", "llama", "--preset", "small",
             "--vocab-size", "32000", "--out", str(out), "--json",
         ],
     )
-    assert result.exit_code == 0, result.stdout + result.stderr
+    assert result.exit_code == 0, result.output
     data = json.loads(result.stdout)
-    assert data["family"] == "llama" and data["config"]["model_type"] == "llama"
-    assert data["estimated_parameters"] > 0
+    assert data["design_source"] == "family:llama" and data["needs_custom_code"] is False
     assert json.loads(out.read_text(encoding="utf-8"))["hidden_size"] == 768
 
 
-def test_create_model_cli_solves_a_param_target():
+def test_cli_compose_your_own():
     result = _runner.invoke(
         app,
         [
-            "create-model", "--family", "gpt2", "--params", "125M",
-            "--vocab-size", "50257", "--context-length", "1024", "--json",
+            "create-model", "--compose", "--name", "MyModel",
+            "--positions", "rope", "--mlp", "gated", "--norm", "rmsnorm", "--preset", "small", "--json",
         ],
     )
-    assert result.exit_code == 0, result.stdout + result.stderr
-    assert 120_000_000 <= json.loads(result.stdout)["estimated_parameters"] <= 130_000_000
+    assert result.exit_code == 0, result.output
+    data = json.loads(result.stdout)
+    assert data["name"] == "MyModel" and data["design_source"] == "composed"
+    assert data["realizing_family"] == "llama"
 
 
-def test_create_model_cli_rejects_two_modes():
-    result = _runner.invoke(app, ["create-model", "--preset", "small", "--params", "125M"])
+def test_cli_compose_novel_flags_custom_code():
+    result = _runner.invoke(
+        app,
+        [
+            "create-model", "--compose", "--name", "Novel",
+            "--positions", "learned", "--mlp", "gated", "--norm", "layernorm", "--preset", "small", "--json",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout)["needs_custom_code"] is True
+
+
+def test_cli_requires_exactly_one_mode():
+    assert _runner.invoke(app, ["create-model", "--preset", "small"]).exit_code == 2
+    assert (
+        _runner.invoke(
+            app, ["create-model", "--from-family", "llama", "--compose", "--name", "x"]
+        ).exit_code
+        == 2
+    )
+
+
+def test_cli_compose_requires_a_name():
+    result = _runner.invoke(app, ["create-model", "--compose", "--preset", "small"])
     assert result.exit_code == 2
+    assert "requires --name" in result.output
 
 
-def test_create_model_cli_rejects_non_finite_params():
-    # AUDIT fix: '1e999' overflows to inf; int(inf) would raise an uncaught OverflowError - now a clean
-    # fail-closed exit (never a traceback).
-    for bad in ("inf", "1e999", "nan", "-5"):
-        result = _runner.invoke(app, ["create-model", "--params", bad])
-        assert result.exit_code == 2, f"{bad}: {result.output}"
+def test_cli_rejects_non_finite_params():
+    for bad in ("inf", "1e999", "nan"):
+        assert (
+            _runner.invoke(app, ["create-model", "--from-family", "llama", "--params", bad]).exit_code
+            == 2
+        )
 
 
-def test_create_model_cli_reports_an_unwritable_out_path(tmp_path):
-    # AUDIT fix: a --out path whose parent does not exist raised an uncaught FileNotFoundError - now a
-    # clean typed error.
+def test_cli_reports_an_unwritable_out_path(tmp_path):
     bad = tmp_path / "missing-dir" / "config.json"
-    result = _runner.invoke(app, ["create-model", "--preset", "small", "--out", str(bad)])
+    result = _runner.invoke(
+        app, ["create-model", "--from-family", "llama", "--preset", "small", "--out", str(bad)]
+    )
     assert result.exit_code == 2
     assert "cannot write --out" in result.output

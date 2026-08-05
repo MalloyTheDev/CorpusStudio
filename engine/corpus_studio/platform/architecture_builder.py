@@ -1,26 +1,24 @@
-"""Model architecture builder (S3b front-end): generate a validated, hash-pinnable architecture config
-for a FROM-SCRATCH pretraining run - the torch-free producer of the ``architecture_ref`` the pretraining
-worker's ``from_config`` random init consumes (``ModelInitializationSpec.architecture_ref``).
+"""Model architecture builder (S3b front-end) - the torch-free producer of the ``architecture_ref`` a
+from-scratch pretraining run's ``from_config`` init consumes. Two HONEST modes:
 
-Three ways to say "what to start at" (no model is instantiated here - no torch / transformers; only a
-config dict + an HONEST parameter ESTIMATE, always labelled approximate, never a measured count):
+* **base on a family** (``build_from_family``) - configure a KNOWN architecture (Llama, Mistral, Qwen2,
+  Gemma, GPT-2, GPT-NeoX). The result is *based on* that family - it is NOT "your own model".
+* **compose** (``build_composed``) - YOU pick the building blocks (positions, MLP shape, norm, attention
+  bias, grouped-query attention) into a novel configuration + your own name. That design is YOURS; it is
+  realized on the matching reference block IMPLEMENTATION (the same blocks Llama/Mistral share). If your
+  combination matches NO reference implementation, ``needs_custom_code`` is set: a truly-novel design
+  needs the custom-block path (real model code), not a config.
 
-* a named ``preset`` (tiny / small / base / large),
-* a ``target_parameters`` count - solved to the nearest valid config, OR
-* ``explicit`` dimensions.
-
-The parameter formula is per-family and validated in tests against known reference models (GPT-2 small
-~124M). It is a STATIC estimate of trainable parameters; the worker's measured accounting is authority.
+No model is instantiated here (no torch / transformers) - only a config dict + an honest STATIC parameter
+ESTIMATE (validated against reference models; a measured count is the worker's job).
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Literal
 
-Family = Literal["llama", "gpt2"]
-_FAMILIES: tuple[Family, ...] = ("llama", "gpt2")
-_HEAD_DIM = 64  # every family here sizes heads at 64-d (heads = hidden // 64).
+_HEAD_DIM = 64  # heads are sized at 64-d (heads = hidden // 64) unless given explicitly.
 
 
 class ArchitectureBuilderError(ValueError):
@@ -28,31 +26,77 @@ class ArchitectureBuilderError(ValueError):
 
 
 @dataclass(frozen=True)
-class BuiltArchitecture:
-    """The result of a build: the HF-style config dict + the STATIC (approximate) parameter estimate and
-    the dimensions chosen. ``config`` is what gets written to the ``--architecture-config`` file and
-    hash-pinned into the sealed ``ModelInitializationSpec.architecture_ref``."""
+class ArchitectureTraits:
+    """The BUILDING BLOCKS of a decoder-LM architecture - the design choices, independent of dimensions.
+    A named family is a preset of these (honestly "based on" that family); composing your own means
+    choosing them yourself. ``intermediate_ratio`` is only a default sizing (explicit dims override it)."""
 
-    family: Family
+    positions: Literal["rope", "learned"]
+    gated_mlp: bool
+    activation: str
+    norm: Literal["rmsnorm", "layernorm"]
+    attention_bias: bool
+    mlp_bias: bool
+    tie_embeddings: bool
+    intermediate_ratio: float
+
+    def structural_signature(self) -> tuple:
+        """What determines the trainable IMPLEMENTATION (activation / tie / ratio are config knobs of it)."""
+        return (self.positions, self.gated_mlp, self.norm, self.attention_bias, self.mlp_bias)
+
+
+# The known families, as trait presets - used ONLY for the honest "base on a family" mode.
+_FAMILIES: dict[str, ArchitectureTraits] = {
+    "llama": ArchitectureTraits("rope", True, "silu", "rmsnorm", False, False, False, 8 / 3),
+    "mistral": ArchitectureTraits("rope", True, "silu", "rmsnorm", False, False, False, 8 / 3),
+    "qwen2": ArchitectureTraits("rope", True, "silu", "rmsnorm", True, False, False, 8 / 3),
+    "gemma": ArchitectureTraits("rope", True, "gelu_pytorch_tanh", "rmsnorm", False, False, True, 8.0),
+    "gpt2": ArchitectureTraits("learned", False, "gelu_new", "layernorm", True, True, True, 4.0),
+    "gpt_neox": ArchitectureTraits("rope", False, "gelu", "layernorm", True, True, False, 4.0),
+}
+KNOWN_FAMILIES: tuple[str, ...] = tuple(_FAMILIES)
+
+# A reference IMPLEMENTATION (a real transformers model_type) per structural signature. A composed design
+# whose signature is here trains on that implementation; one that is absent needs the custom-block path.
+_IMPL_BY_SIGNATURE: dict[tuple, str] = {
+    _FAMILIES["llama"].structural_signature(): "llama",  # gated / RMSNorm / RoPE / no bias
+    _FAMILIES["qwen2"].structural_signature(): "qwen2",  # + attention bias
+    _FAMILIES["gpt2"].structural_signature(): "gpt2",  # standard / LayerNorm / learned / bias
+    _FAMILIES["gpt_neox"].structural_signature(): "gpt_neox",  # standard / LayerNorm / RoPE / bias
+}
+_HF_STANDARD_TYPES = {"llama", "qwen2", "gemma", "mistral"}  # hidden_size-style config fields
+
+
+@dataclass(frozen=True)
+class BuiltArchitecture:
+    """A built architecture: the HF-style config dict + the static (approximate) parameter estimate, the
+    chosen dims, and HONEST provenance - ``design_source`` ('family:<x>' or 'composed'), the reference
+    ``realizing_family`` (the implementation it runs on), and ``needs_custom_code`` (a novel design that
+    no reference implementation builds)."""
+
+    name: str
     config: dict[str, Any]
     estimated_parameters: int
     hidden_size: int
     num_hidden_layers: int
     num_attention_heads: int
+    num_key_value_heads: int
     intermediate_size: int
     vocab_size: int
+    design_source: str
+    realizing_family: str | None
+    needs_custom_code: bool
 
 
-def _intermediate_for(family: Family, hidden_size: int) -> int:
-    if family == "gpt2":
-        return 4 * hidden_size
-    # Llama/SwiGLU: ~8/3 * hidden, rounded to a multiple of 256 (the standard convention).
-    raw = int(8 * hidden_size / 3)
-    return max(256, ((raw + 255) // 256) * 256)
+def _intermediate_for(traits: ArchitectureTraits, hidden_size: int) -> int:
+    raw = int(traits.intermediate_ratio * hidden_size)
+    if traits.gated_mlp:  # round gated MLPs to a multiple of 256 (the standard convention)
+        return max(256, ((raw + 255) // 256) * 256)
+    return max(1, raw)
 
 
 def estimate_parameters(
-    family: Family,
+    traits: ArchitectureTraits,
     *,
     hidden_size: int,
     num_hidden_layers: int,
@@ -63,39 +107,32 @@ def estimate_parameters(
     max_position_embeddings: int,
     tie_word_embeddings: bool,
 ) -> int:
-    """Static estimate of the trainable parameter count for one of the supported families. Exact enough
-    to size a model (validated against reference models); NOT a measured count."""
+    """Static estimate of the trainable parameter count from the building blocks + dims. Validated against
+    reference models (GPT-2 small ~124M, Llama-7B ~6.7B); NOT a measured count."""
     head_dim = hidden_size // num_attention_heads
     kv_dim = num_key_value_heads * head_dim
-    if family == "gpt2":
-        # Learned token + position embeddings, biased Linear, tied output, GELU MLP, LayerNorm.
-        embeddings = vocab_size * hidden_size + max_position_embeddings * hidden_size
-        attention = (3 * hidden_size * hidden_size + 3 * hidden_size) + (
-            hidden_size * hidden_size + hidden_size
-        )
-        mlp = (hidden_size * intermediate_size + intermediate_size) + (
-            intermediate_size * hidden_size + hidden_size
-        )
-        norms = 4 * hidden_size  # two LayerNorms (weight + bias) per block
-        per_layer = attention + mlp + norms
-        total = embeddings + num_hidden_layers * per_layer + 2 * hidden_size  # + final LayerNorm
-    else:  # llama: RoPE (no learned position embeddings), no biases, SwiGLU, RMSNorm
-        embeddings = vocab_size * hidden_size
-        attention = (
-            hidden_size * hidden_size  # Q
-            + 2 * hidden_size * kv_dim  # K, V (GQA-aware)
-            + hidden_size * hidden_size  # O
-        )
-        mlp = 3 * hidden_size * intermediate_size  # gate + up + down
-        norms = 2 * hidden_size  # two RMSNorms (weight only) per block
-        per_layer = attention + mlp + norms
-        total = embeddings + num_hidden_layers * per_layer + hidden_size  # + final RMSNorm
+    embeddings = vocab_size * hidden_size
+    if traits.positions == "learned":
+        embeddings += max_position_embeddings * hidden_size
+    attention = 2 * hidden_size * hidden_size + 2 * hidden_size * kv_dim  # Q,O + K,V (GQA-aware)
+    if traits.attention_bias:
+        attention += 2 * hidden_size + 2 * kv_dim
+    if traits.gated_mlp:
+        mlp = 3 * hidden_size * intermediate_size
+        if traits.mlp_bias:
+            mlp += 2 * intermediate_size + hidden_size
+    else:
+        mlp = 2 * hidden_size * intermediate_size
+        if traits.mlp_bias:
+            mlp += intermediate_size + hidden_size
+    norm_params = hidden_size * (2 if traits.norm == "layernorm" else 1)
+    per_layer = attention + mlp + 2 * norm_params
+    total = embeddings + num_hidden_layers * per_layer + norm_params  # + final norm
     if not tie_word_embeddings:
         total += vocab_size * hidden_size
     return total
 
 
-# Named starting points - family-agnostic dimension sets (the "what to start at" menu).
 _PRESETS: dict[str, dict[str, int]] = {
     "tiny": {"hidden_size": 256, "num_hidden_layers": 4, "num_attention_heads": 4},
     "small": {"hidden_size": 768, "num_hidden_layers": 12, "num_attention_heads": 12},
@@ -104,104 +141,201 @@ _PRESETS: dict[str, dict[str, int]] = {
 }
 
 
-def _default_tie(family: Family) -> bool:
-    return family == "gpt2"  # GPT-2 ties input/output embeddings; Llama unties by default.
-
-
 def solve_for_target(
-    family: Family,
+    traits: ArchitectureTraits,
     target_parameters: int,
     *,
+    num_key_value_heads: int | None,
     vocab_size: int,
     max_position_embeddings: int,
     tie_word_embeddings: bool,
 ) -> dict[str, int]:
-    """Search valid ``{hidden_size, num_hidden_layers}`` for the config whose ESTIMATE lands closest to
-    ``target_parameters``. Width sizes heads at 64-d; depth follows a roughly-square heuristic
-    (layers ~ hidden/64). Returns the winning dimensions (never claims the target is hit exactly)."""
+    """Search valid ``{hidden_size, num_hidden_layers}`` whose ESTIMATE lands closest to the target (heads
+    at 64-d, depth ~ hidden/64). Never claims the target is hit exactly."""
     if target_parameters <= 0:
         raise ArchitectureBuilderError("target_parameters must be positive")
     best: tuple[dict[str, int], int] | None = None
     for hidden_size in range(128, 8192 + 1, 64):
-        num_attention_heads = hidden_size // _HEAD_DIM
-        if num_attention_heads < 1 or hidden_size % num_attention_heads != 0:
+        heads = hidden_size // _HEAD_DIM
+        kv = num_key_value_heads if num_key_value_heads is not None else heads
+        if heads < 1 or hidden_size % heads != 0 or heads % kv != 0:
             continue
-        num_hidden_layers = max(2, round(hidden_size / _HEAD_DIM))
-        intermediate_size = _intermediate_for(family, hidden_size)
+        layers = max(2, round(hidden_size / _HEAD_DIM))
+        intermediate = _intermediate_for(traits, hidden_size)
         params = estimate_parameters(
-            family,
+            traits,
             hidden_size=hidden_size,
-            num_hidden_layers=num_hidden_layers,
-            num_attention_heads=num_attention_heads,
-            num_key_value_heads=num_attention_heads,
-            intermediate_size=intermediate_size,
+            num_hidden_layers=layers,
+            num_attention_heads=heads,
+            num_key_value_heads=kv,
+            intermediate_size=intermediate,
             vocab_size=vocab_size,
             max_position_embeddings=max_position_embeddings,
             tie_word_embeddings=tie_word_embeddings,
         )
         dims = {
             "hidden_size": hidden_size,
-            "num_hidden_layers": num_hidden_layers,
-            "num_attention_heads": num_attention_heads,
-            "intermediate_size": intermediate_size,
+            "num_hidden_layers": layers,
+            "num_attention_heads": heads,
+            "num_key_value_heads": kv,
+            "intermediate_size": intermediate,
         }
         if best is None or abs(params - target_parameters) < abs(best[1] - target_parameters):
             best = (dims, params)
-    assert best is not None  # the range always yields at least one candidate
+    assert best is not None
     return best[0]
 
 
 def _config_dict(
-    family: Family,
+    traits: ArchitectureTraits,
+    model_type: str,
     *,
-    hidden_size: int,
-    num_hidden_layers: int,
-    num_attention_heads: int,
-    num_key_value_heads: int,
-    intermediate_size: int,
+    name: str,
+    dims: dict[str, int],
     vocab_size: int,
     max_position_embeddings: int,
     tie_word_embeddings: bool,
 ) -> dict[str, Any]:
-    """The HF-style architecture config dict for the family (no transformers import - a plain dict the
-    worker's ``AutoConfig``/``from_config`` materializes at train time)."""
-    common = {
-        "hidden_size": hidden_size,
-        "num_hidden_layers": num_hidden_layers,
-        "num_attention_heads": num_attention_heads,
-        "num_key_value_heads": num_key_value_heads,
-        "intermediate_size": intermediate_size,
-        "vocab_size": vocab_size,
-        "max_position_embeddings": max_position_embeddings,
-        "tie_word_embeddings": tie_word_embeddings,
-    }
-    if family == "gpt2":
+    """The HF-style architecture config dict (a plain dict the worker's ``from_config`` materializes)."""
+    if model_type == "gpt2":
         return {
             "model_type": "gpt2",
             "architectures": ["GPT2LMHeadModel"],
-            "n_embd": hidden_size,
-            "n_layer": num_hidden_layers,
-            "n_head": num_attention_heads,
-            "n_inner": intermediate_size,
+            "corpus_studio_name": name,
+            "n_embd": dims["hidden_size"],
+            "n_layer": dims["num_hidden_layers"],
+            "n_head": dims["num_attention_heads"],
+            "n_inner": dims["intermediate_size"],
             "n_positions": max_position_embeddings,
             "vocab_size": vocab_size,
             "tie_word_embeddings": tie_word_embeddings,
-            "activation_function": "gelu_new",
+            "activation_function": traits.activation,
             "layer_norm_epsilon": 1e-5,
         }
-    return {
-        "model_type": "llama",
-        "architectures": ["LlamaForCausalLM"],
-        **common,
-        "hidden_act": "silu",
-        "rms_norm_eps": 1e-5,
-        "rope_theta": 10000.0,
+    config = {
+        "model_type": model_type,
+        "architectures": [f"{model_type.capitalize()}ForCausalLM"],
+        "corpus_studio_name": name,
+        "hidden_size": dims["hidden_size"],
+        "num_hidden_layers": dims["num_hidden_layers"],
+        "num_attention_heads": dims["num_attention_heads"],
+        "num_key_value_heads": dims["num_key_value_heads"],
+        "intermediate_size": dims["intermediate_size"],
+        "vocab_size": vocab_size,
+        "max_position_embeddings": max_position_embeddings,
+        "tie_word_embeddings": tie_word_embeddings,
+        "hidden_act": traits.activation,
     }
+    if traits.norm == "rmsnorm":
+        config["rms_norm_eps"] = 1e-5
+    if traits.positions == "rope":
+        config["rope_theta"] = 10000.0
+    if traits.attention_bias:
+        config["attention_bias"] = True
+    return config
 
 
-def build_architecture(
-    family: Family,
+def _finalize(
+    traits: ArchitectureTraits,
     *,
+    name: str,
+    design_source: str,
+    preset: str | None,
+    target_parameters: int | None,
+    hidden_size: int | None,
+    num_hidden_layers: int | None,
+    num_attention_heads: int | None,
+    num_key_value_heads: int | None,
+    intermediate_size: int | None,
+    vocab_size: int,
+    max_position_embeddings: int,
+    tie_word_embeddings: bool,
+) -> BuiltArchitecture:
+    if vocab_size < 1 or max_position_embeddings < 1:
+        raise ArchitectureBuilderError("vocab_size and max_position_embeddings must be positive")
+    if sum(x is not None for x in (preset, target_parameters, hidden_size)) != 1:
+        raise ArchitectureBuilderError(
+            "specify exactly one of: a preset, a target parameter count, or explicit hidden_size"
+        )
+    if preset is not None:
+        if preset not in _PRESETS:
+            raise ArchitectureBuilderError(f"unknown preset '{preset}'; choose from: {', '.join(_PRESETS)}")
+        dims = dict(_PRESETS[preset])
+        dims["num_key_value_heads"] = num_key_value_heads or dims["num_attention_heads"]
+        dims["intermediate_size"] = _intermediate_for(traits, dims["hidden_size"])
+    elif target_parameters is not None:
+        dims = solve_for_target(
+            traits,
+            target_parameters,
+            num_key_value_heads=num_key_value_heads,
+            vocab_size=vocab_size,
+            max_position_embeddings=max_position_embeddings,
+            tie_word_embeddings=tie_word_embeddings,
+        )
+    else:
+        assert hidden_size is not None
+        heads = num_attention_heads if num_attention_heads is not None else max(1, hidden_size // _HEAD_DIM)
+        if heads < 1 or hidden_size % heads != 0:
+            raise ArchitectureBuilderError("hidden_size must be divisible by num_attention_heads")
+        kv = num_key_value_heads or heads
+        if heads % kv != 0:
+            raise ArchitectureBuilderError("num_attention_heads must be a multiple of num_key_value_heads")
+        dims = {
+            "hidden_size": hidden_size,
+            "num_hidden_layers": num_hidden_layers if num_hidden_layers is not None else max(2, round(hidden_size / _HEAD_DIM)),
+            "num_attention_heads": heads,
+            "num_key_value_heads": kv,
+            "intermediate_size": intermediate_size if intermediate_size is not None else _intermediate_for(traits, hidden_size),
+        }
+        if dims["num_hidden_layers"] < 1 or dims["intermediate_size"] < 1:
+            raise ArchitectureBuilderError("num_hidden_layers and intermediate_size must be positive")
+
+    realizing_family = _IMPL_BY_SIGNATURE.get(traits.structural_signature())
+    needs_custom_code = realizing_family is None
+    # A novel design still gets a config + an estimate, but is honestly flagged: no reference
+    # implementation builds it, so training it needs the custom-block path. A placeholder model_type
+    # marks it (the worker refuses to fabricate an implementation for it).
+    model_type = realizing_family if realizing_family is not None else "custom_decoder"
+    estimate = estimate_parameters(
+        traits,
+        hidden_size=dims["hidden_size"],
+        num_hidden_layers=dims["num_hidden_layers"],
+        num_attention_heads=dims["num_attention_heads"],
+        num_key_value_heads=dims["num_key_value_heads"],
+        intermediate_size=dims["intermediate_size"],
+        vocab_size=vocab_size,
+        max_position_embeddings=max_position_embeddings,
+        tie_word_embeddings=tie_word_embeddings,
+    )
+    config = _config_dict(
+        traits,
+        model_type,
+        name=name,
+        dims=dims,
+        vocab_size=vocab_size,
+        max_position_embeddings=max_position_embeddings,
+        tie_word_embeddings=tie_word_embeddings,
+    )
+    return BuiltArchitecture(
+        name=name,
+        config=config,
+        estimated_parameters=estimate,
+        hidden_size=dims["hidden_size"],
+        num_hidden_layers=dims["num_hidden_layers"],
+        num_attention_heads=dims["num_attention_heads"],
+        num_key_value_heads=dims["num_key_value_heads"],
+        intermediate_size=dims["intermediate_size"],
+        vocab_size=vocab_size,
+        design_source=design_source,
+        realizing_family=realizing_family,
+        needs_custom_code=needs_custom_code,
+    )
+
+
+def build_from_family(
+    family: str,
+    *,
+    name: str | None = None,
     preset: str | None = None,
     target_parameters: int | None = None,
     hidden_size: int | None = None,
@@ -213,82 +347,81 @@ def build_architecture(
     max_position_embeddings: int = 4096,
     tie_word_embeddings: bool | None = None,
 ) -> BuiltArchitecture:
-    """Build a fresh architecture config by EXACTLY ONE of: ``preset``, ``target_parameters``, or the
-    explicit ``hidden_size`` (+ optional dims). Fail-closed on an ambiguous or under-specified request."""
+    """Configure a KNOWN family's architecture (honestly 'based on' that family - NOT your own design)."""
     if family not in _FAMILIES:
         raise ArchitectureBuilderError(
-            f"unsupported family '{family}'; supported: {', '.join(_FAMILIES)}"
+            f"unknown family '{family}'; known: {', '.join(KNOWN_FAMILIES)}"
         )
-    if vocab_size < 1 or max_position_embeddings < 1:
-        raise ArchitectureBuilderError("vocab_size and max_position_embeddings must be positive")
-    tie = _default_tie(family) if tie_word_embeddings is None else tie_word_embeddings
-    modes = [preset is not None, target_parameters is not None, hidden_size is not None]
-    if sum(modes) != 1:
-        raise ArchitectureBuilderError(
-            "specify exactly one of: --preset, --params (target), or explicit --hidden-size"
-        )
-
-    if preset is not None:
-        if preset not in _PRESETS:
-            raise ArchitectureBuilderError(
-                f"unknown preset '{preset}'; choose from: {', '.join(_PRESETS)}"
-            )
-        dims = dict(_PRESETS[preset])
-        dims["intermediate_size"] = _intermediate_for(family, dims["hidden_size"])
-    elif target_parameters is not None:
-        dims = solve_for_target(
-            family,
-            target_parameters,
-            vocab_size=vocab_size,
-            max_position_embeddings=max_position_embeddings,
-            tie_word_embeddings=tie,
-        )
-    else:
-        assert hidden_size is not None
-        heads = num_attention_heads if num_attention_heads is not None else max(1, hidden_size // _HEAD_DIM)
-        if heads < 1 or hidden_size % heads != 0:
-            raise ArchitectureBuilderError("hidden_size must be divisible by num_attention_heads")
-        dims = {
-            "hidden_size": hidden_size,
-            "num_hidden_layers": num_hidden_layers if num_hidden_layers is not None else max(2, round(hidden_size / _HEAD_DIM)),
-            "num_attention_heads": heads,
-            "intermediate_size": intermediate_size if intermediate_size is not None else _intermediate_for(family, hidden_size),
-        }
-        if dims["num_hidden_layers"] < 1 or dims["intermediate_size"] < 1:
-            raise ArchitectureBuilderError("num_hidden_layers and intermediate_size must be positive")
-
-    kv_heads = num_key_value_heads if num_key_value_heads is not None else dims["num_attention_heads"]
-    if dims["num_attention_heads"] % kv_heads != 0:
-        raise ArchitectureBuilderError("num_attention_heads must be a multiple of num_key_value_heads")
-    estimate = estimate_parameters(
-        family,
-        hidden_size=dims["hidden_size"],
-        num_hidden_layers=dims["num_hidden_layers"],
-        num_attention_heads=dims["num_attention_heads"],
-        num_key_value_heads=kv_heads,
-        intermediate_size=dims["intermediate_size"],
+    traits = _FAMILIES[family]
+    if tie_word_embeddings is not None:
+        traits = replace(traits, tie_embeddings=tie_word_embeddings)
+    return _finalize(
+        traits,
+        name=name or family,
+        design_source=f"family:{family}",
+        preset=preset,
+        target_parameters=target_parameters,
+        hidden_size=hidden_size,
+        num_hidden_layers=num_hidden_layers,
+        num_attention_heads=num_attention_heads,
+        num_key_value_heads=num_key_value_heads,
+        intermediate_size=intermediate_size,
         vocab_size=vocab_size,
         max_position_embeddings=max_position_embeddings,
-        tie_word_embeddings=tie,
+        tie_word_embeddings=traits.tie_embeddings,
     )
-    config = _config_dict(
-        family,
-        hidden_size=dims["hidden_size"],
-        num_hidden_layers=dims["num_hidden_layers"],
-        num_attention_heads=dims["num_attention_heads"],
-        num_key_value_heads=kv_heads,
-        intermediate_size=dims["intermediate_size"],
+
+
+def build_composed(
+    *,
+    name: str,
+    positions: str = "rope",
+    gated_mlp: bool = True,
+    activation: str = "silu",
+    norm: str = "rmsnorm",
+    attention_bias: bool = False,
+    mlp_bias: bool = False,
+    tie_embeddings: bool = False,
+    intermediate_ratio: float = 8 / 3,
+    preset: str | None = None,
+    target_parameters: int | None = None,
+    hidden_size: int | None = None,
+    num_hidden_layers: int | None = None,
+    num_attention_heads: int | None = None,
+    num_key_value_heads: int | None = None,
+    intermediate_size: int | None = None,
+    vocab_size: int = 32000,
+    max_position_embeddings: int = 4096,
+) -> BuiltArchitecture:
+    """Compose YOUR OWN architecture DESIGN from building blocks. It is realized on the matching reference
+    block implementation; a combination no implementation builds sets ``needs_custom_code`` (a truly-novel
+    design needs the custom-block path, not a config)."""
+    if positions not in {"rope", "learned"}:
+        raise ArchitectureBuilderError("positions must be 'rope' or 'learned'")
+    if norm not in {"rmsnorm", "layernorm"}:
+        raise ArchitectureBuilderError("norm must be 'rmsnorm' or 'layernorm'")
+    traits = ArchitectureTraits(
+        positions=positions,  # type: ignore[arg-type]
+        gated_mlp=gated_mlp,
+        activation=activation,
+        norm=norm,  # type: ignore[arg-type]
+        attention_bias=attention_bias,
+        mlp_bias=mlp_bias,
+        tie_embeddings=tie_embeddings,
+        intermediate_ratio=intermediate_ratio,
+    )
+    return _finalize(
+        traits,
+        name=name,
+        design_source="composed",
+        preset=preset,
+        target_parameters=target_parameters,
+        hidden_size=hidden_size,
+        num_hidden_layers=num_hidden_layers,
+        num_attention_heads=num_attention_heads,
+        num_key_value_heads=num_key_value_heads,
+        intermediate_size=intermediate_size,
         vocab_size=vocab_size,
         max_position_embeddings=max_position_embeddings,
-        tie_word_embeddings=tie,
-    )
-    return BuiltArchitecture(
-        family=family,
-        config=config,
-        estimated_parameters=estimate,
-        hidden_size=dims["hidden_size"],
-        num_hidden_layers=dims["num_hidden_layers"],
-        num_attention_heads=dims["num_attention_heads"],
-        intermediate_size=dims["intermediate_size"],
-        vocab_size=vocab_size,
+        tie_word_embeddings=tie_embeddings,
     )
