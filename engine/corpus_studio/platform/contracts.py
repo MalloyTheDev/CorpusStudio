@@ -5499,6 +5499,34 @@ class GradientCoverageEvidence(ContractModel):
         return self
 
 
+def _validate_safetensors_export_change(
+    *,
+    before_sha256: str,
+    after_sha256: str,
+    tensor_count: int,
+    tensor_names: list[str],
+    changed_tensor_count: int,
+    changed_tensor_names: list[str],
+    noun: str,
+    activity: str,
+) -> None:
+    """Shared fail-closed checks for a safetensors export-state identity, so the adapter and full-model
+    sibling evidence models cannot drift. ``noun`` ('adapter' / 'model') + ``activity`` ('training' /
+    'pretraining') reproduce each model's exact messages; the checks themselves are identical."""
+    if before_sha256 == after_sha256:
+        raise ValueError(f"{noun} export state must change during successful {activity}")
+    if tensor_names != sorted(set(tensor_names)):
+        raise ValueError(f"{noun} export tensor names must be sorted and unique")
+    if tensor_count != len(tensor_names):
+        raise ValueError(f"{noun} export tensor count must match its complete name inventory")
+    if changed_tensor_names != sorted(set(changed_tensor_names)):
+        raise ValueError(f"changed {noun} export names must be sorted and unique")
+    if changed_tensor_count != len(changed_tensor_names):
+        raise ValueError(f"changed {noun} export count must match its name inventory")
+    if not set(changed_tensor_names).issubset(tensor_names):
+        raise ValueError(f"changed {noun} export names must belong to the export inventory")
+
+
 class AdapterExportStateEvidence(ContractModel):
     """Canonical identity for the exact PEFT state expected in adapter_model.safetensors."""
 
@@ -5515,18 +5543,16 @@ class AdapterExportStateEvidence(ContractModel):
 
     @model_validator(mode="after")
     def _proved_export_change(self) -> AdapterExportStateEvidence:
-        if self.before_sha256 == self.after_sha256:
-            raise ValueError("adapter export state must change during successful training")
-        if self.tensor_names != sorted(set(self.tensor_names)):
-            raise ValueError("adapter export tensor names must be sorted and unique")
-        if self.tensor_count != len(self.tensor_names):
-            raise ValueError("adapter export tensor count must match its complete name inventory")
-        if self.changed_tensor_names != sorted(set(self.changed_tensor_names)):
-            raise ValueError("changed adapter export names must be sorted and unique")
-        if self.changed_tensor_count != len(self.changed_tensor_names):
-            raise ValueError("changed adapter export count must match its name inventory")
-        if not set(self.changed_tensor_names).issubset(self.tensor_names):
-            raise ValueError("changed adapter export names must belong to the export inventory")
+        _validate_safetensors_export_change(
+            before_sha256=self.before_sha256,
+            after_sha256=self.after_sha256,
+            tensor_count=self.tensor_count,
+            tensor_names=self.tensor_names,
+            changed_tensor_count=self.changed_tensor_count,
+            changed_tensor_names=self.changed_tensor_names,
+            noun="adapter",
+            activity="training",
+        )
         return self
 
 
@@ -5601,18 +5627,16 @@ class FullModelExportStateEvidence(ContractModel):
 
     @model_validator(mode="after")
     def _proved_export_change(self) -> FullModelExportStateEvidence:
-        if self.before_sha256 == self.after_sha256:
-            raise ValueError("model export state must change during successful pretraining")
-        if self.tensor_names != sorted(set(self.tensor_names)):
-            raise ValueError("model export tensor names must be sorted and unique")
-        if self.tensor_count != len(self.tensor_names):
-            raise ValueError("model export tensor count must match its complete name inventory")
-        if self.changed_tensor_names != sorted(set(self.changed_tensor_names)):
-            raise ValueError("changed model export names must be sorted and unique")
-        if self.changed_tensor_count != len(self.changed_tensor_names):
-            raise ValueError("changed model export count must match its name inventory")
-        if not set(self.changed_tensor_names).issubset(self.tensor_names):
-            raise ValueError("changed model export names must belong to the export inventory")
+        _validate_safetensors_export_change(
+            before_sha256=self.before_sha256,
+            after_sha256=self.after_sha256,
+            tensor_count=self.tensor_count,
+            tensor_names=self.tensor_names,
+            changed_tensor_count=self.changed_tensor_count,
+            changed_tensor_names=self.changed_tensor_names,
+            noun="model",
+            activity="pretraining",
+        )
         return self
 
 
@@ -5715,6 +5739,22 @@ class RunManifest(ContractModel):
     # checkpoint provenance for a fresh run identity (#440). Absent for an ordinary from-scratch run.
     resume_lineage: ResumeLineage | None = None
     notes: str = ""
+
+    @model_validator(mode="after")
+    def _one_success_evidence_family(self) -> RunManifest:
+        # A run is EITHER an adapter (SFT/DPO) success or a full-model pretraining success, never both -
+        # they describe incompatible artifacts (adapter_model.safetensors vs model.safetensors). Enforce
+        # the invariant the field docs assert rather than leaving conflict resolution to callers. At most
+        # one may be set; a prepared / running / failed run carries neither.
+        if (
+            self.training_success_evidence is not None
+            and self.pretraining_success_evidence is not None
+        ):
+            raise ValueError(
+                "a run carries at most one success-evidence family: adapter "
+                "(training_success_evidence) XOR full-model (pretraining_success_evidence)"
+            )
+        return self
 
     @field_validator("parameter_accounting_refs")
     @classmethod

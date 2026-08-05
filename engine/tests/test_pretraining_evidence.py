@@ -8,6 +8,7 @@ from pydantic import ValidationError
 
 from corpus_studio.platform.common import Ref
 from corpus_studio.platform.contracts import (
+    AdapterExportStateEvidence,
     FullModelExportStateEvidence,
     GradientCoverageEvidence,
     OptimizerStepLossEvidence,
@@ -15,6 +16,8 @@ from corpus_studio.platform.contracts import (
     PretrainingSuccessEvidence,
     RunManifest,
     TrainableStateChangeEvidence,
+    TrainingExecutionEvidence,
+    TrainingSuccessEvidence,
 )
 
 _A, _B, _C, _D = ("a" * 64, "b" * 64, "c" * 64, "d" * 64)
@@ -168,3 +171,67 @@ def test_success_model_verified_flags_are_type_locked() -> None:
             model_safetensors_sha256=_A,
             model_config_sha256=_B,
         )
+
+
+def _pretraining_success() -> PretrainingSuccessEvidence:
+    return PretrainingSuccessEvidence(
+        execution=_execution(),
+        output_path_verified=True,
+        model_bytes_verified=True,
+        artifact_integrity_verified=True,
+        model_safetensors_sha256=_A,
+        model_config_sha256=_B,
+    )
+
+
+def _adapter_success() -> TrainingSuccessEvidence:
+    # A minimal valid SFT adapter success, to prove the RunManifest XOR guard (not the adapter contract).
+    execution = TrainingExecutionEvidence(
+        trainable_state=_trainable(),
+        adapter_export_state=AdapterExportStateEvidence(
+            before_sha256=_C,
+            after_sha256=_D,
+            tensor_count=2,
+            tensor_names=["p.0", "p.1"],
+            changed_tensor_count=1,
+            changed_tensor_names=["p.0"],
+            adapter_config_semantic_sha256=_A,
+        ),
+        gradient_coverage=_gradients(),
+        optimizer_created=True,
+        completed_optimizer_steps=1,
+        step_losses=[OptimizerStepLossEvidence(optimizer_step=1, loss=3.0)],
+    )
+    return TrainingSuccessEvidence(
+        execution=execution,
+        output_path_verified=True,
+        adapter_bytes_verified=True,
+        artifact_integrity_verified=True,
+        adapter_safetensors_sha256=_A,
+        adapter_config_sha256=_B,
+    )
+
+
+def test_run_manifest_refuses_both_success_evidence_families() -> None:
+    # honesty invariant: a run cannot be BOTH an adapter success and a full-model pretraining success.
+    with pytest.raises(ValidationError, match="at most one success-evidence family"):
+        RunManifest(
+            run_id="run-both",
+            plan_ref=Ref(id="plan-both"),
+            created_at="2026-08-05T00:00:00+00:00",
+            updated_at="2026-08-05T00:00:03+00:00",
+            training_success_evidence=_adapter_success(),
+            pretraining_success_evidence=_pretraining_success(),
+        )
+
+
+def test_run_manifest_allows_neither_success_evidence() -> None:
+    # a prepared / running / failed run carries neither family - the XOR guard must not force one.
+    manifest = RunManifest(
+        run_id="run-prepared",
+        plan_ref=Ref(id="plan-prepared"),
+        created_at="2026-08-05T00:00:00+00:00",
+        updated_at="2026-08-05T00:00:00+00:00",
+    )
+    assert manifest.training_success_evidence is None
+    assert manifest.pretraining_success_evidence is None
