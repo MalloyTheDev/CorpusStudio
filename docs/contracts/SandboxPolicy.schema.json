@@ -1,0 +1,98 @@
+{
+  "additionalProperties": false,
+  "description": "The OS-level containment policy for executing VETTED-BUT-UNTRUSTED custom-block code (mode 3, slice\n3). A static screen is not a safety proof; this policy is the real blast-radius limit. Three invariants\nare TYPE-LOCKED so an untrusted-code sandbox can never be weakened: no network, a read-only root, and\nno-new-privileges. ``writable_paths`` are the only rw exceptions (the run-scoped output dir);\n``gpu_devices`` is an HONEST, documented hole - a GPU training block must reach the CUDA devices, so a\nGPU workload is blast-radius-limited, NOT fully isolated. Enforced by the sandbox launcher; a host with\nno usable backend refuses to run custom code (fail-closed). ``bubblewrap`` is the primary backend, with\nan ``unshare`` + rlimits fallback that is weaker (no filesystem confinement).",
+  "properties": {
+    "contract_version": {
+      "const": "1.0.0",
+      "default": "1.0.0",
+      "title": "Contract Version",
+      "type": "string"
+    },
+    "gpu_devices": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Gpu Devices",
+      "type": "array"
+    },
+    "network_isolated": {
+      "const": true,
+      "default": true,
+      "title": "Network Isolated",
+      "type": "boolean"
+    },
+    "no_new_privileges": {
+      "const": true,
+      "default": true,
+      "title": "No New Privileges",
+      "type": "boolean"
+    },
+    "readonly_root": {
+      "const": true,
+      "default": true,
+      "title": "Readonly Root",
+      "type": "boolean"
+    },
+    "rlimit_address_space_bytes": {
+      "anyOf": [
+        {
+          "minimum": 1,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Rlimit Address Space Bytes"
+    },
+    "rlimit_cpu_seconds": {
+      "anyOf": [
+        {
+          "minimum": 1,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Rlimit Cpu Seconds"
+    },
+    "rlimit_open_files": {
+      "anyOf": [
+        {
+          "minimum": 1,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Rlimit Open Files"
+    },
+    "rlimit_processes": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Rlimit Processes"
+    },
+    "writable_paths": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Writable Paths",
+      "type": "array"
+    }
+  },
+  "title": "SandboxPolicy",
+  "type": "object"
+}

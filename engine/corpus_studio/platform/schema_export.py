@@ -47,6 +47,7 @@ from .contracts import (
     RunManifest,
     RunPlan,
     RunTelemetrySummary,
+    SandboxPolicy,
     StorageProfile,
     TelemetrySample,
     TokenizerDescriptor,
@@ -100,6 +101,7 @@ ROOT_CONTRACTS: dict[str, type[ContractModel]] = {
     "PretrainingDataPolicy": PretrainingDataPolicy,
     "PreferenceDataPolicy": PreferenceDataPolicy,
     "ModelCodeVettingReport": ModelCodeVettingReport,
+    "SandboxPolicy": SandboxPolicy,
 }
 
 

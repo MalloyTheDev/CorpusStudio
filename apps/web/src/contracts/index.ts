@@ -32,6 +32,7 @@ export type { RunEvent } from "./RunEvent";
 export type { RunManifest } from "./RunManifest";
 export type { RunPlan } from "./RunPlan";
 export type { RunTelemetrySummary } from "./RunTelemetrySummary";
+export type { SandboxPolicy } from "./SandboxPolicy";
 export type { StorageProfile } from "./StorageProfile";
 export type { TelemetrySample } from "./TelemetrySample";
 export type { TokenizerDescriptor } from "./TokenizerDescriptor";
