@@ -8,9 +8,11 @@ base gate. The dense-SFT seal is untouched - pretraining has its OWN resolved co
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
+
+from corpus_studio.platform.contracts import ResolvedPretrainingExecutionConfiguration
 
 
 class CorpusShardBinding(BaseModel):
@@ -72,7 +74,9 @@ class PretrainRunConfig(BaseModel):
     execution_configuration_hash: str | None = None
 
 
-def pretrain_config_from_resolved(execution: Any) -> PretrainRunConfig:
+def pretrain_config_from_resolved(
+    execution: ResolvedPretrainingExecutionConfiguration,
+) -> PretrainRunConfig:
     """Map the sealed ``ResolvedPretrainingExecutionConfiguration`` to the trainer boundary (no torch, no
     defaults invented - every value comes from the sealed config)."""
     init = execution.init
