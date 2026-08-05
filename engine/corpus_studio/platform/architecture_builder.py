@@ -1,16 +1,18 @@
 """Model architecture builder (S3b front-end) - the torch-free producer of the ``architecture_ref`` a
 from-scratch pretraining run's ``from_config`` init consumes. Two HONEST modes:
 
-* **base on a family** (``build_from_family``) - configure a KNOWN architecture (Llama, Mistral, Qwen2,
-  Gemma, GPT-2, GPT-NeoX). The result is *based on* that family - it is NOT "your own model".
+* **base on a family** (``build_from_family``) - configure a KNOWN architecture (its real transformers
+  ``model_type``). The result is *based on* that family - NOT "your own model".
 * **compose** (``build_composed``) - YOU pick the building blocks (positions, MLP shape, norm, attention
   bias, grouped-query attention) into a novel configuration + your own name. That design is YOURS; it is
-  realized on the matching reference block IMPLEMENTATION (the same blocks Llama/Mistral share). If your
-  combination matches NO reference implementation, ``needs_custom_code`` is set: a truly-novel design
-  needs the custom-block path (real model code), not a config.
+  realized on the reference block IMPLEMENTATION whose STRUCTURAL SIGNATURE matches (the same blocks
+  families share). A combination NO reference implementation builds sets ``needs_custom_code``: a
+  truly-novel design needs the custom-block path (real model code), not a config.
 
 No model is instantiated here (no torch / transformers) - only a config dict + an honest STATIC parameter
-ESTIMATE (validated against reference models; a measured count is the worker's job).
+ESTIMATE (validated against reference models; a measured count is the worker's job). Estimates are close
+for the llama/GPT-2 families and approximate for quirky ones (partial rotary, extra norms) - always
+labelled an estimate, never a measured count.
 """
 
 from __future__ import annotations
@@ -28,8 +30,7 @@ class ArchitectureBuilderError(ValueError):
 @dataclass(frozen=True)
 class ArchitectureTraits:
     """The BUILDING BLOCKS of a decoder-LM architecture - the design choices, independent of dimensions.
-    A named family is a preset of these (honestly "based on" that family); composing your own means
-    choosing them yourself. ``intermediate_ratio`` is only a default sizing (explicit dims override it)."""
+    ``intermediate_ratio`` is only a default sizing (explicit dims override it)."""
 
     positions: Literal["rope", "learned"]
     gated_mlp: bool
@@ -45,26 +46,58 @@ class ArchitectureTraits:
         return (self.positions, self.gated_mlp, self.norm, self.attention_bias, self.mlp_bias)
 
 
-# The known families, as trait presets - used ONLY for the honest "base on a family" mode.
-_FAMILIES: dict[str, ArchitectureTraits] = {
-    "llama": ArchitectureTraits("rope", True, "silu", "rmsnorm", False, False, False, 8 / 3),
-    "mistral": ArchitectureTraits("rope", True, "silu", "rmsnorm", False, False, False, 8 / 3),
-    "qwen2": ArchitectureTraits("rope", True, "silu", "rmsnorm", True, False, False, 8 / 3),
-    "gemma": ArchitectureTraits("rope", True, "gelu_pytorch_tanh", "rmsnorm", False, False, True, 8.0),
-    "gpt2": ArchitectureTraits("learned", False, "gelu_new", "layernorm", True, True, True, 4.0),
-    "gpt_neox": ArchitectureTraits("rope", False, "gelu", "layernorm", True, True, False, 4.0),
+@dataclass(frozen=True)
+class _Impl:
+    """A known reference implementation: its exact transformers ``model_type`` + architectures class +
+    config field style, and the structural traits it realizes."""
+
+    model_type: str
+    architectures: str
+    config_style: Literal["hf_standard", "gpt2"]
+    traits: ArchitectureTraits
+
+
+def _t(
+    positions: str,
+    gated: bool,
+    activation: str,
+    norm: str,
+    attn_bias: bool,
+    mlp_bias: bool,
+    tied: bool,
+    ratio: float,
+) -> ArchitectureTraits:
+    return ArchitectureTraits(positions, gated, activation, norm, attn_bias, mlp_bias, tied, ratio)  # type: ignore[arg-type]
+
+
+# The known families, each a REAL transformers implementation (its own model_type). "Based on <family>".
+_FAMILIES: dict[str, _Impl] = {
+    "llama": _Impl("llama", "LlamaForCausalLM", "hf_standard", _t("rope", True, "silu", "rmsnorm", False, False, False, 8 / 3)),
+    "mistral": _Impl("mistral", "MistralForCausalLM", "hf_standard", _t("rope", True, "silu", "rmsnorm", False, False, False, 8 / 3)),
+    "qwen2": _Impl("qwen2", "Qwen2ForCausalLM", "hf_standard", _t("rope", True, "silu", "rmsnorm", True, False, False, 8 / 3)),
+    "qwen3": _Impl("qwen3", "Qwen3ForCausalLM", "hf_standard", _t("rope", True, "silu", "rmsnorm", False, False, False, 8 / 3)),
+    "gemma": _Impl("gemma", "GemmaForCausalLM", "hf_standard", _t("rope", True, "gelu_pytorch_tanh", "rmsnorm", False, False, True, 8.0)),
+    "gemma2": _Impl("gemma2", "Gemma2ForCausalLM", "hf_standard", _t("rope", True, "gelu_pytorch_tanh", "rmsnorm", False, False, True, 4.0)),
+    "phi": _Impl("phi", "PhiForCausalLM", "hf_standard", _t("rope", False, "gelu_new", "layernorm", True, True, False, 4.0)),
+    "phi3": _Impl("phi3", "Phi3ForCausalLM", "hf_standard", _t("rope", True, "silu", "rmsnorm", False, False, False, 8 / 3)),
+    "starcoder2": _Impl("starcoder2", "Starcoder2ForCausalLM", "hf_standard", _t("rope", False, "gelu_pytorch_tanh", "layernorm", True, True, False, 4.0)),
+    "stablelm": _Impl("stablelm", "StableLmForCausalLM", "hf_standard", _t("rope", True, "silu", "layernorm", False, False, False, 8 / 3)),
+    "gpt2": _Impl("gpt2", "GPT2LMHeadModel", "gpt2", _t("learned", False, "gelu_new", "layernorm", True, True, True, 4.0)),
+    "gpt_neox": _Impl("gpt_neox", "GPTNeoXForCausalLM", "hf_standard", _t("rope", False, "gelu", "layernorm", True, True, False, 4.0)),
 }
 KNOWN_FAMILIES: tuple[str, ...] = tuple(_FAMILIES)
 
-# A reference IMPLEMENTATION (a real transformers model_type) per structural signature. A composed design
-# whose signature is here trains on that implementation; one that is absent needs the custom-block path.
-_IMPL_BY_SIGNATURE: dict[tuple, str] = {
-    _FAMILIES["llama"].structural_signature(): "llama",  # gated / RMSNorm / RoPE / no bias
-    _FAMILIES["qwen2"].structural_signature(): "qwen2",  # + attention bias
-    _FAMILIES["gpt2"].structural_signature(): "gpt2",  # standard / LayerNorm / learned / bias
-    _FAMILIES["gpt_neox"].structural_signature(): "gpt_neox",  # standard / LayerNorm / RoPE / bias
-}
-_HF_STANDARD_TYPES = {"llama", "qwen2", "gemma", "mistral"}  # hidden_size-style config fields
+
+def _build_signature_map() -> dict[tuple, _Impl]:
+    """The representative implementation per STRUCTURAL signature (for compose realizability). The first
+    family declared with a given signature is the representative."""
+    result: dict[tuple, _Impl] = {}
+    for impl in _FAMILIES.values():
+        result.setdefault(impl.traits.structural_signature(), impl)
+    return result
+
+
+_IMPL_BY_SIGNATURE = _build_signature_map()
 
 
 @dataclass(frozen=True)
@@ -188,8 +221,10 @@ def solve_for_target(
 
 def _config_dict(
     traits: ArchitectureTraits,
-    model_type: str,
     *,
+    model_type: str,
+    architectures: str,
+    config_style: str,
     name: str,
     dims: dict[str, int],
     vocab_size: int,
@@ -197,10 +232,10 @@ def _config_dict(
     tie_word_embeddings: bool,
 ) -> dict[str, Any]:
     """The HF-style architecture config dict (a plain dict the worker's ``from_config`` materializes)."""
-    if model_type == "gpt2":
+    if config_style == "gpt2":
         return {
-            "model_type": "gpt2",
-            "architectures": ["GPT2LMHeadModel"],
+            "model_type": model_type,
+            "architectures": [architectures],
             "corpus_studio_name": name,
             "n_embd": dims["hidden_size"],
             "n_layer": dims["num_hidden_layers"],
@@ -212,9 +247,9 @@ def _config_dict(
             "activation_function": traits.activation,
             "layer_norm_epsilon": 1e-5,
         }
-    config = {
+    config: dict[str, Any] = {
         "model_type": model_type,
-        "architectures": [f"{model_type.capitalize()}ForCausalLM"],
+        "architectures": [architectures],
         "corpus_studio_name": name,
         "hidden_size": dims["hidden_size"],
         "num_hidden_layers": dims["num_hidden_layers"],
@@ -238,6 +273,11 @@ def _config_dict(
 def _finalize(
     traits: ArchitectureTraits,
     *,
+    model_type: str,
+    architectures: str,
+    config_style: str,
+    realizing_family: str | None,
+    needs_custom_code: bool,
     name: str,
     design_source: str,
     preset: str | None,
@@ -290,12 +330,6 @@ def _finalize(
         if dims["num_hidden_layers"] < 1 or dims["intermediate_size"] < 1:
             raise ArchitectureBuilderError("num_hidden_layers and intermediate_size must be positive")
 
-    realizing_family = _IMPL_BY_SIGNATURE.get(traits.structural_signature())
-    needs_custom_code = realizing_family is None
-    # A novel design still gets a config + an estimate, but is honestly flagged: no reference
-    # implementation builds it, so training it needs the custom-block path. A placeholder model_type
-    # marks it (the worker refuses to fabricate an implementation for it).
-    model_type = realizing_family if realizing_family is not None else "custom_decoder"
     estimate = estimate_parameters(
         traits,
         hidden_size=dims["hidden_size"],
@@ -309,7 +343,9 @@ def _finalize(
     )
     config = _config_dict(
         traits,
-        model_type,
+        model_type=model_type,
+        architectures=architectures,
+        config_style=config_style,
         name=name,
         dims=dims,
         vocab_size=vocab_size,
@@ -347,16 +383,21 @@ def build_from_family(
     max_position_embeddings: int = 4096,
     tie_word_embeddings: bool | None = None,
 ) -> BuiltArchitecture:
-    """Configure a KNOWN family's architecture (honestly 'based on' that family - NOT your own design)."""
+    """Configure a KNOWN family's architecture, using that family's OWN transformers ``model_type``
+    (honestly 'based on' that family - NOT your own design)."""
     if family not in _FAMILIES:
-        raise ArchitectureBuilderError(
-            f"unknown family '{family}'; known: {', '.join(KNOWN_FAMILIES)}"
-        )
-    traits = _FAMILIES[family]
+        raise ArchitectureBuilderError(f"unknown family '{family}'; known: {', '.join(KNOWN_FAMILIES)}")
+    impl = _FAMILIES[family]
+    traits = impl.traits
     if tie_word_embeddings is not None:
         traits = replace(traits, tie_embeddings=tie_word_embeddings)
     return _finalize(
         traits,
+        model_type=impl.model_type,
+        architectures=impl.architectures,
+        config_style=impl.config_style,
+        realizing_family=family,
+        needs_custom_code=False,
         name=name or family,
         design_source=f"family:{family}",
         preset=preset,
@@ -382,7 +423,7 @@ def build_composed(
     attention_bias: bool = False,
     mlp_bias: bool = False,
     tie_embeddings: bool = False,
-    intermediate_ratio: float = 8 / 3,
+    intermediate_ratio: float | None = None,
     preset: str | None = None,
     target_parameters: int | None = None,
     hidden_size: int | None = None,
@@ -393,13 +434,16 @@ def build_composed(
     vocab_size: int = 32000,
     max_position_embeddings: int = 4096,
 ) -> BuiltArchitecture:
-    """Compose YOUR OWN architecture DESIGN from building blocks. It is realized on the matching reference
-    block implementation; a combination no implementation builds sets ``needs_custom_code`` (a truly-novel
-    design needs the custom-block path, not a config)."""
+    """Compose YOUR OWN architecture DESIGN from building blocks. It is realized on the reference
+    implementation whose STRUCTURAL SIGNATURE matches; a combination none matches sets
+    ``needs_custom_code`` (a truly-novel design needs the custom-block path, not a config)."""
     if positions not in {"rope", "learned"}:
         raise ArchitectureBuilderError("positions must be 'rope' or 'learned'")
     if norm not in {"rmsnorm", "layernorm"}:
         raise ArchitectureBuilderError("norm must be 'rmsnorm' or 'layernorm'")
+    # Default the MLP ratio by shape when unset (gated ~ 8/3, standard = 4x) so a composed standard MLP is
+    # not silently undersized.
+    ratio = intermediate_ratio if intermediate_ratio is not None else (8 / 3 if gated_mlp else 4.0)
     traits = ArchitectureTraits(
         positions=positions,  # type: ignore[arg-type]
         gated_mlp=gated_mlp,
@@ -408,10 +452,26 @@ def build_composed(
         attention_bias=attention_bias,
         mlp_bias=mlp_bias,
         tie_embeddings=tie_embeddings,
-        intermediate_ratio=intermediate_ratio,
+        intermediate_ratio=ratio,
     )
+    impl = _IMPL_BY_SIGNATURE.get(traits.structural_signature())
+    if impl is not None:
+        model_type, architectures, config_style = impl.model_type, impl.architectures, impl.config_style
+        realizing_family: str | None = impl.model_type
+        needs_custom_code = False
+    else:
+        # A novel design still gets a config + an estimate, but is honestly flagged: no reference
+        # implementation builds it, so training it needs the custom-block path (real model code).
+        model_type, architectures, config_style = "custom_decoder", "CustomDecoderForCausalLM", "hf_standard"
+        realizing_family = None
+        needs_custom_code = True
     return _finalize(
         traits,
+        model_type=model_type,
+        architectures=architectures,
+        config_style=config_style,
+        realizing_family=realizing_family,
+        needs_custom_code=needs_custom_code,
         name=name,
         design_source="composed",
         preset=preset,

@@ -1017,3 +1017,17 @@ def test_platform_plan_pretraining_refuses_a_vocab_that_contradicts_the_arch_con
     )
     assert result.exit_code == 2
     assert "contradicts the architecture config" in result.output
+
+
+def test_platform_plan_warns_on_a_custom_decoder_arch_config(monkeypatch, tmp_path):
+    # AUDIT: a composed design no reference implementation builds (model_type "custom_decoder") needs the
+    # not-yet-shipped custom-block path - planning against it must WARN, not silently plan a dead run.
+    _ready_host(monkeypatch)
+    args = _pretraining_cli_args(tmp_path)
+    (tmp_path / "config.json").write_text(
+        json.dumps({"model_type": "custom_decoder", "hidden_size": 256, "vocab_size": 32000}),
+        encoding="utf-8",
+    )
+    result = runner.invoke(app, [*args, "--json"])
+    assert result.exit_code == 0, result.output  # advisory: it warns, it does not block planning
+    assert "custom_decoder design" in result.output

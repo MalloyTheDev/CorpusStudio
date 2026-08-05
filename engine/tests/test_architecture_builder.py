@@ -12,6 +12,7 @@ from corpus_studio.cli import app
 from corpus_studio.platform.architecture_builder import (
     _FAMILIES,
     ArchitectureBuilderError,
+    KNOWN_FAMILIES,
     build_composed,
     build_from_family,
     estimate_parameters,
@@ -25,7 +26,7 @@ _runner = CliRunner()
 
 def test_gpt2_small_formula_matches_the_reference_124m():
     params = estimate_parameters(
-        _FAMILIES["gpt2"],
+        _FAMILIES["gpt2"].traits,
         hidden_size=768,
         num_hidden_layers=12,
         num_attention_heads=12,
@@ -40,7 +41,7 @@ def test_gpt2_small_formula_matches_the_reference_124m():
 
 def test_llama_7b_formula_is_in_range():
     params = estimate_parameters(
-        _FAMILIES["llama"],
+        _FAMILIES["llama"].traits,
         hidden_size=4096,
         num_hidden_layers=32,
         num_attention_heads=32,
@@ -63,8 +64,8 @@ def test_untying_adds_the_embedding_matrix():
         vocab_size=50257,
         max_position_embeddings=1024,
     )
-    tied = estimate_parameters(_FAMILIES["gpt2"], tie_word_embeddings=True, **kw)
-    untied = estimate_parameters(_FAMILIES["gpt2"], tie_word_embeddings=False, **kw)
+    tied = estimate_parameters(_FAMILIES["gpt2"].traits, tie_word_embeddings=True, **kw)
+    untied = estimate_parameters(_FAMILIES["gpt2"].traits, tie_word_embeddings=False, **kw)
     assert untied - tied == 50257 * 768
 
 
@@ -78,8 +79,8 @@ def test_grouped_query_attention_reduces_params():
         max_position_embeddings=4096,
         tie_word_embeddings=False,
     )
-    mha = estimate_parameters(_FAMILIES["llama"], num_key_value_heads=16, **kw)
-    gqa = estimate_parameters(_FAMILIES["llama"], num_key_value_heads=4, **kw)
+    mha = estimate_parameters(_FAMILIES["llama"].traits, num_key_value_heads=16, **kw)
+    gqa = estimate_parameters(_FAMILIES["llama"].traits, num_key_value_heads=4, **kw)
     assert gqa < mha
 
 
@@ -222,3 +223,22 @@ def test_cli_reports_an_unwritable_out_path(tmp_path):
     )
     assert result.exit_code == 2
     assert "cannot write --out" in result.output
+
+
+# ---- audit fixes: family identity + the expanded set -----------------------------------------------
+
+
+def test_every_family_uses_its_own_model_type_and_class():
+    # AUDIT fix: a family must carry its OWN transformers model_type - NOT the one its block signature
+    # happens to share. Mistral/Gemma share Llama's blocks but are NOT llama.
+    assert set(KNOWN_FAMILIES) >= {"mistral", "gemma", "qwen3", "phi", "starcoder2", "stablelm"}
+    for fam in KNOWN_FAMILIES:
+        assert build_from_family(fam, preset="tiny").config["model_type"] == fam
+    assert build_from_family("mistral", preset="small").config["architectures"] == ["MistralForCausalLM"]
+    # AUDIT fix: multi-word model types must not be mangled by capitalize()
+    assert build_from_family("gpt_neox", preset="small").config["architectures"] == ["GPTNeoXForCausalLM"]
+
+
+def test_composing_gated_layernorm_realizes_on_stablelm():
+    built = build_composed(name="S", positions="rope", gated_mlp=True, norm="layernorm", preset="small")
+    assert built.realizing_family == "stablelm" and built.needs_custom_code is False

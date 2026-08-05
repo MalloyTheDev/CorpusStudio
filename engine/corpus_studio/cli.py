@@ -1159,6 +1159,19 @@ def platform_plan(
                 raise typer.Exit(2) from exc
             pretraining_arch_ref_id = str(architecture_config)
             pretraining_arch_ref_sha256 = hashlib.sha256(arch_bytes).hexdigest()
+            # A composed design that no reference implementation builds is emitted with model_type
+            # "custom_decoder": it needs the (not-yet-shipped, security-gated) custom-block path, so a run
+            # planned against it cannot initialize a model yet. Warn loudly rather than plan a dead run.
+            if (
+                isinstance(arch_config_json, dict)
+                and arch_config_json.get("model_type") == "custom_decoder"
+            ):
+                typer.echo(
+                    "warning: --architecture-config is a custom_decoder design (no reference "
+                    "implementation builds it); the custom-block path is not yet available, so a "
+                    "pretraining run cannot initialize this model until that slice lands.",
+                    err=True,
+                )
             # The architecture config's vocab_size IS the model's embedding size: default --init-vocab-size
             # to it, and refuse an explicit value that contradicts it (a silent mismatch = a broken model).
             arch_vocab = (
@@ -1590,8 +1603,9 @@ def create_model(
     from_family: Optional[str] = typer.Option(
         None,
         "--from-family",
-        help="BASE ON a known architecture (llama / mistral / qwen2 / gemma / gpt2 / gpt_neox). The result "
-        "is BASED ON that family - not your own design. Use --compose to design your own.",
+        help="BASE ON a known architecture (llama / mistral / qwen2 / qwen3 / gemma / gemma2 / phi / "
+        "phi3 / starcoder2 / stablelm / gpt2 / gpt_neox). The result is BASED ON that family - not your "
+        "own design. Use --compose to design your own.",
     ),
     compose: bool = typer.Option(
         False,
