@@ -105,6 +105,13 @@ def _refuse_unsupported(execution: ResolvedPretrainingExecutionConfiguration) ->
         raise PretrainingError("continued pretraining (checkpoint resume) is a later worker slice")
     if init.custom_code is not None:
         raise PretrainingError("custom-block execution needs the gated worker sandbox (not built); refuse")
+    tokenizer_source = execution.tokenizer_source
+    if tokenizer_source.mode == "freeze" and tokenizer_source.tokenizer_location is None:
+        # freeze with no location = the checkpoint's tokenizer (continued init) - refuse cleanly rather
+        # than let the load path do Path(None).
+        raise PretrainingError(
+            "a freeze tokenizer without a location comes from a continued checkpoint (not yet supported)"
+        )
 
 
 def _train_bpe_tokenizer(documents: list[str], tokenizer_source: Any) -> Any:  # pragma: no cover

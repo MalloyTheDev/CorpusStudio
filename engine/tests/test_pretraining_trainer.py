@@ -61,21 +61,24 @@ def test_load_architecture_config_requires_a_ref():
         load_architecture_config(None)
 
 
-def _execution(*, init_mode="random", custom_code=None, tokenizer_mode="train"):
+def _execution(*, init_mode="random", custom_code=None, tokenizer_mode="train", tokenizer_location=None):
     # A duck-typed stand-in: _refuse_unsupported only reads these attributes (a full sealed config is heavy).
     return SimpleNamespace(
         init=SimpleNamespace(mode=init_mode, custom_code=custom_code),
-        tokenizer_source=SimpleNamespace(mode=tokenizer_mode),
+        tokenizer_source=SimpleNamespace(mode=tokenizer_mode, tokenizer_location=tokenizer_location),
     )
 
 
 def test_refuse_unsupported_modes():
     _refuse_unsupported(_execution())  # random + train is supported (no raise)
-    _refuse_unsupported(_execution(tokenizer_mode="import"))  # import supported now (inc 3b)
+    _refuse_unsupported(_execution(tokenizer_mode="import", tokenizer_location="/t"))  # import (inc 3b)
+    _refuse_unsupported(_execution(tokenizer_mode="freeze", tokenizer_location="/t"))  # freeze + location
     with pytest.raises(PretrainingError, match="continued"):
         _refuse_unsupported(_execution(init_mode="continued"))
     with pytest.raises(PretrainingError, match="custom-block"):
         _refuse_unsupported(_execution(custom_code=object()))
+    with pytest.raises(PretrainingError, match="freeze tokenizer without a location"):
+        _refuse_unsupported(_execution(tokenizer_mode="freeze", tokenizer_location=None))
 
 
 def test_tokenizer_source_spec_import_requires_a_location():
