@@ -1225,6 +1225,18 @@ def test_pretraining_config_maps_the_sealed_config_to_the_trainer_boundary():
     assert tc.output_dir == cfg.output_dir
     assert tc.cpu_toy is False  # runtime_mode == "training"
     assert tc.execution_configuration_hash == cfg.configuration_hash
+    # FAITHFULNESS: the sealed execution semantics are carried, not dropped (Codex audit).
+    assert tc.loss_impl == cfg.loss_impl.value
+    assert tc.export_format == cfg.export_format.value and tc.output_layout == cfg.output_layout
+    assert tc.optim == cfg.optimizer.impl.value
+    assert tc.adam_beta1 == cfg.optimizer.adam_beta1 and tc.adam_beta2 == cfg.optimizer.adam_beta2
+    assert tc.forward_compute_dtype == cfg.precision.forward_compute_dtype.value
+    assert tc.gradient_dtype == cfg.precision.gradient_dtype.value
+    assert tc.attention_kernel == cfg.attention.effective_backend_required.value
+    assert tc.device_map == {e.module: e.device for e in cfg.device_map}
+    assert tc.corpus_packing == cfg.data.packing and tc.global_batch_size == cfg.data.global_batch_size
+    assert tc.checkpoint_impl == cfg.checkpoint_policy.impl.value
+    assert tc.reset_optimizer == cfg.init.reset_optimizer
 
 
 def test_pretraining_plan_continued_binds_the_continued_objective():
