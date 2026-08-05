@@ -15,7 +15,7 @@ corpus-studio platform-schemas --out docs/contracts
 # or: python -m corpus_studio.cli platform-schemas --out docs/contracts
 ```
 
-`index.json` lists all **39 root contracts** and their shared `contract_version`.
+`index.json` lists all **40 root contracts** and their shared `contract_version`.
 
 ## The contracts
 
@@ -43,6 +43,7 @@ corpus-studio platform-schemas --out docs/contracts
 | `RunPlan` | The **immutable, fully-resolved** execution plan (`plan_hash`-sealed), including concrete physical resources, state placements, offload rules, and rank/group bindings; accumulation target is in **supervised tokens**. |
 | `ResolvedExecutionConfiguration` | The hash-sealed, fully-resolved execution configuration consumed **directly** by an isolated worker - every execution-affecting default; a worker may refuse it but never silently fill in or override it. |
 | `ResolvedPreferenceExecutionConfiguration` | The sibling hash-sealed execution configuration for offline **preference optimization (DPO)**, carried on `RunPlan.resolved_preference_execution`; reuses every shared execution sub-spec + adds a `PreferenceDataPolicy` and the DPO loss/reference seal; kept separate so the byte-locked SFT seal is never perturbed. |
+| `ResolvedPretrainingExecutionConfiguration` | The sibling hash-sealed execution configuration for **from-scratch / continued pretraining** - a full-parameter causal-LM run (no adapter, no 4-bit base, no single dataset file) with a `ModelInitializationSpec` (random-from-config or a continued checkpoint), a `TokenizerSourceSpec` (train/import/freeze), and the sharded `PretrainingDataPolicy`; kept separate so the byte-locked SFT seal is never perturbed. Its `RunPlan` carry + resolver + CLI land in the S3a-2 slice. |
 | `RunManifest` | A durable run **instance** + state machine + reconciliation. |
 | `RunEvent` | The **streamed telemetry** envelope (stage markers + metrics incl. **dedicated vs shared** GPU memory). |
 | `TelemetrySample` | One raw, append-only environmental sample (`<run-dir>/TelemetrySamples.jsonl`); the authoritative per-tick series the summary is derived from. |

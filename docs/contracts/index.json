@@ -86,6 +86,10 @@
       "file": "ResolvedPreferenceExecutionConfiguration.schema.json"
     },
     {
+      "contract": "ResolvedPretrainingExecutionConfiguration",
+      "file": "ResolvedPretrainingExecutionConfiguration.schema.json"
+    },
+    {
       "contract": "RunPlan",
       "file": "RunPlan.schema.json"
     },

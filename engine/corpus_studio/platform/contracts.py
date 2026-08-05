@@ -4165,6 +4165,252 @@ class ResolvedPreferenceExecutionConfiguration(ContractModel):
         return self
 
 
+class ModelInitializationSpec(ContractModel):
+    """How a PRETRAINING run instantiates its model. From-scratch has NO source weights: it builds a
+    model from an architecture config with reproducible random init (the worker's ``from_config`` path,
+    never ``from_pretrained``), pinned by ``architecture_ref`` + ``vocab_size`` + ``init_seed``.
+    Continued pretraining loads a hash-pinned ``source_checkpoint_ref`` and states explicitly what is
+    reset (optimizer / lr scheduler / data cursor) vs carried. Dense/MoE-safe: this seals init INTENT
+    and assumes no dense-specific model shape."""
+
+    mode: Literal["random", "continued"]
+    # random init: the architecture config identity + the exact vocab/context the init reproduces.
+    architecture_ref: Ref | None = None
+    vocab_size: int | None = Field(default=None, ge=1)
+    max_position_embeddings: int | None = Field(default=None, ge=1)
+    init_seed: int | None = Field(default=None, ge=0)
+    initializer_range: float | None = Field(default=None, gt=0)
+    # continued init: the exact source checkpoint + what carries vs resets.
+    source_checkpoint_ref: Ref | None = None
+    reset_optimizer: bool = True
+    reset_lr_scheduler: bool = True
+    reset_data_cursor: bool = True
+
+    @model_validator(mode="after")
+    def _validate_init(self) -> ModelInitializationSpec:
+        if self.mode == "random":
+            if self.architecture_ref is None or not _is_pinned_ref(self.architecture_ref):
+                raise ValueError("random init requires a hash-pinned architecture_ref")
+            if self.vocab_size is None or self.init_seed is None:
+                raise ValueError(
+                    "random init requires vocab_size and init_seed so the initialization reproduces"
+                )
+            if self.source_checkpoint_ref is not None:
+                raise ValueError("random init must not name a source checkpoint")
+        else:  # continued
+            if self.source_checkpoint_ref is None or not _is_pinned_ref(self.source_checkpoint_ref):
+                raise ValueError("continued init requires a hash-pinned source_checkpoint_ref")
+            if self.architecture_ref is not None:
+                raise ValueError("continued init derives its architecture from the checkpoint")
+        return self
+
+
+class TokenizerSourceSpec(ContractModel):
+    """How the tokenizer is obtained, frozen by hash BEFORE any token is consumed (a tokenizer change
+    invalidates all downstream token accounting). ``train`` builds a NEW tokenizer from a corpus sample
+    (a new subsystem the worker slice implements); ``import`` / ``freeze`` pin an existing tokenizer by
+    its content digest exactly as the SFT path does today."""
+
+    mode: Literal["train", "import", "freeze"]
+    # train: the algorithm + vocab + special tokens the new tokenizer is built with.
+    algorithm: Literal["bpe", "unigram", "wordpiece"] | None = None
+    vocab_size: int | None = Field(default=None, ge=1)
+    special_tokens: list[str] | None = None
+    min_frequency: int | None = Field(default=None, ge=1)
+    # import / freeze: the exact tokenizer bytes.
+    tokenizer_content_sha256: str | None = Field(default=None, pattern=SHA256_PATTERN)
+
+    @model_validator(mode="after")
+    def _validate_tokenizer_source(self) -> TokenizerSourceSpec:
+        if self.mode == "train":
+            if self.algorithm is None or self.vocab_size is None:
+                raise ValueError("training a tokenizer requires an algorithm and a vocab_size")
+            if not self.special_tokens:
+                raise ValueError(
+                    "a trained tokenizer must declare its special tokens (e.g. BOS/EOS/PAD/UNK)"
+                )
+            if len(set(self.special_tokens)) != len(self.special_tokens):
+                raise ValueError("special tokens must be unique")
+            if self.tokenizer_content_sha256 is not None:
+                raise ValueError("a to-be-trained tokenizer has no pre-existing content digest")
+        else:  # import / freeze
+            if self.tokenizer_content_sha256 is None:
+                raise ValueError(
+                    f"an {self.mode} tokenizer requires a pinned tokenizer_content_sha256"
+                )
+        return self
+
+
+class ResolvedPretrainingExecutionConfiguration(ContractModel):
+    """The hash-sealed configuration for a from-scratch / continued PRETRAINING run - the sibling of
+    :class:`ResolvedExecutionConfiguration` for the ``pretraining`` execution variant.
+
+    The dense-QLoRA-SFT seal is byte-locked (its own ``configuration_hash`` AND a committed semantic
+    golden), so pretraining semantics live on THIS separate contract, never as new fields on the SFT
+    config. Unlike SFT/DPO this is a FULL-PARAMETER causal-LM run: there is no adapter, no 4-bit base,
+    and no single dataset file. The three input kinds are captured by method sub-specs rather than the
+    SFT-shaped ``ExecutionInputs`` (which fail-closed requires one local dataset file + a model-weights
+    binding, neither of which a from-scratch run has): the model by a :class:`ModelInitializationSpec`
+    (random from a config, or a continued checkpoint), the tokenizer by a :class:`TokenizerSourceSpec`,
+    and the corpus by the sharded :class:`PretrainingDataPolicy`.
+
+    Carried on ``RunPlan.resolved_pretraining_execution`` (a plan carries exactly one of the SFT /
+    preference / pretraining configs). What remains gated is EXECUTION: the pretraining worker loop
+    (``from_config`` init, corpus streaming, packing, per-rank cursor), a workload-verified run, and the
+    milestone wheel that promotes ``pretraining`` to ``workload_verified``. ``trainer_interface`` is an
+    execution-shaped placeholder until that worker seals the exact trainer surface."""
+
+    contract_version: CONTRACT_VERSION_LITERAL = "1.0.0"
+    configuration_id: str = Field(pattern=_ID)
+    configuration_hash: str = Field(pattern=SHA256_PATTERN)
+    backend_ref: Ref
+    environment_ref: Ref
+    environment_binding: Literal["profile_snapshot", "managed_lock"]
+    capability_report_ref: Ref
+    objective_ref: Ref
+    runtime_mode: Literal["training", "cpu_toy"]
+    init: ModelInitializationSpec
+    tokenizer_source: TokenizerSourceSpec
+    precision: PrecisionExecutionPolicy
+    attention: AttentionExecutionPolicy
+    device_map: list[DeviceMapEntry] = Field(min_length=1)
+    optimizer: OptimizerSpec
+    loss_impl: LossImpl
+    sequence: SequenceSpec
+    batching: BatchingSpec
+    checkpoint_policy: CheckpointPolicy
+    schedule: TrainingSchedule
+    data: PretrainingDataPolicy
+    trainer_interface: TrainerInterfacePolicy
+    export_format: ExportFormat
+    trust_remote_code: Literal[False] = False
+    use_safetensors: Literal[True] = True
+    gradient_checkpointing: bool = True
+    output_dir: str = Field(min_length=1)
+    output_layout: Literal["run_scoped_v1"] = "run_scoped_v1"
+    seed: int = Field(default=42, ge=0)
+    data_seed: int = Field(default=42, ge=0)
+
+    @model_validator(mode="after")
+    def _validate_pretraining_configuration(self) -> ResolvedPretrainingExecutionConfiguration:
+        # Shared safety invariants are enforced independently here rather than by refactoring the
+        # byte-locked SFT validator - the seals stay decoupled so a change to one can never perturb the
+        # other's hash.
+        for label, ref in (
+            ("backend_ref", self.backend_ref),
+            ("environment_ref", self.environment_ref),
+            ("capability_report_ref", self.capability_report_ref),
+            ("objective_ref", self.objective_ref),
+        ):
+            if not _is_pinned_ref(ref):
+                raise ValueError(f"resolved pretraining execution {label} must be hash-pinned")
+        if self.backend_ref.id != "corpus_studio":
+            raise ValueError(
+                "resolved pretraining execution requires the first-party corpus_studio worker backend"
+            )
+        # The only admitted pretraining shapes are the from-scratch + continued causal-LM objectives.
+        if self.objective_ref.id not in {"pretraining", "continued_pretraining"}:
+            raise ValueError(
+                "pretraining execution must bind the 'pretraining' or 'continued_pretraining' objective"
+            )
+        # Full-parameter next-token cross entropy - never a preference/DPO loss.
+        if self.loss_impl not in {
+            LossImpl.cross_entropy,
+            LossImpl.liger_fused_ce,
+            LossImpl.chunked_ce,
+        }:
+            raise ValueError(
+                "pretraining loss must be a next-token cross entropy "
+                "(cross_entropy / liger_fused_ce / chunked_ce)"
+            )
+        # init.mode and the objective must agree: 'continued' <-> continued_pretraining.
+        continued_objective = self.objective_ref.id == "continued_pretraining"
+        if (self.init.mode == "continued") != continued_objective:
+            raise ValueError(
+                "init.mode must match the objective: 'continued' <-> continued_pretraining, "
+                "'random' <-> pretraining"
+            )
+        # A continued run inherits the checkpoint's tokenizer; it cannot train a fresh one over an
+        # existing model (that would desync the embedding table from the vocabulary).
+        if self.init.mode == "continued" and self.tokenizer_source.mode == "train":
+            raise ValueError(
+                "continued pretraining cannot train a new tokenizer (it must match the checkpoint)"
+            )
+        # Full-parameter: an unquantized base with coherent storage/forward dtypes (no 4-bit path).
+        if self.precision.quantized_storage_format != QuantizationMode.none:
+            raise ValueError("full-parameter pretraining does not quantize the base (no 4-bit)")
+        if self.precision.weight_storage_dtype is None:
+            raise ValueError("full-parameter pretraining must seal the weight storage dtype")
+        if self.precision.weight_storage_dtype != self.precision.forward_compute_dtype:
+            raise ValueError(
+                "full-parameter pretraining requires weight and forward dtypes to match"
+            )
+        # Exact gradient accumulation with a derived advisory token target (mirror the SFT/DPO trainer).
+        if self.batching.fallback_grad_accumulation_steps is None:
+            raise ValueError("the first-party trainer requires exact gradient accumulation")
+        expected_token_target = (
+            self.sequence.max_sequence_len
+            * self.batching.micro_batch_size
+            * self.batching.fallback_grad_accumulation_steps
+        )
+        if self.batching.supervised_token_accumulation_target != expected_token_target:
+            raise ValueError(
+                "the fixed-microbatch trainer requires its advisory token target to be derived exactly"
+            )
+        if self.sequence.buckets:
+            raise ValueError("the first-party trainer does not implement sequence buckets")
+        if any(
+            value is None
+            for value in (
+                self.optimizer.weight_decay,
+                self.optimizer.lr_scheduler,
+                self.optimizer.warmup_ratio,
+            )
+        ):
+            raise ValueError("the first-party trainer requires all optimizer defaults")
+        # Full-parameter pretraining checkpoints the whole model - never an adapter-only checkpoint - and
+        # emits a full model, never a PEFT adapter. (full_state / sharded / distcp keep it MoE-safe.)
+        if self.checkpoint_policy.impl == CheckpointImpl.adapter_only:
+            raise ValueError("full-parameter pretraining does not use adapter-only checkpoints")
+        if self.checkpoint_policy.cadence_seconds is not None:
+            raise ValueError("the first-party trainer does not implement time-based checkpoints")
+        if self.checkpoint_policy.reload_verify:
+            raise ValueError(
+                "the first-party trainer does not implement checkpoint reload verification"
+            )
+        if self.export_format == ExportFormat.adapter_peft:
+            raise ValueError("full-parameter pretraining emits a full model, not a PEFT adapter")
+        # One reproducible sample order: the data policy's seed and the top-level data seed must agree.
+        if self.data.data_seed != self.data_seed:
+            raise ValueError(
+                "the pretraining data_seed and the top-level data_seed must match for one "
+                "reproducible sample order"
+            )
+        # device_map well-formedness + cpu_toy placement (mirror the SFT/DPO rule).
+        keys = [item.module for item in self.device_map]
+        if keys != sorted(set(keys)) or "" not in keys:
+            raise ValueError("device_map must be sorted, unique, and bind the root module")
+        if self.runtime_mode == "cpu_toy" and self.device_map != [
+            DeviceMapEntry(module="", device="cpu")
+        ]:
+            raise ValueError("cpu_toy execution must bind the entire model to CPU")
+        # Environment binding identity (mirror the SFT/DPO rule).
+        environment_hash = self.environment_ref.hash
+        if environment_hash is None or environment_hash.value is None:
+            raise ValueError("environment_ref must be hash-pinned")
+        if (
+            self.environment_binding == "profile_snapshot"
+            and self.environment_ref.id != environment_hash.value
+        ):
+            raise ValueError("profile-snapshot environment identity must be its content hash")
+        if (
+            self.environment_binding == "managed_lock"
+            and self.environment_ref.id == environment_hash.value
+        ):
+            raise ValueError("managed-lock environment identity must name the managed environment")
+        return self
+
+
 class EvalSchedule(ContractModel):
     before_run: bool = True
     after_run: bool = True
