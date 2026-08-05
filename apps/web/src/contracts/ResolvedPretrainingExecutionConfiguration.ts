@@ -152,6 +152,7 @@ export type MinFrequency = number | null;
 export type Mode1 = "train" | "import" | "freeze";
 export type SpecialTokens = string[] | null;
 export type TokenizerContentSha256 = string | null;
+export type TokenizerLocation = string | null;
 export type VocabSize1 = number | null;
 export type DisableTqdm = boolean;
 export type LoggingNanInfFilter = false | null;
@@ -442,6 +443,7 @@ export interface TokenizerSourceSpec {
   mode: Mode1;
   special_tokens?: SpecialTokens;
   tokenizer_content_sha256?: TokenizerContentSha256;
+  tokenizer_location?: TokenizerLocation;
   vocab_size?: VocabSize1;
 }
 /**

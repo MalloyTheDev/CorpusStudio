@@ -14,6 +14,7 @@ needed until the (gated) Phase 2.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 from typing import Any
@@ -104,8 +105,13 @@ def _refuse_unsupported(execution: ResolvedPretrainingExecutionConfiguration) ->
         raise PretrainingError("continued pretraining (checkpoint resume) is a later worker slice")
     if init.custom_code is not None:
         raise PretrainingError("custom-block execution needs the gated worker sandbox (not built); refuse")
-    if execution.tokenizer_source.mode in ("import", "freeze"):
-        raise PretrainingError("the import/freeze tokenizer path is a later slice (S3b-1a inc 3b)")
+    tokenizer_source = execution.tokenizer_source
+    if tokenizer_source.mode == "freeze" and tokenizer_source.tokenizer_location is None:
+        # freeze with no location = the checkpoint's tokenizer (continued init) - refuse cleanly rather
+        # than let the load path do Path(None).
+        raise PretrainingError(
+            "a freeze tokenizer without a location comes from a continued checkpoint (not yet supported)"
+        )
 
 
 def _train_bpe_tokenizer(documents: list[str], tokenizer_source: Any) -> Any:  # pragma: no cover
@@ -139,6 +145,25 @@ def _train_bpe_tokenizer(documents: list[str], tokenizer_source: Any) -> Any:  #
     )
 
 
+def _load_imported_tokenizer(tokenizer_source: Any) -> Any:  # pragma: no cover
+    """Load a pre-built tokenizer pinned by location + content digest (the bring-your-own path)."""
+    from transformers import AutoTokenizer  # noqa: PLC0415
+
+    location = Path(tokenizer_source.tokenizer_location)
+    tokenizer = AutoTokenizer.from_pretrained(str(location))
+    # Verify the pinned content: a fast tokenizer's canonical bytes live in tokenizer.json.
+    tokenizer_json = location / "tokenizer.json" if location.is_dir() else location
+    if tokenizer_json.is_file():
+        observed = hashlib.sha256(tokenizer_json.read_bytes()).hexdigest()
+        if observed != tokenizer_source.tokenizer_content_sha256:
+            raise PretrainingError(
+                "the imported tokenizer content does not match the sealed tokenizer_content_sha256"
+            )
+    if tokenizer.pad_token is None and tokenizer.eos_token is not None:
+        tokenizer.pad_token = tokenizer.eos_token
+    return tokenizer
+
+
 def run_pretraining(  # pragma: no cover - torch/tokenizers integration; proven by a CPU run
     execution: ResolvedPretrainingExecutionConfiguration,
     *,
@@ -169,7 +194,12 @@ def run_pretraining(  # pragma: no cover - torch/tokenizers integration; proven 
     if not documents:
         raise PretrainingError("no corpus documents found in the sealed shards")
 
-    tokenizer = _train_bpe_tokenizer(documents, execution.tokenizer_source)
+    if execution.tokenizer_source.mode == "train":
+        tokenizer = _train_bpe_tokenizer(documents, execution.tokenizer_source)
+        tokenizer_source = "trained"
+    else:  # import / freeze - bring your own pinned tokenizer
+        tokenizer = _load_imported_tokenizer(execution.tokenizer_source)
+        tokenizer_source = "imported"
     eos_id = tokenizer.eos_token_id if tokenizer.eos_token_id is not None else 0
 
     arch = load_architecture_config(execution.init.architecture_ref, corpus_root=corpus_root)
@@ -223,5 +253,5 @@ def run_pretraining(  # pragma: no cover - torch/tokenizers integration; proven 
         vocab_size=int(tokenizer.vocab_size),
         num_blocks=packed.coverage.num_blocks,
         coverage_ratio=packed.coverage.coverage_ratio,
-        tokenizer_source="trained",
+        tokenizer_source=tokenizer_source,
     )

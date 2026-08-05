@@ -4249,8 +4249,9 @@ class TokenizerSourceSpec(ContractModel):
     vocab_size: int | None = Field(default=None, ge=1)
     special_tokens: list[str] | None = None
     min_frequency: int | None = Field(default=None, ge=1)
-    # import / freeze: the exact tokenizer bytes.
+    # import / freeze: the exact tokenizer bytes (content digest) + WHERE the worker loads them from.
     tokenizer_content_sha256: str | None = Field(default=None, pattern=SHA256_PATTERN)
+    tokenizer_location: str | None = Field(default=None, min_length=1)
 
     @model_validator(mode="after")
     def _validate_tokenizer_source(self) -> TokenizerSourceSpec:
@@ -4263,13 +4264,17 @@ class TokenizerSourceSpec(ContractModel):
                 )
             if len(set(self.special_tokens)) != len(self.special_tokens):
                 raise ValueError("special tokens must be unique")
-            if self.tokenizer_content_sha256 is not None:
-                raise ValueError("a to-be-trained tokenizer has no pre-existing content digest")
+            if self.tokenizer_content_sha256 is not None or self.tokenizer_location is not None:
+                raise ValueError("a to-be-trained tokenizer has no pre-existing content digest or location")
         else:  # import / freeze
             if self.tokenizer_content_sha256 is None:
                 raise ValueError(
                     f"an {self.mode} tokenizer requires a pinned tokenizer_content_sha256"
                 )
+            # Only import (bring-your-own) needs WHERE to load from; freeze reuses the checkpoint's
+            # tokenizer, so it carries the digest but no separate location.
+            if self.mode == "import" and self.tokenizer_location is None:
+                raise ValueError("an import tokenizer requires a tokenizer_location to load from")
         return self
 
 
@@ -6376,6 +6381,7 @@ class TrainingPlanParameters(ContractModel):
     tokenizer_vocab_size: int | None = None
     tokenizer_special_tokens: tuple[str, ...] | None = None
     tokenizer_min_frequency: int | None = None
+    tokenizer_location: str | None = None
     # Custom-block (mode 3): mirror of the PlannerConstraints admission fields (kept field-for-field so
     # the resolver copies parameters -> constraints verbatim). Set only for an admitted custom_decoder.
     custom_code_bundle_ref_id: str | None = None

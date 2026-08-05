@@ -384,6 +384,7 @@ export type MinFrequency = number | null;
 export type Mode2 = "train" | "import" | "freeze";
 export type SpecialTokens = string[] | null;
 export type TokenizerContentSha256 = string | null;
+export type TokenizerLocation = string | null;
 export type VocabSize1 = number | null;
 export type TrustRemoteCode3 = false;
 export type UseSafetensors2 = true;
@@ -1029,6 +1030,7 @@ export interface TokenizerSourceSpec {
   mode: Mode2;
   special_tokens?: SpecialTokens;
   tokenizer_content_sha256?: TokenizerContentSha256;
+  tokenizer_location?: TokenizerLocation;
   vocab_size?: VocabSize1;
 }
 export interface TrainingConfigSnapshot {

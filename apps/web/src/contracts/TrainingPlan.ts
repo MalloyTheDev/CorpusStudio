@@ -75,6 +75,7 @@ export type SupervisedTokenAccumulationTarget = number | null;
 export type TaskType = string;
 export type TokenizerAlgorithm = string | null;
 export type TokenizerContentSha256 = string | null;
+export type TokenizerLocation = string | null;
 export type TokenizerMinFrequency = number | null;
 export type TokenizerRevision = string | null;
 export type TokenizerSourceMode = string | null;
@@ -188,6 +189,7 @@ export interface TrainingPlanParameters {
   task_type?: TaskType;
   tokenizer_algorithm?: TokenizerAlgorithm;
   tokenizer_content_sha256?: TokenizerContentSha256;
+  tokenizer_location?: TokenizerLocation;
   tokenizer_min_frequency?: TokenizerMinFrequency;
   tokenizer_revision?: TokenizerRevision;
   tokenizer_source_mode?: TokenizerSourceMode;

@@ -962,6 +962,11 @@ def platform_plan(
         "--tokenizer-special-tokens",
         help="Comma-separated special tokens for a trained tokenizer (e.g. '<bos>,<eos>,<pad>,<unk>').",
     ),
+    tokenizer_location: Optional[str] = typer.Option(
+        None,
+        "--tokenizer-location",
+        help="Import/freeze tokenizer: the local path the worker loads the pinned tokenizer from.",
+    ),
     tokenizer_digest: Optional[str] = typer.Option(
         None,
         "--tokenizer-content-sha256",
@@ -1318,6 +1323,7 @@ def platform_plan(
             if tokenizer_special_tokens
             else None
         ),
+        tokenizer_location=tokenizer_location,
     )
     parameter_accounting = None
     storage_profile = None

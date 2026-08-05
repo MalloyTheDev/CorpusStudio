@@ -682,6 +682,18 @@
           "default": null,
           "title": "Tokenizer Content Sha256"
         },
+        "tokenizer_location": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tokenizer Location"
+        },
         "tokenizer_min_frequency": {
           "anyOf": [
             {

@@ -1290,6 +1290,19 @@
           "default": null,
           "title": "Tokenizer Content Sha256"
         },
+        "tokenizer_location": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tokenizer Location"
+        },
         "vocab_size": {
           "anyOf": [
             {
