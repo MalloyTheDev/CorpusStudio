@@ -322,6 +322,24 @@ def _finalize(
         raise ArchitectureBuilderError(
             "specify exactly one of: a preset, a target parameter count, or explicit hidden_size"
         )
+    # Explicit dims refine the explicit-hidden_size mode ONLY; a preset or a param-target computes them.
+    # Refuse the mix rather than silently ignoring the values the caller supplied (num_key_value_heads is
+    # a cross-cutting GQA knob, honored in every mode).
+    if preset is not None or target_parameters is not None:
+        ignored = [
+            flag
+            for flag, val in (
+                ("num_hidden_layers", num_hidden_layers),
+                ("num_attention_heads", num_attention_heads),
+                ("intermediate_size", intermediate_size),
+            )
+            if val is not None
+        ]
+        if ignored:
+            raise ArchitectureBuilderError(
+                f"{', '.join(ignored)} apply only to explicit hidden_size sizing; a preset or a target "
+                "parameter count computes them"
+            )
     if preset is not None:
         if preset not in _PRESETS:
             raise ArchitectureBuilderError(f"unknown preset '{preset}'; choose from: {', '.join(_PRESETS)}")
@@ -340,7 +358,9 @@ def _finalize(
     else:
         assert hidden_size is not None
         heads = num_attention_heads if num_attention_heads is not None else max(1, hidden_size // _HEAD_DIM)
-        if heads < 1 or hidden_size % heads != 0:
+        if heads < 1:
+            raise ArchitectureBuilderError("num_attention_heads must be positive")
+        if hidden_size % heads != 0:
             raise ArchitectureBuilderError("hidden_size must be divisible by num_attention_heads")
         kv = num_key_value_heads or heads
         if heads % kv != 0:
