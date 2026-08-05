@@ -1210,6 +1210,59 @@ def test_pretraining_plan_seals_a_from_scratch_config():
     assert verify_run_plan_hash(plan)
 
 
+def test_cpu_toy_pretraining_actually_trains_a_from_scratch_model(tmp_path):
+    # S3b-1a inc 3a: the CPU proof - run_pretraining trains a random-init model with a from-scratch BPE
+    # tokenizer over packed sequences. Skipped in the base gate (no torch); runs where the [train] libs are.
+    import hashlib
+    import json
+
+    pytest.importorskip("torch")
+    pytest.importorskip("transformers")
+    pytest.importorskip("tokenizers")
+    pytest.importorskip("datasets")
+    pytest.importorskip("accelerate")
+    from corpus_studio.training.pretraining_trainer import run_pretraining
+
+    arch = tmp_path / "arch.json"
+    arch.write_text(
+        json.dumps(
+            {"model_type": "gpt2", "n_embd": 32, "n_layer": 2, "n_head": 2, "n_inner": 64,
+             "n_positions": 128, "vocab_size": 300}
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "corpus").mkdir()
+    shard = tmp_path / "corpus" / "s0.jsonl"
+    shard.write_text(
+        "\n".join(
+            json.dumps({"text": "the quick brown fox jumps over the lazy dog . " * 6}) for _ in range(60)
+        ),
+        encoding="utf-8",
+    )
+    data = _pretraining_data(
+        shards=(
+            PretrainingShard(
+                shard_id="s0", location="corpus/s0.jsonl", source="t", row_count=60, token_count=600,
+                content_sha256=hashlib.sha256(shard.read_bytes()).hexdigest(),
+            ),
+        ),
+        token_budget=600,
+    )
+    plan = _pretraining_plan(
+        _profile(cc_major=8), _report(readiness="cpu_toy_only"), pretraining_data=data,
+        architecture_ref_id=str(arch), architecture_ref_sha256=hashlib.sha256(arch.read_bytes()).hexdigest(),
+        init_vocab_size=300, tokenizer_vocab_size=300,
+        tokenizer_special_tokens=("<unk>", "<bos>", "<eos>", "<pad>"), sequence_len=32, allow_cpu_toy=True,
+    )
+    result = run_pretraining(
+        plan.resolved_pretraining_execution, corpus_root=tmp_path, output_dir=str(tmp_path / "out")
+    )
+    assert result.cpu_toy and result.tokenizer_source == "trained"
+    assert result.steps == plan.resolved_pretraining_execution.schedule.max_steps
+    assert result.num_blocks > 0 and result.final_loss is not None
+    assert (tmp_path / "out" / "model.safetensors").exists()
+
+
 def test_pretraining_plan_continued_binds_the_continued_objective():
     plan = _pretraining_plan(
         _profile(cc_major=8),
