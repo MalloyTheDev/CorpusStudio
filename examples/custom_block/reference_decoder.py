@@ -4,7 +4,8 @@ Copy this as a starting point for your OWN model implementation (the only not-bo
 or a composed-on-standard-blocks design needs no custom code). To be admitted by ``vet-model-code`` a
 custom block must:
 
-1. subclass a recognized model base (torch ``nn.Module`` / HF ``PreTrainedModel`` / ``CustomDecoderBase``),
+1. subclass a recognized model base (torch ``nn.Module`` today - directly or via a local base class; a
+   CorpusStudio base joins when the worker ABI ships),
 2. define ``__init__(self, config)`` that builds the model from an architecture config, and
 3. define ``forward(...)`` that accepts ``input_ids`` and returns ``loss`` + ``logits``.
 
@@ -38,15 +39,16 @@ class ReferenceDecoderForCausalLM(nn.Module):
         self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
 
     def forward(self, input_ids, attention_mask=None, labels=None):
-        # attention_mask (padding) is accepted for interface compatibility with HF-style trainers; this
-        # minimal reference trains on packed sequences and relies on the causal mask alone.
         seq_len = input_ids.size(1)
         causal = torch.triu(
             torch.full((seq_len, seq_len), float("-inf"), device=input_ids.device), diagonal=1
         )
+        # Honor a padding mask (1 = keep, 0 = pad) so copied models handle padded batches correctly; None
+        # means fully-packed sequences with no padding.
+        key_padding = attention_mask == 0 if attention_mask is not None else None
         hidden = self.embed_tokens(input_ids)
         for layer in self.layers:
-            hidden = layer(hidden, src_mask=causal)
+            hidden = layer(hidden, src_mask=causal, src_key_padding_mask=key_padding)
         logits = self.lm_head(self.norm(hidden))
         loss = None
         if labels is not None:

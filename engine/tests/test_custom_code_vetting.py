@@ -94,6 +94,24 @@ def test_a_model_subclass_with_forward_conforms():
     assert _errors(vet_source(src, entry_symbol="M")) == set()
 
 
+def test_an_indirect_model_subclass_conforms():
+    # AUDIT (Codex): custom blocks commonly use a local base; conformance resolves local inheritance
+    # rather than requiring the model base to be a DIRECT base.
+    src = (
+        "import torch\n\nclass Base(torch.nn.Module):\n    pass\n\n"
+        "class M(Base):\n    def forward(self, input_ids):\n        return input_ids\n"
+    )
+    assert _errors(vet_source(src, entry_symbol="M")) == set()
+
+
+def test_a_forward_that_cannot_take_input_ids_is_rejected():
+    # AUDIT (Codex): the worker calls forward with input_ids; a forward that cannot accept it is refused.
+    bad = "import torch\n\nclass M(torch.nn.Module):\n    def forward(self):\n        return 0\n"
+    assert "entry-forward-signature" in _errors(vet_source(bad, entry_symbol="M"))
+    ok = "import torch\n\nclass M(torch.nn.Module):\n    def forward(self, **kw):\n        return kw\n"
+    assert _errors(vet_source(ok, entry_symbol="M")) == set()  # **kwargs can receive input_ids
+
+
 def test_the_reference_example_block_is_admitted():
     from pathlib import Path
 

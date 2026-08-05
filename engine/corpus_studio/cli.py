@@ -1211,6 +1211,19 @@ def platform_plan(
                 except (OSError, ValueError, ValidationError) as exc:
                     typer.echo(f"cannot read the custom-code inputs: {exc}", err=True)
                     raise typer.Exit(2) from exc
+                from corpus_studio.platform.custom_code_vetting import (  # noqa: PLC0415
+                    ANALYZER_VERSION,
+                )
+
+                # Bind admission to the CURRENT screening rules: a report from an older analyzer may have
+                # admitted code the current rules reject, so refuse it rather than let it bypass them.
+                if vetting_report.analyzer_version != ANALYZER_VERSION:
+                    typer.echo(
+                        f"the vetting report was produced by a different analyzer version "
+                        f"({vetting_report.analyzer_version} != {ANALYZER_VERSION}); re-run vet-model-code.",
+                        err=True,
+                    )
+                    raise typer.Exit(2)
                 if vetting_report.verdict != "admitted":
                     typer.echo(
                         "the vetting report did not admit this bundle; resolve its findings and re-run "
