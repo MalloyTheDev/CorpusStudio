@@ -21,7 +21,10 @@ from typing import Literal
 from corpus_studio.platform.contracts import ModelCodeVettingReport, VettingFinding
 
 # Bump when the screening rules change so a report's provenance is legible.
-ANALYZER_VERSION = "1.0.0"
+# Bumped when the screening RULES change, so a report produced by an older analyzer cannot be reused to
+# admit code the current rules would reject (platform-plan enforces the match). 1.1.0 added interface
+# conformance (model-base resolution + forward signature).
+ANALYZER_VERSION = "1.1.0"
 
 SUPPORTED_INTERFACE_VERSIONS: frozenset[str] = frozenset({"custom_decoder_v1"})
 
@@ -57,6 +60,14 @@ _DUNDER_ESCAPES: frozenset[str] = frozenset(
 _ALLOWED_MODULE_STMTS: tuple[type[ast.stmt], ...] = (
     ast.Import, ast.ImportFrom, ast.ClassDef, ast.FunctionDef, ast.Assign, ast.AnnAssign,
 )
+
+# custom_decoder_v1 interface conformance: the entry class must be a plausible causal-LM model - it
+# resolves (directly or via a locally-defined base) to a recognized model base and defines a ``forward``
+# that accepts ``input_ids``. Checked statically by NAME in the AST (no import, no torch). ``Module`` is
+# ``torch.nn.Module`` (its import root ``torch`` is allowlisted); HF ``PreTrainedModel`` is intentionally
+# NOT listed because ``transformers`` is not an allowlisted import root, and a CorpusStudio base joins
+# when its (allowlisted) module ships with the worker ABI.
+_MODEL_BASES: frozenset[str] = frozenset({"Module"})
 
 
 def _err(code: str, message: str, lineno: int | None = None) -> VettingFinding:
@@ -112,6 +123,43 @@ def _is_docstring(stmt: ast.stmt) -> bool:
     )
 
 
+def _base_name(node: ast.expr) -> str:
+    """The trailing name of a base-class expression (``nn.Module`` / ``torch.nn.Module`` -> ``Module``)."""
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        return node.attr
+    return ""
+
+
+def _resolves_to_model_base(entry: ast.ClassDef, classes: dict[str, ast.ClassDef]) -> bool:
+    """Whether ``entry`` reaches a recognized model base directly OR through a locally-defined base class
+    (``class Base(nn.Module)`` then ``class Entry(Base)``). Bounded by the local class set + a visited
+    guard, so a cycle cannot loop forever."""
+    seen: set[str] = set()
+    stack = [entry]
+    while stack:
+        cls = stack.pop()
+        if cls.name in seen:
+            continue
+        seen.add(cls.name)
+        for base in cls.bases:
+            name = _base_name(base)
+            if name in _MODEL_BASES:
+                return True
+            local = classes.get(name)
+            if local is not None:
+                stack.append(local)
+    return False
+
+
+def _forward_accepts_input_ids(fn: ast.FunctionDef) -> bool:
+    """The worker calls the model with ``input_ids`` (and ``labels``); a forward that cannot accept it
+    would fail at call time. Accept it by name, or a ``*args`` / ``**kwargs`` that could receive it."""
+    names = {a.arg for a in fn.args.args} | {a.arg for a in fn.args.kwonlyargs}
+    return "input_ids" in names or fn.args.vararg is not None or fn.args.kwarg is not None
+
+
 def _entry_class_present(tree: ast.Module, entry_symbol: str, findings: list[VettingFinding]) -> None:
     classes = {n.name: n for n in tree.body if isinstance(n, ast.ClassDef)}
     entry = classes.get(entry_symbol)
@@ -120,11 +168,29 @@ def _entry_class_present(tree: ast.Module, entry_symbol: str, findings: list[Vet
             _err("entry-class-missing", f"the entry class '{entry_symbol}' is not defined at module level")
         )
         return
-    if not entry.bases:
-        # Full ABI conformance (must subclass the custom-block base) lands with that base in a later slice;
-        # for now a base is expected but only warned, so the screen does not couple to an unshipped symbol.
+    if not _resolves_to_model_base(entry, classes):
         findings.append(
-            _warn("entry-class-no-base", f"'{entry_symbol}' declares no base class", entry.lineno)
+            _err(
+                "entry-not-a-model",
+                f"'{entry_symbol}' must subclass a model base ({', '.join(sorted(_MODEL_BASES))}) "
+                "directly or through a locally-defined base",
+                entry.lineno,
+            )
+        )
+    forward = next(
+        (n for n in entry.body if isinstance(n, ast.FunctionDef) and n.name == "forward"), None
+    )
+    if forward is None:
+        findings.append(
+            _err("entry-no-forward", f"'{entry_symbol}' must define a forward() method", entry.lineno)
+        )
+    elif not _forward_accepts_input_ids(forward):
+        findings.append(
+            _err(
+                "entry-forward-signature",
+                f"'{entry_symbol}'.forward must accept input_ids (by name, or via **kwargs)",
+                forward.lineno,
+            )
         )
 
 

@@ -1033,7 +1033,8 @@ def _admitted_custom_decoder(tmp_path):
     )
     bundle = tmp_path / "block.py"
     bundle.write_text(
-        "import torch\n\nclass MyBlock(torch.nn.Module):\n    def forward(self, x):\n        return x\n",
+        "import torch\n\nclass MyBlock(torch.nn.Module):\n"
+        "    def forward(self, input_ids):\n        return input_ids\n",
         encoding="utf-8",
     )
     report = build_report(bundle.read_bytes(), entry_symbol="MyBlock")
@@ -1101,7 +1102,8 @@ def test_platform_plan_refuses_a_vetting_that_does_not_match_the_bundle(monkeypa
     _ready_host(monkeypatch)
     args, bundle, vetting = _admitted_custom_decoder(tmp_path)
     bundle.write_text(
-        "import torch\n\nclass MyBlock(torch.nn.Module):\n    def forward(self, x):\n        return x + 1\n",
+        "import torch\n\nclass MyBlock(torch.nn.Module):\n"
+        "    def forward(self, input_ids):\n        return input_ids + 1\n",
         encoding="utf-8",
     )
     result = runner.invoke(
@@ -1110,6 +1112,21 @@ def test_platform_plan_refuses_a_vetting_that_does_not_match_the_bundle(monkeypa
     )
     assert result.exit_code == 2, result.output
     assert "does not match the bundle bytes" in result.output
+
+
+def test_platform_plan_refuses_a_stale_analyzer_version(monkeypatch, tmp_path):
+    # A report from an older analyzer (looser rules) must not admit code the current rules would reject.
+    _ready_host(monkeypatch)
+    args, bundle, vetting = _admitted_custom_decoder(tmp_path)
+    report = json.loads(vetting.read_text(encoding="utf-8"))
+    report["analyzer_version"] = "0.9.0"  # pretend an older analyzer produced it
+    vetting.write_text(json.dumps(report), encoding="utf-8")
+    result = runner.invoke(
+        app,
+        [*args, "--custom-code-bundle", str(bundle), "--custom-code-vetting", str(vetting), "--json"],
+    )
+    assert result.exit_code == 2, result.output
+    assert "different analyzer version" in result.output
 
 
 def test_platform_plan_refuses_custom_code_flags_on_a_standard_arch(monkeypatch, tmp_path):
