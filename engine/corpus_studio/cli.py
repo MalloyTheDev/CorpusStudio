@@ -910,6 +910,52 @@ def platform_plan(
         help="DPO prompt token cap (preference plans only). Defaults to half the sequence window; "
         "must be below --sequence-len so the response has room.",
     ),
+    corpus_manifest: Optional[Path] = typer.Option(
+        None,
+        "--corpus-manifest",
+        help="Pretraining corpus: a JSON PretrainingDataPolicy (content-hashed shards + token budget / "
+        "mixture). Defaults to --dataset. Required for --task-type pretraining.",
+    ),
+    init_mode: Optional[str] = typer.Option(
+        None, "--init-mode", help="Pretraining init: 'random' (from-scratch) or 'continued'."
+    ),
+    architecture_config: Optional[Path] = typer.Option(
+        None,
+        "--architecture-config",
+        help="Random-init: the model architecture config file (hashed into the sealed init spec).",
+    ),
+    init_vocab_size: Optional[int] = typer.Option(
+        None, "--init-vocab-size", help="Random-init vocabulary size."
+    ),
+    init_seed: Optional[int] = typer.Option(
+        None, "--init-seed", help="Random-init seed (defaults to --seed)."
+    ),
+    source_checkpoint_sha256: Optional[str] = typer.Option(
+        None,
+        "--source-checkpoint-sha256",
+        help="Continued init: the base checkpoint content digest (its id is --base-model).",
+    ),
+    tokenizer_source: Optional[str] = typer.Option(
+        None,
+        "--tokenizer-source",
+        help="Pretraining tokenizer: 'train' (from the corpus), 'import', or 'freeze'.",
+    ),
+    tokenizer_algorithm: Optional[str] = typer.Option(
+        None, "--tokenizer-algorithm", help="Train-tokenizer algorithm: bpe / unigram / wordpiece."
+    ),
+    tokenizer_vocab_size: Optional[int] = typer.Option(
+        None, "--tokenizer-vocab-size", help="Train-tokenizer vocabulary size."
+    ),
+    tokenizer_special_tokens: Optional[str] = typer.Option(
+        None,
+        "--tokenizer-special-tokens",
+        help="Comma-separated special tokens for a trained tokenizer (e.g. '<bos>,<eos>,<pad>,<unk>').",
+    ),
+    tokenizer_digest: Optional[str] = typer.Option(
+        None,
+        "--tokenizer-content-sha256",
+        help="Import/freeze pretraining tokenizer: the exact tokenizer content digest.",
+    ),
     dataset_format: str = typer.Option("instruction", "--dataset-format", help="Row format: instruction (Alpaca) or chat (messages)."),
     output_dir: Optional[str] = typer.Option(
         None,
@@ -1023,6 +1069,7 @@ def platform_plan(
     from corpus_studio.platform.contracts import (
         ParameterAccountingReport,
         PhysicalExecutionSpec,
+        PretrainingDataPolicy,
         StorageProfile,
     )
     from corpus_studio.platform.planner import (
@@ -1055,22 +1102,26 @@ def platform_plan(
         assess_dataset_file_conformance,
     )
 
-    try:
-        dataset_conformance = assess_dataset_file_conformance(dataset_path, dataset_format)
-    except DatasetConformanceError as exc:
-        typer.echo(f"dataset conformance preflight failed: {exc}", err=True)
-        raise typer.Exit(2) from exc
-    if not dataset_conformance.is_conformant:
-        typer.echo(dataset_conformance.describe_refusal(dataset_path), err=True)
-        raise typer.Exit(2)
-    # Partial conformance: some rows render, some do not. Sealing silently would over-claim the
-    # trained row count (the plan implies the whole dataset trains, but only the compatible rows do).
-    # Fail closed unless the caller explicitly accepts training only the compatible rows.
-    if dataset_conformance.rejected_rows > 0:
-        if not allow_unrenderable_rows:
-            typer.echo(dataset_conformance.describe_partial_refusal(dataset_path), err=True)
+    # Pretraining consumes a sharded corpus (a PretrainingDataPolicy), NOT an instruction/chat dataset,
+    # so the SFT/DPO row-conformance preflight does not apply to it (it stays None for a pretraining plan).
+    dataset_conformance = None
+    if task_type != "pretraining":
+        try:
+            dataset_conformance = assess_dataset_file_conformance(dataset_path, dataset_format)
+        except DatasetConformanceError as exc:
+            typer.echo(f"dataset conformance preflight failed: {exc}", err=True)
+            raise typer.Exit(2) from exc
+        if not dataset_conformance.is_conformant:
+            typer.echo(dataset_conformance.describe_refusal(dataset_path), err=True)
             raise typer.Exit(2)
-        typer.echo(dataset_conformance.describe_partial_warning(dataset_path), err=True)
+        # Partial conformance: some rows render, some do not. Sealing silently would over-claim the
+        # trained row count (the plan implies the whole dataset trains, but only the compatible rows do).
+        # Fail closed unless the caller explicitly accepts training only the compatible rows.
+        if dataset_conformance.rejected_rows > 0:
+            if not allow_unrenderable_rows:
+                typer.echo(dataset_conformance.describe_partial_refusal(dataset_path), err=True)
+                raise typer.Exit(2)
+            typer.echo(dataset_conformance.describe_partial_warning(dataset_path), err=True)
     # Resolve, canonicalize, and CONTAIN the sealed output root so a plan's write location is
     # CWD-independent and can never land inside the checkout (containment finding F5). Omission defaults
     # to the application-data runs root; an in-repo path is refused fail-closed before any plan id mints.
@@ -1079,12 +1130,39 @@ def platform_plan(
     except OutputContainmentError as exc:
         typer.echo(f"invalid output root: {exc}", err=True)
         raise typer.Exit(2) from exc
+    # Pretraining (S3a-2): read the corpus policy + derive the sealed architecture ref. The tokenizer
+    # digest overrides the model digest for an imported/frozen pretraining tokenizer.
+    pretraining_data = None
+    pretraining_arch_ref_id = None
+    pretraining_arch_ref_sha256 = None
+    resolved_tokenizer_digest = model_digest
+    if task_type == "pretraining":
+        manifest_path = corpus_manifest or Path(dataset_path)
+        try:
+            pretraining_data = PretrainingDataPolicy.model_validate_json(
+                manifest_path.read_text(encoding="utf-8")
+            )
+        except (OSError, ValueError, ValidationError) as exc:
+            typer.echo(f"invalid corpus manifest: {exc}", err=True)
+            raise typer.Exit(2) from exc
+        if tokenizer_digest is not None:
+            resolved_tokenizer_digest = tokenizer_digest
+        if architecture_config is not None:
+            import hashlib  # noqa: PLC0415
+
+            try:
+                arch_bytes = architecture_config.read_bytes()
+            except OSError as exc:
+                typer.echo(f"cannot read --architecture-config: {exc}", err=True)
+                raise typer.Exit(2) from exc
+            pretraining_arch_ref_id = str(architecture_config)
+            pretraining_arch_ref_sha256 = hashlib.sha256(arch_bytes).hexdigest()
     constraints = PlannerConstraints(
         base_model=base_model,
         model_revision=model_revision,
         tokenizer_revision=tokenizer_revision,
         model_content_sha256=model_digest,
-        tokenizer_content_sha256=model_digest,
+        tokenizer_content_sha256=resolved_tokenizer_digest,
         dataset_path=dataset_path,
         dataset_content_sha256=dataset_digest,
         task_type=task_type,
@@ -1110,6 +1188,21 @@ def platform_plan(
         allocator_max_split_size_mb=max_split_size_mb,
         allocator_gc_threshold=gc_threshold,
         allow_cpu_toy=allow_cpu_toy,
+        init_mode=init_mode,
+        architecture_ref_id=pretraining_arch_ref_id,
+        architecture_ref_sha256=pretraining_arch_ref_sha256,
+        init_vocab_size=init_vocab_size,
+        init_seed=init_seed,
+        source_checkpoint_ref_id=(base_model if init_mode == "continued" else None),
+        source_checkpoint_ref_sha256=source_checkpoint_sha256,
+        tokenizer_source_mode=tokenizer_source,
+        tokenizer_algorithm=tokenizer_algorithm,
+        tokenizer_vocab_size=tokenizer_vocab_size,
+        tokenizer_special_tokens=(
+            tuple(token.strip() for token in tokenizer_special_tokens.split(",") if token.strip())
+            if tokenizer_special_tokens
+            else None
+        ),
     )
     parameter_accounting = None
     storage_profile = None
@@ -1190,6 +1283,7 @@ def platform_plan(
             allow_marginal_storage=allow_marginal_storage,
             allow_unknown_storage=allow_unknown_storage,
             project_dir=_project_dir_for_dataset(dataset_path),
+            pretraining_data=pretraining_data,
         )
     except PlannerError as exc:
         typer.echo(str(exc), err=True)
@@ -1204,9 +1298,11 @@ def platform_plan(
         (out_dir / "FitClassification.json").write_text(fit.model_dump_json(indent=2), encoding="utf-8")
         # Seal the structural-conformance verdict alongside the plan so the sealed evidence records
         # exactly how many rows the plan's dataset_format renders (compatible) vs drops (rejected).
-        (out_dir / "DatasetConformance.json").write_text(
-            json.dumps(dataset_conformance.as_dict(), indent=2), encoding="utf-8"
-        )
+        # A pretraining plan has no row-conformance verdict (its corpus is a sharded PretrainingDataPolicy).
+        if dataset_conformance is not None:
+            (out_dir / "DatasetConformance.json").write_text(
+                json.dumps(dataset_conformance.as_dict(), indent=2), encoding="utf-8"
+            )
         if parameter_accounting is not None:
             (out_dir / "ParameterAccountingReport.json").write_text(
                 parameter_accounting.model_dump_json(indent=2), encoding="utf-8"
@@ -1223,7 +1319,9 @@ def platform_plan(
                 {
                     "run_plan": plan.model_dump(mode="json"),
                     "fit_classification": fit.model_dump(mode="json"),
-                    "dataset_conformance": dataset_conformance.as_dict(),
+                    "dataset_conformance": (
+                        dataset_conformance.as_dict() if dataset_conformance is not None else None
+                    ),
                 },
                 indent=2,
             )

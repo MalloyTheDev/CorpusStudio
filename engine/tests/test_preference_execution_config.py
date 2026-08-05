@@ -264,7 +264,7 @@ def test_run_plan_carries_the_dpo_config_at_most_one_and_byte_safe():
     both = dict(payload)
     assert sft_plan.resolved_execution is not None
     both["resolved_execution"] = sft_plan.resolved_execution.model_dump(mode="json")
-    with pytest.raises(ValueError, match="never both"):
+    with pytest.raises(ValueError, match="never more than one"):
         RunPlan.model_validate(both)
     # byte-safe: an SFT plan (no preference config) omits the field from its serialization entirely.
     assert "resolved_preference_execution" not in sft_plan.model_dump(mode="json")

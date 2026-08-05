@@ -887,3 +887,71 @@ def test_platform_plan_bundle_records_full_conformance_for_a_clean_dataset(monke
     conformance = json.loads(result.stdout)["dataset_conformance"]
     assert conformance["rejected_rows"] == 0
     assert conformance["compatible_rows"] == conformance["total_rows"] >= 1
+
+
+def test_platform_plan_pretraining_from_scratch_through_the_cli(monkeypatch, tmp_path):
+    # Reachability: a from-scratch pretraining plan is requestable from the SHIPPING CLI. Its corpus is a
+    # PretrainingDataPolicy manifest (NOT an instruction/chat dataset, so the row-conformance preflight is
+    # skipped), and it lowers to a sealed resolved_pretraining_execution (admit-at-planning; the runner
+    # refuses it at execution until the pretraining worker + wheel land).
+    _ready_host(monkeypatch)
+    manifest = tmp_path / "corpus.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "shards": [
+                    {
+                        "shard_id": "s0",
+                        "location": "corpus/s0.jsonl",
+                        "source": "web",
+                        "row_count": 100,
+                        "token_count": 100000,
+                        "content_sha256": "d" * 64,
+                    }
+                ],
+                "data_seed": 42,
+                "global_batch_size": 8,
+                "token_budget": 1000000,
+            }
+        ),
+        encoding="utf-8",
+    )
+    arch = tmp_path / "config.json"
+    arch.write_text(json.dumps({"model_type": "llama", "hidden_size": 256}), encoding="utf-8")
+    result = runner.invoke(
+        app,
+        [
+            "platform-plan",
+            "--base-model",
+            "arch:demo-small",
+            "--dataset",
+            str(manifest),
+            "--task-type",
+            "pretraining",
+            "--init-mode",
+            "random",
+            "--architecture-config",
+            str(arch),
+            "--init-vocab-size",
+            "32000",
+            "--tokenizer-source",
+            "train",
+            "--tokenizer-algorithm",
+            "bpe",
+            "--tokenizer-vocab-size",
+            "32000",
+            "--tokenizer-special-tokens",
+            "<bos>,<eos>,<pad>,<unk>",
+            "--json",
+        ],
+    )
+    assert result.exit_code == 0, result.stdout + result.stderr
+    plan = json.loads(result.stdout)["run_plan"]
+    assert plan["task_type"] == "pretraining"
+    assert plan["resolved_execution"] is None
+    cfg = plan["resolved_pretraining_execution"]
+    assert cfg is not None
+    assert cfg["init"]["mode"] == "random"
+    assert cfg["objective_ref"]["id"] == "pretraining"
+    assert cfg["tokenizer_source"]["mode"] == "train"
+    assert cfg["tokenizer_source"]["vocab_size"] == 32000

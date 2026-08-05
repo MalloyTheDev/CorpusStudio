@@ -115,7 +115,7 @@ def reference_execution_variants() -> tuple[BackendExecutionVariant, ...]:
         BackendExecutionVariant(
             backend_id="corpus_studio",
             variant_kind=ExecutionVariantKind.pretraining,
-            support=ExecutionVariantSupport.declared,
+            support=ExecutionVariantSupport.contract_validated,
         ),
         BackendExecutionVariant(
             backend_id="corpus_studio",

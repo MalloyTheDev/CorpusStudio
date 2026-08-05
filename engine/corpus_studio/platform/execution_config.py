@@ -61,6 +61,12 @@ PREFERENCE_NOT_EXECUTABLE_REASON = (
     "workload-verified run, and the milestone wheel are the gated next step."
 )
 
+PRETRAINING_NOT_EXECUTABLE_REASON = (
+    "this is a sealed pretraining plan - admitted at planning but not yet executable: 'pretraining' is "
+    "contract_validated, not workload_verified. The pretraining worker loop (from_config init, corpus "
+    "streaming, packing), a workload-verified run, and the milestone wheel are the gated next step."
+)
+
 
 def required_runner_lane(plan: RunPlan) -> str:
     """Return the only runner lane allowed to consume ``plan``."""
@@ -77,6 +83,10 @@ def required_runner_lane(plan: RunPlan) -> str:
         # earliest dispatch gate - with a typed reason, so the refusal is reachable through the shipping
         # platform-run flow rather than surfacing the generic "no executable runner lane" below.
         raise ExecutionConfigurationError(PREFERENCE_NOT_EXECUTABLE_REASON)
+    if plan.resolved_pretraining_execution is not None:
+        # A sealed pretraining plan is likewise admitted at planning but refused at EXECUTION until the
+        # pretraining worker + wheel land - the same earliest-dispatch typed refusal.
+        raise ExecutionConfigurationError(PRETRAINING_NOT_EXECUTABLE_REASON)
     if plan.backend_ref.id == "echo":
         if plan.task_type.value != "evaluation":
             raise ExecutionConfigurationError(
