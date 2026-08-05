@@ -4,7 +4,11 @@ trailing remainder is dropped or padded, never hidden."""
 
 import pytest
 
-from corpus_studio.training.corpus_packing import pack_documents
+from corpus_studio.training.corpus_packing import (
+    finalize_remainder,
+    pack_chunk,
+    pack_documents,
+)
 
 
 def test_packs_documents_into_fixed_blocks():
@@ -64,3 +68,29 @@ def test_empty_documents_are_skipped_not_given_a_spurious_eos():
 def test_invalid_arguments_fail_closed(kwargs):
     with pytest.raises(ValueError):
         pack_documents([[1, 2]], **kwargs)
+
+
+# ---- streaming composition (no boundary loss, memory-bounded) --------------------------------------
+
+
+def test_pack_chunk_carries_residual_across_shards():
+    # AUDIT (Codex): the residual from one shard threads into the next, so the boundary token is not lost
+    # and the whole corpus need not be materialized.
+    c1 = pack_chunk([[1, 2]], sequence_len=2, eos_id=0)  # stream [1,2,0] -> block [1,2], remainder [0]
+    assert c1.blocks == [[1, 2]] and c1.remainder == [0]
+    c2 = pack_chunk([[3, 4]], sequence_len=2, eos_id=0, carry_in=c1.remainder)  # [0,3,4,0]
+    assert c2.blocks == [[0, 3], [4, 0]] and c2.remainder == []
+    # streaming equals the whole-corpus pack (no boundary loss)
+    whole = pack_documents([[1, 2], [3, 4]], sequence_len=2, eos_id=0)
+    assert c1.blocks + c2.blocks == whole.blocks
+
+
+def test_finalize_remainder_drops_or_pads():
+    assert finalize_remainder([9], sequence_len=4, eos_id=0).dropped_tokens == 1
+    padded = finalize_remainder([9], sequence_len=4, eos_id=0, pad=True)
+    assert padded.blocks == [[9, 0, 0, 0]] and padded.padded_tokens == 3
+
+
+def test_finalize_rejects_an_oversized_remainder():
+    with pytest.raises(ValueError):  # a full block is not a "remainder" - pack it first
+        finalize_remainder([1, 2, 3, 4], sequence_len=4, eos_id=0)

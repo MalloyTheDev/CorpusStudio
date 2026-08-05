@@ -2,17 +2,20 @@
 control-plane ``platform.pretraining_data`` (which plans shard order + token budget).
 
 Pretraining trains on PACKED sequences: tokenized documents concatenated with an EOS separator and split
-into fixed ``sequence_len`` blocks, no padding - which is why a from-scratch run needs a different data
-path than SFT's one-example-per-row. This module is the packing primitive + its coverage accounting.
+into fixed ``sequence_len`` blocks, no padding - a different data path than SFT's one-example-per-row.
 
-Honesty invariant (no silent truncation): EVERY token is accounted for. A trailing remainder shorter than
-one block is REPORTED - dropped (``drop_remainder=True``) or explicitly padded (``drop_remainder=False``)
-- never hidden. Empty documents contribute no tokens and are skipped (no spurious EOS-only segment); since
-they carry no tokens this is not a truncation.
+Two layers, so the loader can be memory-bounded AND correct across shards:
 
-Scope: this is the PURE primitive over a materialized stream, so the packing math is unit-tested without
-torch or a tokenizer. Memory-bounded STREAMING over shards (yielding blocks incrementally rather than
-materializing a whole corpus) is the worker's data loader - a later slice (S3b-1c) that calls this.
+* :func:`pack_chunk` - STREAMING-COMPOSABLE. Packs the full blocks it can from one chunk (a shard) plus a
+  ``carry_in`` residual, and EXPOSES the trailing ``remainder`` to thread into the next call. The loader
+  holds only one chunk + a sub-block residual in memory, and no tokens are lost at a shard boundary.
+* :func:`finalize_remainder` - the FINAL leftover after the last chunk: dropped, or EOS-padded into one
+  last block. Padded positions are the last ``padded_tokens`` of that block and a loader MUST mask them in
+  the labels, or the model is trained to predict synthetic EOS.
+
+:func:`pack_documents` is a whole-corpus convenience over the two (materializes; fine for small corpora +
+tests). Honesty invariant (no silent truncation): every token is accounted for - a remainder is dropped or
+padded, never hidden; empty documents carry no tokens and are skipped (not a truncation).
 """
 
 from __future__ import annotations
@@ -25,10 +28,10 @@ from dataclasses import dataclass
 class PackingCoverage:
     """How the token stream was accounted for - so a run can prove nothing was silently dropped."""
 
-    total_tokens: int  # every token in the stream (document tokens + one EOS separator per document)
-    packed_tokens: int  # tokens that landed in a full block (from the real stream)
+    total_tokens: int  # every token consumed (document tokens + one EOS separator per non-empty document)
+    packed_tokens: int  # real stream tokens that landed in a block
     dropped_tokens: int  # a trailing remainder dropped because it did not fill a block
-    padded_tokens: int  # EOS padding added to complete a final block (drop_remainder=False)
+    padded_tokens: int  # EOS padding added to complete a final block (a loader MUST mask these)
     num_blocks: int
     num_documents: int
 
@@ -39,12 +42,86 @@ class PackingCoverage:
 
 
 @dataclass(frozen=True)
+class PackedChunk:
+    """Blocks packed from one chunk, plus the trailing ``remainder`` to carry into the next call. Coverage
+    counts this chunk only; a streaming loader accumulates across chunks then finalizes the last remainder."""
+
+    blocks: list[list[int]]
+    remainder: list[int]
+    sequence_len: int
+    tokens_consumed: int  # real tokens added THIS chunk (documents + EOS separators), excluding carry_in
+    num_documents: int
+
+
+@dataclass(frozen=True)
+class FinalizedRemainder:
+    """The last remainder resolved after every chunk: dropped or EOS-padded into one final block."""
+
+    blocks: list[list[int]]
+    dropped_tokens: int
+    padded_tokens: int
+
+
+@dataclass(frozen=True)
 class PackedCorpus:
-    """The packed blocks (each exactly ``sequence_len`` tokens) + honest coverage accounting."""
+    """A whole-corpus pack (blocks + honest coverage) - the convenience result of :func:`pack_documents`."""
 
     blocks: list[list[int]]
     sequence_len: int
     coverage: PackingCoverage
+
+
+def _validate(sequence_len: int, eos_id: int) -> None:
+    if sequence_len < 1:
+        raise ValueError("sequence_len must be positive")
+    if eos_id < 0:
+        raise ValueError("eos_id must be non-negative")
+
+
+def pack_chunk(
+    documents: Iterable[list[int]],
+    *,
+    sequence_len: int,
+    eos_id: int,
+    carry_in: list[int] | None = None,
+) -> PackedChunk:
+    """Pack one chunk (e.g. a shard): prepend ``carry_in`` (the previous chunk's residual), concatenate the
+    EOS-separated documents, emit every full ``sequence_len`` block, and EXPOSE the leftover ``remainder``
+    (< one block) to thread into the next call. Empty documents are skipped. Memory-bounded: holds one
+    chunk + a sub-block residual, never the whole corpus."""
+    _validate(sequence_len, eos_id)
+    stream: list[int] = list(carry_in) if carry_in else []
+    tokens_consumed = 0
+    num_documents = 0
+    for document in documents:
+        if not document:
+            continue  # an empty document has no tokens; do not emit a spurious EOS-only segment
+        num_documents += 1
+        stream.extend(document)
+        stream.append(eos_id)  # EOS separator bounds cross-document continuation
+        tokens_consumed += len(document) + 1
+
+    full_blocks = len(stream) // sequence_len
+    blocks = [stream[i * sequence_len : (i + 1) * sequence_len] for i in range(full_blocks)]
+    remainder = stream[full_blocks * sequence_len :]
+    return PackedChunk(blocks, remainder, sequence_len, tokens_consumed, num_documents)
+
+
+def finalize_remainder(
+    remainder: list[int], *, sequence_len: int, eos_id: int, pad: bool = False
+) -> FinalizedRemainder:
+    """Resolve the FINAL leftover after all chunks. Default drops it (reports the count). ``pad=True`` EOS-
+    pads it into one last block - the last ``padded_tokens`` positions are synthetic and a loader MUST mask
+    them in the labels so the model is not trained to predict EOS."""
+    _validate(sequence_len, eos_id)
+    if not remainder:
+        return FinalizedRemainder([], 0, 0)
+    if len(remainder) >= sequence_len:
+        raise ValueError("remainder must be smaller than one block; pack it before finalizing")
+    if not pad:
+        return FinalizedRemainder([], len(remainder), 0)
+    padded = sequence_len - len(remainder)
+    return FinalizedRemainder([remainder + [eos_id] * padded], 0, padded)
 
 
 def pack_documents(
@@ -54,44 +131,19 @@ def pack_documents(
     eos_id: int,
     drop_remainder: bool = True,
 ) -> PackedCorpus:
-    """Concatenate tokenized ``documents`` (each an EOS-separated segment) and split into fixed
-    ``sequence_len`` blocks. A document longer than a block simply spans multiple blocks - packing works
-    on the flat stream. The final short remainder is dropped or EOS-padded per ``drop_remainder``, and
-    either way it is counted in the returned :class:`PackingCoverage` (never silently discarded)."""
-    if sequence_len < 1:
-        raise ValueError("sequence_len must be positive")
-    if eos_id < 0:
-        raise ValueError("eos_id must be non-negative")
-
-    stream: list[int] = []
-    num_documents = 0
-    for document in documents:
-        if not document:
-            continue  # an empty document has no tokens; do not emit a spurious EOS-only segment
-        num_documents += 1
-        stream.extend(document)
-        stream.append(eos_id)  # EOS separator bounds cross-document continuation
-
-    total = len(stream)
-    full_blocks = total // sequence_len
-    blocks = [stream[i * sequence_len : (i + 1) * sequence_len] for i in range(full_blocks)]
-
-    remainder = total - full_blocks * sequence_len
-    dropped = 0
-    padded = 0
-    if remainder:
-        if drop_remainder:
-            dropped = remainder
-        else:
-            padded = sequence_len - remainder
-            blocks.append(stream[full_blocks * sequence_len :] + [eos_id] * padded)
-
+    """Whole-corpus convenience: pack every document then resolve the final remainder. Materializes the
+    corpus, so a large streamed corpus should use :func:`pack_chunk` + :func:`finalize_remainder` instead."""
+    chunk = pack_chunk(documents, sequence_len=sequence_len, eos_id=eos_id)
+    tail = finalize_remainder(
+        chunk.remainder, sequence_len=sequence_len, eos_id=eos_id, pad=not drop_remainder
+    )
+    blocks = chunk.blocks + tail.blocks
     coverage = PackingCoverage(
-        total_tokens=total,
-        packed_tokens=total - dropped,
-        dropped_tokens=dropped,
-        padded_tokens=padded,
+        total_tokens=chunk.tokens_consumed,
+        packed_tokens=chunk.tokens_consumed - tail.dropped_tokens,
+        dropped_tokens=tail.dropped_tokens,
+        padded_tokens=tail.padded_tokens,
         num_blocks=len(blocks),
-        num_documents=num_documents,
+        num_documents=chunk.num_documents,
     )
     return PackedCorpus(blocks=blocks, sequence_len=sequence_len, coverage=coverage)
