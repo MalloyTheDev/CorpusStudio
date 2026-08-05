@@ -4830,6 +4830,11 @@ class RunPlan(ContractModel):
     resolved_preference_execution: ResolvedPreferenceExecutionConfiguration | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
+    # The pretraining (from-scratch / continued) sibling seal. A plan carries exactly one of the SFT /
+    # preference / pretraining configs; excluded when unset so it never perturbs existing plan hashes.
+    resolved_pretraining_execution: ResolvedPretrainingExecutionConfiguration | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     # Pins the parameter evidence the planner consumed; it does not manufacture missing counts.
     parameter_accounting_ref: Ref | None = None
     # ``None`` identifies a legacy plan. The planner always emits a fully resolved spec for new plans.
@@ -4843,9 +4848,15 @@ class RunPlan(ContractModel):
             raise ValueError("parameter_accounting_ref must pin the sealed report hash")
         # A plan carries exactly one execution authority - checked before the per-config summary
         # cross-checks so a double-authority plan fails on THAT, not on an incidental summary mismatch.
-        if self.resolved_execution is not None and self.resolved_preference_execution is not None:
+        _execution_authorities = (
+            self.resolved_execution,
+            self.resolved_preference_execution,
+            self.resolved_pretraining_execution,
+        )
+        if sum(1 for authority in _execution_authorities if authority is not None) > 1:
             raise ValueError(
-                "a RunPlan carries either the SFT or the preference execution config, never both"
+                "a RunPlan carries exactly one execution config (SFT, preference, or pretraining), "
+                "never more than one"
             )
         execution = self.resolved_execution
         if execution is not None:
@@ -4965,6 +4976,72 @@ class RunPlan(ContractModel):
                 or preference.output_dir != self.export.output_dir
             ):
                 raise ValueError("resolved preference export format/output must match the RunPlan summary")
+        pretraining = self.resolved_pretraining_execution
+        if pretraining is not None:
+            expected_pretraining_hash = _canonical_contract_sha256(
+                pretraining.model_dump(mode="json", exclude={"configuration_hash"})
+            )
+            if pretraining.configuration_hash != expected_pretraining_hash:
+                raise ValueError(
+                    "resolved_pretraining_execution configuration_hash does not match its body"
+                )
+            if self.training_config_snapshot:
+                raise ValueError("new resolved plans cannot carry a second trainer-config authority")
+            if pretraining.backend_ref != self.backend_ref:
+                raise ValueError("resolved pretraining execution backend_ref must match the RunPlan")
+            if pretraining.environment_ref != self.environment_ref:
+                raise ValueError(
+                    "resolved pretraining execution environment_ref must match the RunPlan"
+                )
+            # A full-parameter from-scratch / continued plan has no adapter and no single dataset/model
+            # binding (the corpus is a shard set; the model is a config or a checkpoint), so the SFT-shaped
+            # dataset/model/adapter cross-checks do not apply - only the shared summary invariants below.
+            if self.task_type != TaskType.pretraining:
+                raise ValueError("a resolved pretraining execution requires a pretraining RunPlan")
+            if pretraining.precision.forward_compute_dtype != self.precision:
+                raise ValueError(
+                    "resolved pretraining forward precision must match the RunPlan summary"
+                )
+            if pretraining.precision.quantized_storage_format != self.quantization:
+                raise ValueError("resolved pretraining quantization must match the RunPlan summary")
+            if pretraining.loss_impl != self.loss_impl:
+                raise ValueError("resolved pretraining loss must match the RunPlan summary")
+            for label, resolved, summary in (
+                ("optimizer", pretraining.optimizer, self.optimizer),
+                ("sequence", pretraining.sequence, self.sequence),
+                ("batching", pretraining.batching, self.batching),
+                ("checkpoint", pretraining.checkpoint_policy, self.checkpoint_policy),
+            ):
+                if resolved != summary:
+                    raise ValueError(
+                        f"resolved pretraining {label} policy must match the RunPlan summary"
+                    )
+            pretraining_attention_summary = {
+                AttentionKernel.eager: AttentionImpl.eager,
+                AttentionKernel.torch_sdpa_math: AttentionImpl.math,
+                AttentionKernel.torch_sdpa_flash: AttentionImpl.sdpa,
+                AttentionKernel.torch_sdpa_mem_efficient: AttentionImpl.sdpa,
+                AttentionKernel.flash_attention_2: AttentionImpl.flash_attention_2,
+                AttentionKernel.flash_attention_3: AttentionImpl.flash_attention_3,
+                AttentionKernel.xformers: AttentionImpl.xformers,
+            }[pretraining.attention.effective_backend_required]
+            if pretraining_attention_summary != self.attention_backend:
+                raise ValueError(
+                    "resolved pretraining attention policy must match the RunPlan summary"
+                )
+            if pretraining.seed != self.seed or (
+                pretraining.gradient_checkpointing != self.gradient_checkpointing
+            ):
+                raise ValueError(
+                    "resolved pretraining seed/checkpointing must match the RunPlan summary"
+                )
+            if (
+                pretraining.export_format != self.export.format
+                or pretraining.output_dir != self.export.output_dir
+            ):
+                raise ValueError(
+                    "resolved pretraining export format/output must match the RunPlan summary"
+                )
         if self.physical_execution is None:
             return self
         if (
@@ -6168,6 +6245,21 @@ class TrainingPlanParameters(ContractModel):
     preference_beta: float = 0.1
     preference_label_smoothing: float = 0.0
     preference_max_prompt_length: int | None = None
+    # Pretraining (S3a-2) - mirrors PlannerConstraints field-for-field so the resolver lowers these
+    # verbatim into a pretraining RunPlan (init / tokenizer knobs; the corpus rides beside the plan).
+    init_mode: str | None = None
+    architecture_ref_id: str | None = None
+    architecture_ref_sha256: str | None = None
+    init_vocab_size: int | None = None
+    init_seed: int | None = None
+    init_initializer_range: float | None = None
+    source_checkpoint_ref_id: str | None = None
+    source_checkpoint_ref_sha256: str | None = None
+    tokenizer_source_mode: str | None = None
+    tokenizer_algorithm: str | None = None
+    tokenizer_vocab_size: int | None = None
+    tokenizer_special_tokens: tuple[str, ...] | None = None
+    tokenizer_min_frequency: int | None = None
 
 
 class TrainingPlanComposition(ContractModel):

@@ -22,6 +22,8 @@ from corpus_studio.platform.contracts import (
     ParameterWindow,
     PhysicalExecutionSpec,
     ProbeResult,
+    PretrainingDataPolicy,
+    PretrainingShard,
     StorageProfile,
     StorageRoleAssessment,
 )
@@ -412,8 +414,9 @@ def test_planner_admits_the_dense_qlora_sft_task_and_refuses_unexecutable_varian
     # to it and the plan builds; a task whose shape the first-party harness cannot execute is refused
     # FAIL-CLOSED at planning - never silently downgraded to dense_qlora_sft.
     assert _plan(_profile(cc_major=8), _report(), task_type="sft").resolved_execution is not None
-    # pretraining maps to a declared-only shape -> refused below workload_verified.
-    with pytest.raises(PlannerError, match="below the required 'workload_verified'"):
+    # pretraining maps to a contract_validated shape -> ADMITTED at planning (like DPO); its dedicated
+    # builder then requires a corpus, so without one it fails THERE, not at the variant admission gate.
+    with pytest.raises(PlannerError, match="requires a corpus"):
         _plan(_profile(cc_major=8), _report(), task_type="pretraining")
     # a preference request must name its objective; without one it maps to no shape -> refused.
     with pytest.raises(PlannerError, match="no executable execution variant"):
@@ -1138,3 +1141,133 @@ def test_an_invalid_resolved_field_becomes_planner_error():
     # pydantic ValidationError leaking out.
     with pytest.raises(PlannerError, match="invalid"):
         _plan(_profile(cc_major=12), _report(), sequence_len=0)
+
+
+# ---- pretraining (S3a-2): from-scratch / continued planning through its own builder ----------------
+
+
+def _pretraining_data(**over):
+    base = dict(
+        shards=(
+            PretrainingShard(
+                shard_id="s0",
+                location="corpus/s0.jsonl",
+                source="web",
+                row_count=100,
+                token_count=100_000,
+                content_sha256="d" * 64,
+            ),
+        ),
+        data_seed=42,
+        global_batch_size=8,
+        token_budget=1_000_000,
+    )
+    base.update(over)
+    return PretrainingDataPolicy(**base)
+
+
+def _pretraining_plan(profile, report, *, pretraining_data=None, **kw):
+    kw.setdefault("base_model", "arch:demo-small")
+    kw.setdefault("dataset_path", "corpus/manifest.json")
+    kw.setdefault("task_type", "pretraining")
+    kw.setdefault("init_mode", "random")
+    kw.setdefault("architecture_ref_id", "arch:demo-small")
+    kw.setdefault("architecture_ref_sha256", "c" * 64)
+    kw.setdefault("init_vocab_size", 32000)
+    kw.setdefault("tokenizer_source_mode", "train")
+    kw.setdefault("tokenizer_algorithm", "bpe")
+    kw.setdefault("tokenizer_vocab_size", 32000)
+    kw.setdefault("tokenizer_special_tokens", ("<bos>", "<eos>", "<pad>", "<unk>"))
+    kw.setdefault("export_format", "merged_safetensors")
+    return build_run_plan(
+        profile=profile,
+        capabilities=report,
+        dataset_ref=Ref(id="corpus", hash=P.HashRef(value="d" * 64)),
+        constraints=PlannerConstraints(**kw),
+        plan_id="pt1",
+        now=_NOW,
+        pretraining_data=_pretraining_data() if pretraining_data is None else pretraining_data,
+    )
+
+
+def test_pretraining_plan_seals_a_from_scratch_config():
+    from corpus_studio.platform.execution_config import (
+        verify_pretraining_execution_configuration_hash,
+    )
+
+    plan = _pretraining_plan(_profile(cc_major=8), _report())
+    assert plan.task_type.value == "pretraining"
+    assert plan.resolved_pretraining_execution is not None
+    assert plan.resolved_execution is None and plan.resolved_preference_execution is None
+    cfg = plan.resolved_pretraining_execution
+    assert verify_pretraining_execution_configuration_hash(cfg)
+    assert cfg.init.mode == "random" and cfg.objective_ref.id == "pretraining"
+    assert cfg.tokenizer_source.mode == "train"
+    # the base-model-less body synthesizes a full-parameter, unquantized summary
+    assert plan.adapter.method.value == "full_finetune"
+    assert plan.quantization.value == "none"
+    assert plan.loss_impl.value in {"cross_entropy", "liger_fused_ce"}
+    assert verify_run_plan_hash(plan)
+
+
+def test_pretraining_plan_continued_binds_the_continued_objective():
+    plan = _pretraining_plan(
+        _profile(cc_major=8),
+        _report(),
+        init_mode="continued",
+        source_checkpoint_ref_id="ckpt:base",
+        source_checkpoint_ref_sha256="e" * 64,
+        tokenizer_source_mode="freeze",
+        tokenizer_content_sha256="f" * 64,
+        architecture_ref_id=None,
+        architecture_ref_sha256=None,
+        init_vocab_size=None,
+    )
+    cfg = plan.resolved_pretraining_execution
+    assert cfg.init.mode == "continued"
+    assert cfg.objective_ref.id == "continued_pretraining"
+
+
+def test_pretraining_plan_is_refused_at_execution_with_a_typed_reason():
+    from corpus_studio.platform.execution_config import (
+        ExecutionConfigurationError,
+        required_runner_lane,
+    )
+
+    plan = _pretraining_plan(_profile(cc_major=8), _report())
+    with pytest.raises(ExecutionConfigurationError, match="not yet executable"):
+        required_runner_lane(plan)
+
+
+def test_pretraining_requires_a_corpus():
+    with pytest.raises(PlannerError, match="requires a corpus"):
+        build_run_plan(
+            profile=_profile(cc_major=8),
+            capabilities=_report(),
+            dataset_ref=Ref(id="corpus", hash=P.HashRef(value="d" * 64)),
+            constraints=PlannerConstraints(
+                base_model="arch:demo",
+                dataset_path="corpus/manifest.json",
+                task_type="pretraining",
+                init_mode="random",
+                architecture_ref_id="arch:demo",
+                architecture_ref_sha256="c" * 64,
+                init_vocab_size=32000,
+                tokenizer_source_mode="train",
+                tokenizer_algorithm="bpe",
+                tokenizer_vocab_size=32000,
+                tokenizer_special_tokens=("<eos>",),
+            ),
+            plan_id="pt1",
+            now=_NOW,
+        )
+
+
+def test_pretraining_random_init_requires_an_architecture():
+    with pytest.raises(PlannerError, match="architecture ref"):
+        _pretraining_plan(_profile(cc_major=8), _report(), architecture_ref_id=None)
+
+
+def test_pretraining_train_tokenizer_requires_an_algorithm():
+    with pytest.raises(PlannerError, match="algorithm"):
+        _pretraining_plan(_profile(cc_major=8), _report(), tokenizer_algorithm=None)

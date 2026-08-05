@@ -576,7 +576,52 @@ export type SaveStrategy1 = "no" | "steps";
 export type Seed1 = number;
 export type TrustRemoteCode1 = false;
 export type UseSafetensors1 = true;
+export type ConfigurationHash2 = string;
+export type ConfigurationId2 = string;
+export type ContractVersion7 = "1.0.0";
+export type ContractVersion8 = "1.0.0";
+export type DataSeed3 = number;
+export type DocumentBoundaries = boolean;
+export type Epochs = number | null;
+export type GlobalBatchSize = number;
+export type Packing2 = "none" | "concat_and_split" | "best_fit";
+export type ContentSha2561 = string;
+export type Location1 = string;
+export type RowCount = number;
+export type ShardId = string;
+export type Source2 = string;
+export type TokenCount = number;
+export type Shards = PretrainingShard[];
+export type Streaming = boolean;
+export type TokenBudget = number | null;
+export type DataSeed4 = number;
+/**
+ * @minItems 1
+ */
+export type DeviceMap2 = [DeviceMapEntry, ...DeviceMapEntry[]];
+export type EnvironmentBinding2 = "profile_snapshot" | "managed_lock";
+export type GradientCheckpointing3 = boolean;
+export type InitSeed = number | null;
+export type InitializerRange = number | null;
+export type MaxPositionEmbeddings = number | null;
+export type Mode1 = "random" | "continued";
+export type ResetDataCursor = boolean;
+export type ResetLrScheduler = boolean;
+export type ResetOptimizer = boolean;
+export type VocabSize = number | null;
+export type OutputDir3 = string;
+export type OutputLayout2 = "run_scoped_v1";
+export type RuntimeMode3 = "training" | "cpu_toy";
 export type Seed2 = number;
+export type Algorithm = ("bpe" | "unigram" | "wordpiece") | null;
+export type MinFrequency = number | null;
+export type Mode2 = "train" | "import" | "freeze";
+export type SpecialTokens = string[] | null;
+export type TokenizerContentSha256 = string | null;
+export type VocabSize1 = number | null;
+export type TrustRemoteCode2 = false;
+export type UseSafetensors2 = true;
+export type Seed3 = number;
 export type CheckpointDir = string;
 export type CheckpointId = string;
 export type CheckpointManifestHash = string;
@@ -586,7 +631,7 @@ export type ExecutionConfigurationHash = string | null;
 export type Pid = number | null;
 export type ProcessStartedAt = string | null;
 export type RunId1 = string;
-export type ContractVersion7 = "1.0.0";
+export type ContractVersion9 = "1.0.0";
 export type Detail1 = string | null;
 export type DetectedAt = string | null;
 export type ExceptionType = string | null;
@@ -609,7 +654,7 @@ export type FitClass =
   | "ACCIDENTAL_WDDM_SPILL"
   | "THRASHING"
   | "FAIL";
-export type ContractVersion8 = "1.0.0";
+export type ContractVersion10 = "1.0.0";
 export type DeviceCapacityBytes = number | null;
 export type EstimatedPeakBytes = number | null;
 export type HeadroomBytes = number | null;
@@ -631,7 +676,7 @@ export type RunId2 = string | null;
 export type Signal = string | null;
 export type Action = "cancel" | "pause" | "resume" | "checkpoint_now";
 export type RunId3 = string;
-export type ContractVersion9 = "1.0.0";
+export type ContractVersion11 = "1.0.0";
 export type EmittedAt = string;
 export type Epoch = number | null;
 export type EventType =
@@ -761,7 +806,7 @@ export type PidAlive = boolean;
 export type RunId5 = string;
 export type ArtifactId = string;
 export type BaseModel1 = string | null;
-export type ContractVersion10 = "1.0.0";
+export type ContractVersion12 = "1.0.0";
 export type CreatedAt1 = string | null;
 export type CheapFingerprint = string | null;
 export type ContentHash = string | null;
@@ -777,7 +822,7 @@ export type Artifacts = ArtifactManifest[];
 export type AdapterApplied = boolean | null;
 export type Backend = string | null;
 export type ChatTemplateApplied = boolean | null;
-export type ContractVersion11 = "1.0.0";
+export type ContractVersion13 = "1.0.0";
 export type DatasetFingerprint = string | null;
 export type Name3 = string;
 export type VersionRef = string | null;
@@ -810,14 +855,14 @@ export type RunId6 = string;
 export type ArtifactIds = string[];
 export type BaseModel2 = string;
 export type Checkpoints = string[];
-export type ContractVersion12 = "1.0.0";
+export type ContractVersion14 = "1.0.0";
 export type CreatedAt2 = string;
 export type AfterEvalModel = string | null;
 export type AfterEvalRef = string | null;
 export type BeforeEvalRef = string | null;
 export type FinishedAt = string | null;
 export type Notes4 = string;
-export type OutputDir3 = string;
+export type OutputDir4 = string;
 export type ParameterAccountingRefs = Ref[];
 export type Argv = string[];
 export type ExitCode1 = number | null;
@@ -1259,7 +1304,8 @@ export interface RunPlan {
   quantization: QuantizationMode;
   resolved_execution?: ResolvedExecutionConfiguration | null;
   resolved_preference_execution?: ResolvedPreferenceExecutionConfiguration | null;
-  seed?: Seed2;
+  resolved_pretraining_execution?: ResolvedPretrainingExecutionConfiguration | null;
+  seed?: Seed3;
   sequence: SequenceSpec;
   task_type: TaskType;
   training_config_snapshot?: TrainingConfigSnapshot;
@@ -1663,6 +1709,127 @@ export interface ReferenceModelBinding {
   mode?: Mode;
   precompute_ref_log_probs?: PrecomputeRefLogProbs;
 }
+/**
+ * The hash-sealed configuration for a from-scratch / continued PRETRAINING run - the sibling of
+ * :class:`ResolvedExecutionConfiguration` for the ``pretraining`` execution variant.
+ *
+ * The dense-QLoRA-SFT seal is byte-locked (its own ``configuration_hash`` AND a committed semantic
+ * golden), so pretraining semantics live on THIS separate contract, never as new fields on the SFT
+ * config. Unlike SFT/DPO this is a FULL-PARAMETER causal-LM run: there is no adapter, no 4-bit base,
+ * and no single dataset file. The three input kinds are captured by method sub-specs rather than the
+ * SFT-shaped ``ExecutionInputs`` (which fail-closed requires one local dataset file + a model-weights
+ * binding, neither of which a from-scratch run has): the model by a :class:`ModelInitializationSpec`
+ * (random from a config, or a continued checkpoint), the tokenizer by a :class:`TokenizerSourceSpec`,
+ * and the corpus by the sharded :class:`PretrainingDataPolicy`.
+ *
+ * Carried on ``RunPlan.resolved_pretraining_execution`` (a plan carries exactly one of the SFT /
+ * preference / pretraining configs). What remains gated is EXECUTION: the pretraining worker loop
+ * (``from_config`` init, corpus streaming, packing, per-rank cursor), a workload-verified run, and the
+ * milestone wheel that promotes ``pretraining`` to ``workload_verified``. ``trainer_interface`` is an
+ * execution-shaped placeholder until that worker seals the exact trainer surface.
+ */
+export interface ResolvedPretrainingExecutionConfiguration {
+  attention: AttentionExecutionPolicy;
+  backend_ref: Ref;
+  batching: BatchingSpec;
+  capability_report_ref: Ref;
+  checkpoint_policy: CheckpointPolicy;
+  configuration_hash: ConfigurationHash2;
+  configuration_id: ConfigurationId2;
+  contract_version?: ContractVersion7;
+  data: PretrainingDataPolicy;
+  data_seed?: DataSeed4;
+  device_map: DeviceMap2;
+  environment_binding: EnvironmentBinding2;
+  environment_ref: Ref;
+  export_format: ExportFormat;
+  gradient_checkpointing?: GradientCheckpointing3;
+  init: ModelInitializationSpec;
+  loss_impl: LossImpl;
+  objective_ref: Ref;
+  optimizer: OptimizerSpec;
+  output_dir: OutputDir3;
+  output_layout?: OutputLayout2;
+  precision: PrecisionExecutionPolicy;
+  runtime_mode: RuntimeMode3;
+  schedule: TrainingSchedule;
+  seed?: Seed2;
+  sequence: SequenceSpec;
+  tokenizer_source: TokenizerSourceSpec;
+  trainer_interface: TrainerInterfacePolicy;
+  trust_remote_code?: TrustRemoteCode2;
+  use_safetensors?: UseSafetensors2;
+}
+/**
+ * Additive, dense/MoE-safe pretraining data policy (#487), PARALLEL to the SFT-only
+ * ``TrainingDataPolicy`` - never reuse the SFT contract for a sharded / streamed / mixture-weighted
+ * corpus. It declares a content-hashed shard set, streaming, per-source mixture weights, document
+ * boundaries, pretraining packing, a seeded deterministic global order, and a stop condition (token
+ * budget and/or epochs) so a run stops at the budget and never silently truncates. The runtime
+ * per-rank data cursor + streaming resume is a separate (worker) slice.
+ */
+export interface PretrainingDataPolicy {
+  contract_version?: ContractVersion8;
+  data_seed: DataSeed3;
+  document_boundaries?: DocumentBoundaries;
+  epochs?: Epochs;
+  global_batch_size: GlobalBatchSize;
+  mixture_weights?: MixtureWeights;
+  packing?: Packing2;
+  shards: Shards;
+  streaming?: Streaming;
+  token_budget?: TokenBudget;
+}
+export interface MixtureWeights {
+  [k: string]: number;
+}
+/**
+ * One content-hashed corpus shard in a :class:`PretrainingDataPolicy`: a stable id + location, its
+ * row and token counts, its sha256, and the mixture source it belongs to. The token count feeds the
+ * token budget; the sha256 pins the exact bytes so a resumed stream reads the same shard.
+ */
+export interface PretrainingShard {
+  content_sha256: ContentSha2561;
+  location: Location1;
+  row_count: RowCount;
+  shard_id: ShardId;
+  source?: Source2;
+  token_count: TokenCount;
+}
+/**
+ * How a PRETRAINING run instantiates its model. From-scratch has NO source weights: it builds a
+ * model from an architecture config with reproducible random init (the worker's ``from_config`` path,
+ * never ``from_pretrained``), pinned by ``architecture_ref`` + ``vocab_size`` + ``init_seed``.
+ * Continued pretraining loads a hash-pinned ``source_checkpoint_ref`` and states explicitly what is
+ * reset (optimizer / lr scheduler / data cursor) vs carried. Dense/MoE-safe: this seals init INTENT
+ * and assumes no dense-specific model shape.
+ */
+export interface ModelInitializationSpec {
+  architecture_ref?: Ref | null;
+  init_seed?: InitSeed;
+  initializer_range?: InitializerRange;
+  max_position_embeddings?: MaxPositionEmbeddings;
+  mode: Mode1;
+  reset_data_cursor?: ResetDataCursor;
+  reset_lr_scheduler?: ResetLrScheduler;
+  reset_optimizer?: ResetOptimizer;
+  source_checkpoint_ref?: Ref | null;
+  vocab_size?: VocabSize;
+}
+/**
+ * How the tokenizer is obtained, frozen by hash BEFORE any token is consumed (a tokenizer change
+ * invalidates all downstream token accounting). ``train`` builds a NEW tokenizer from a corpus sample
+ * (a new subsystem the worker slice implements); ``import`` / ``freeze`` pin an existing tokenizer by
+ * its content digest exactly as the SFT path does today.
+ */
+export interface TokenizerSourceSpec {
+  algorithm?: Algorithm;
+  min_frequency?: MinFrequency;
+  mode: Mode2;
+  special_tokens?: SpecialTokens;
+  tokenizer_content_sha256?: TokenizerContentSha256;
+  vocab_size?: VocabSize1;
+}
 export interface TrainingConfigSnapshot {
   [k: string]: unknown;
 }
@@ -1689,7 +1856,7 @@ export interface RunAcceptedBody {
  * fused-attention deadlock) vs an ACCIDENTAL_SPILL vs a CONTROLLED_OFFLOAD. NEW.
  */
 export interface FailureRecord {
-  contract_version?: ContractVersion7;
+  contract_version?: ContractVersion9;
   detail?: Detail1;
   detected_at?: DetectedAt;
   exception_type?: ExceptionType;
@@ -1713,7 +1880,7 @@ export interface FailureRecord {
 export interface FitClassification {
   attention_path?: AttentionImpl | null;
   classification: FitClass;
-  contract_version?: ContractVersion8;
+  contract_version?: ContractVersion10;
   device_capacity_bytes?: DeviceCapacityBytes;
   estimated_peak_bytes?: EstimatedPeakBytes;
   headroom_bytes?: HeadroomBytes;
@@ -1747,7 +1914,7 @@ export interface RunControlBody {
  * streaming telemetry today (run_registry is a durable per-run record, not an event stream).
  */
 export interface RunEvent {
-  contract_version?: ContractVersion9;
+  contract_version?: ContractVersion11;
   emitted_at: EmittedAt;
   epoch?: Epoch;
   event_type: EventType;
@@ -1885,7 +2052,7 @@ export interface TerminalResultBody {
 export interface ArtifactManifest {
   artifact_id: ArtifactId;
   base_model?: BaseModel1;
-  contract_version?: ContractVersion10;
+  contract_version?: ContractVersion12;
   created_at?: CreatedAt1;
   integrity?: ArtifactIntegrity | null;
   kind?: Kind2;
@@ -1914,7 +2081,7 @@ export interface ArtifactIntegrity {
  */
 export interface EvaluationResult {
   as_served?: AsServed | null;
-  contract_version?: ContractVersion11;
+  contract_version?: ContractVersion13;
   dataset?: EvalDataset | null;
   eval_id: EvalId;
   gate?: EvalGate | null;
@@ -1993,7 +2160,7 @@ export interface RunManifest {
   artifact_ids?: ArtifactIds;
   base_model?: BaseModel2;
   checkpoints?: Checkpoints;
-  contract_version?: ContractVersion12;
+  contract_version?: ContractVersion14;
   created_at: CreatedAt2;
   dataset_ref?: Ref | null;
   environment_ref?: Ref | null;
@@ -2002,7 +2169,7 @@ export interface RunManifest {
   final_fit?: FitClassification | null;
   finished_at?: FinishedAt;
   notes?: Notes4;
-  output_dir?: OutputDir3;
+  output_dir?: OutputDir4;
   parameter_accounting_refs?: ParameterAccountingRefs;
   plan_ref: Ref;
   process?: RunProcessInfo | null;
