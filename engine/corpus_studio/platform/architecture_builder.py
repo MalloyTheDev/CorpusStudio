@@ -49,12 +49,24 @@ class ArchitectureTraits:
 @dataclass(frozen=True)
 class _Impl:
     """A known reference implementation: its exact transformers ``model_type`` + architectures class +
-    config field style, and the structural traits it realizes."""
+    config field style, and the structural traits it realizes. ``supports_gqa`` is False for the classic
+    multi-head-only blocks (GPT-2, GPT-NeoX) whose config cannot express distinct KV heads."""
 
     model_type: str
     architectures: str
     config_style: Literal["hf_standard", "gpt2"]
     traits: ArchitectureTraits
+    supports_gqa: bool = True
+
+
+# transformers ACT2FN activations we allow a composed design to request (anything else would only fail
+# far away at worker instantiation, so we fail closed here instead).
+_KNOWN_ACTIVATIONS: frozenset[str] = frozenset(
+    {
+        "silu", "swish", "gelu", "gelu_new", "gelu_pytorch_tanh", "gelu_fast",
+        "quick_gelu", "relu", "relu2", "mish", "tanh", "sigmoid",
+    }
+)
 
 
 def _t(
@@ -82,8 +94,8 @@ _FAMILIES: dict[str, _Impl] = {
     "phi3": _Impl("phi3", "Phi3ForCausalLM", "hf_standard", _t("rope", True, "silu", "rmsnorm", False, False, False, 8 / 3)),
     "starcoder2": _Impl("starcoder2", "Starcoder2ForCausalLM", "hf_standard", _t("rope", False, "gelu_pytorch_tanh", "layernorm", True, True, False, 4.0)),
     "stablelm": _Impl("stablelm", "StableLmForCausalLM", "hf_standard", _t("rope", True, "silu", "layernorm", False, False, False, 8 / 3)),
-    "gpt2": _Impl("gpt2", "GPT2LMHeadModel", "gpt2", _t("learned", False, "gelu_new", "layernorm", True, True, True, 4.0)),
-    "gpt_neox": _Impl("gpt_neox", "GPTNeoXForCausalLM", "hf_standard", _t("rope", False, "gelu", "layernorm", True, True, False, 4.0)),
+    "gpt2": _Impl("gpt2", "GPT2LMHeadModel", "gpt2", _t("learned", False, "gelu_new", "layernorm", True, True, True, 4.0), supports_gqa=False),
+    "gpt_neox": _Impl("gpt_neox", "GPTNeoXForCausalLM", "hf_standard", _t("rope", False, "gelu", "layernorm", True, True, False, 4.0), supports_gqa=False),
 }
 KNOWN_FAMILIES: tuple[str, ...] = tuple(_FAMILIES)
 
@@ -187,6 +199,8 @@ def solve_for_target(
     at 64-d, depth ~ hidden/64). Never claims the target is hit exactly."""
     if target_parameters <= 0:
         raise ArchitectureBuilderError("target_parameters must be positive")
+    if num_key_value_heads is not None and num_key_value_heads < 1:
+        raise ArchitectureBuilderError("num_key_value_heads must be positive")
     best: tuple[dict[str, int], int] | None = None
     for hidden_size in range(128, 8192 + 1, 64):
         heads = hidden_size // _HEAD_DIM
@@ -215,7 +229,11 @@ def solve_for_target(
         }
         if best is None or abs(params - target_parameters) < abs(best[1] - target_parameters):
             best = (dims, params)
-    assert best is not None
+    if best is None:
+        raise ArchitectureBuilderError(
+            "no architecture in the search range satisfies the constraints (check num_key_value_heads "
+            "- it must divide a valid head count)"
+        )
     return best[0]
 
 
@@ -267,6 +285,10 @@ def _config_dict(
         config["rope_theta"] = 10000.0
     if traits.attention_bias:
         config["attention_bias"] = True
+    if model_type == "custom_decoder":
+        # An explicit, durable marker: this design has no reference implementation and needs the
+        # custom-block path - planning must refuse it, not seal it as a runnable config.
+        config["corpus_studio_needs_custom_code"] = True
     return config
 
 
@@ -276,6 +298,7 @@ def _finalize(
     model_type: str,
     architectures: str,
     config_style: str,
+    supports_gqa: bool,
     realizing_family: str | None,
     needs_custom_code: bool,
     name: str,
@@ -293,6 +316,8 @@ def _finalize(
 ) -> BuiltArchitecture:
     if vocab_size < 1 or max_position_embeddings < 1:
         raise ArchitectureBuilderError("vocab_size and max_position_embeddings must be positive")
+    if num_key_value_heads is not None and num_key_value_heads < 1:
+        raise ArchitectureBuilderError("num_key_value_heads must be positive")
     if sum(x is not None for x in (preset, target_parameters, hidden_size)) != 1:
         raise ArchitectureBuilderError(
             "specify exactly one of: a preset, a target parameter count, or explicit hidden_size"
@@ -329,6 +354,15 @@ def _finalize(
         }
         if dims["num_hidden_layers"] < 1 or dims["intermediate_size"] < 1:
             raise ArchitectureBuilderError("num_hidden_layers and intermediate_size must be positive")
+
+    # A block that cannot express distinct KV heads (GPT-2 / GPT-NeoX) must not silently drop a requested
+    # GQA: the estimate would show reduced parameters the built model would not have. Fail closed.
+    if not supports_gqa and dims["num_key_value_heads"] < dims["num_attention_heads"]:
+        raise ArchitectureBuilderError(
+            f"the {realizing_family or model_type} block does not support grouped-query attention "
+            "(distinct num_key_value_heads); set it equal to num_attention_heads or choose a GQA-capable "
+            "design"
+        )
 
     estimate = estimate_parameters(
         traits,
@@ -396,6 +430,7 @@ def build_from_family(
         model_type=impl.model_type,
         architectures=impl.architectures,
         config_style=impl.config_style,
+        supports_gqa=impl.supports_gqa,
         realizing_family=family,
         needs_custom_code=False,
         name=name or family,
@@ -441,6 +476,10 @@ def build_composed(
         raise ArchitectureBuilderError("positions must be 'rope' or 'learned'")
     if norm not in {"rmsnorm", "layernorm"}:
         raise ArchitectureBuilderError("norm must be 'rmsnorm' or 'layernorm'")
+    if activation not in _KNOWN_ACTIVATIONS:
+        raise ArchitectureBuilderError(
+            f"unknown activation '{activation}'; choose from: {', '.join(sorted(_KNOWN_ACTIVATIONS))}"
+        )
     # Default the MLP ratio by shape when unset (gated ~ 8/3, standard = 4x) so a composed standard MLP is
     # not silently undersized.
     ratio = intermediate_ratio if intermediate_ratio is not None else (8 / 3 if gated_mlp else 4.0)
@@ -459,17 +498,21 @@ def build_composed(
         model_type, architectures, config_style = impl.model_type, impl.architectures, impl.config_style
         realizing_family: str | None = impl.model_type
         needs_custom_code = False
+        supports_gqa = impl.supports_gqa
     else:
         # A novel design still gets a config + an estimate, but is honestly flagged: no reference
-        # implementation builds it, so training it needs the custom-block path (real model code).
+        # implementation builds it, so training it needs the custom-block path (real model code). A
+        # custom block is free to implement GQA, so we do not pre-refuse it here.
         model_type, architectures, config_style = "custom_decoder", "CustomDecoderForCausalLM", "hf_standard"
         realizing_family = None
         needs_custom_code = True
+        supports_gqa = True
     return _finalize(
         traits,
         model_type=model_type,
         architectures=architectures,
         config_style=config_style,
+        supports_gqa=supports_gqa,
         realizing_family=realizing_family,
         needs_custom_code=needs_custom_code,
         name=name,

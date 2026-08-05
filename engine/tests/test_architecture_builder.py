@@ -242,3 +242,47 @@ def test_every_family_uses_its_own_model_type_and_class():
 def test_composing_gated_layernorm_realizes_on_stablelm():
     built = build_composed(name="S", positions="rope", gated_mlp=True, norm="layernorm", preset="small")
     assert built.realizing_family == "stablelm" and built.needs_custom_code is False
+
+
+# ---- audit fixes: fail-closed on invalid / unsupported requests ------------------------------------
+
+
+def test_zero_kv_heads_fails_closed_not_crash():
+    # AUDIT (Codex): --num-kv-heads 0 must be a typed error, not a ZeroDivisionError. Covers all size modes.
+    with pytest.raises(ArchitectureBuilderError, match="num_key_value_heads must be positive"):
+        build_from_family("llama", preset="small", num_key_value_heads=0)
+    with pytest.raises(ArchitectureBuilderError, match="num_key_value_heads must be positive"):
+        build_from_family("llama", target_parameters=125_000_000, num_key_value_heads=0)
+
+
+def test_impossible_kv_head_target_fails_closed_not_assert():
+    # AUDIT (Codex): a KV-head count no searched width can satisfy must raise a typed error, not an
+    # uncaught AssertionError from the solve loop.
+    with pytest.raises(ArchitectureBuilderError, match="no architecture in the search range"):
+        build_from_family("llama", target_parameters=125_000_000, num_key_value_heads=129)
+
+
+def test_gqa_on_a_non_gqa_block_is_refused():
+    # AUDIT (Codex): GPT-2 / GPT-NeoX cannot express distinct KV heads; a GQA request there would make the
+    # estimate diverge from the built model. Fail closed rather than silently drop it.
+    with pytest.raises(ArchitectureBuilderError, match="grouped-query attention"):
+        build_from_family("gpt2", preset="small", num_key_value_heads=4)
+    with pytest.raises(ArchitectureBuilderError, match="grouped-query attention"):
+        build_composed(
+            name="G", positions="learned", gated_mlp=False, norm="layernorm",
+            attention_bias=True, mlp_bias=True, num_key_value_heads=4, preset="small",
+        )
+
+
+def test_unknown_activation_is_refused():
+    # AUDIT (Codex): an activation no ACT2FN entry provides would only fail far away at worker
+    # instantiation; refuse it at compose time.
+    with pytest.raises(ArchitectureBuilderError, match="unknown activation"):
+        build_composed(name="A", activation="banana", preset="small")
+
+
+def test_custom_decoder_config_carries_a_durable_marker():
+    built = build_composed(
+        name="Novel", positions="learned", gated_mlp=True, norm="layernorm", preset="small"
+    )
+    assert built.config["corpus_studio_needs_custom_code"] is True

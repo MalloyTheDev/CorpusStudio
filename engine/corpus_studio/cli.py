@@ -1160,18 +1160,21 @@ def platform_plan(
             pretraining_arch_ref_id = str(architecture_config)
             pretraining_arch_ref_sha256 = hashlib.sha256(arch_bytes).hexdigest()
             # A composed design that no reference implementation builds is emitted with model_type
-            # "custom_decoder": it needs the (not-yet-shipped, security-gated) custom-block path, so a run
-            # planned against it cannot initialize a model yet. Warn loudly rather than plan a dead run.
-            if (
-                isinstance(arch_config_json, dict)
-                and arch_config_json.get("model_type") == "custom_decoder"
+            # "custom_decoder" (and a corpus_studio_needs_custom_code marker): it needs the not-yet-shipped,
+            # security-gated custom-block path. Sealing a plan for an implementation that does not exist
+            # would be a lie, so REFUSE fail-closed rather than warn - honesty invariant "installed !=
+            # supported".
+            if isinstance(arch_config_json, dict) and (
+                arch_config_json.get("model_type") == "custom_decoder"
+                or arch_config_json.get("corpus_studio_needs_custom_code") is True
             ):
                 typer.echo(
-                    "warning: --architecture-config is a custom_decoder design (no reference "
-                    "implementation builds it); the custom-block path is not yet available, so a "
-                    "pretraining run cannot initialize this model until that slice lands.",
+                    "cannot plan a run against a custom_decoder architecture: no reference implementation "
+                    "builds it, and the custom-block path (your own model code) is not yet available. "
+                    "Compose onto a known block, or base on a family.",
                     err=True,
                 )
+                raise typer.Exit(2)
             # The architecture config's vocab_size IS the model's embedding size: default --init-vocab-size
             # to it, and refuse an explicit value that contradicts it (a silent mismatch = a broken model).
             arch_vocab = (
