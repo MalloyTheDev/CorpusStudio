@@ -1271,3 +1271,42 @@ def test_pretraining_random_init_requires_an_architecture():
 def test_pretraining_train_tokenizer_requires_an_algorithm():
     with pytest.raises(PlannerError, match="algorithm"):
         _pretraining_plan(_profile(cc_major=8), _report(), tokenizer_algorithm=None)
+
+
+def test_pretraining_fit_is_honestly_not_estimated_not_fabricated():
+    # AUDIT fix: a full-parameter pretraining plan must NOT be run through the LoRA/QLoRA VRAM estimator
+    # (which would fabricate a fit as if it were LoRA r16 over an HF base). The calibrator says so.
+    from corpus_studio.platform.calibrator import classify_fit
+
+    plan = _pretraining_plan(_profile(cc_major=8), _report())
+    fit = classify_fit(plan, _profile(cc_major=8))
+    assert fit.classification.name == "PLANNED_UNPROVEN"
+    assert "pretraining" in fit.rationale and "not estimated" in fit.rationale
+
+
+def test_pretraining_runner_refuses_with_a_typed_reason_at_both_gates():
+    # AUDIT fix: the DIRECT runner path gives the SAME typed reason as the dispatch gate (defense-in-depth),
+    # not the generic "no ResolvedExecutionConfiguration".
+    from corpus_studio.platform.execution_config import (
+        ExecutionConfigurationError,
+        required_runner_lane,
+    )
+    from corpus_studio.platform.runners import RunnerFailure, TrainingRunner
+
+    plan = _pretraining_plan(_profile(cc_major=8), _report())
+    with pytest.raises(ExecutionConfigurationError, match="not yet executable"):
+        required_runner_lane(plan)
+    with pytest.raises(RunnerFailure, match="not yet executable"):
+        TrainingRunner(cpu_toy=False)._resolve_trainer(plan)
+    with pytest.raises(RunnerFailure, match="not yet executable"):
+        TrainingRunner(cpu_toy=False)._resolve_config(plan, "run-x")
+
+
+def test_pretraining_model_vocab_defaults_to_the_trained_tokenizer_vocab():
+    # AUDIT fix: a from-scratch model sizes its embedding to its tokenizer - the operator need not repeat
+    # the vocab on both knobs, and a mismatch can never be sealed.
+    plan = _pretraining_plan(
+        _profile(cc_major=8), _report(), init_vocab_size=None, tokenizer_vocab_size=50000
+    )
+    cfg = plan.resolved_pretraining_execution
+    assert cfg.init.vocab_size == 50000 and cfg.tokenizer_source.vocab_size == 50000

@@ -51,6 +51,27 @@ def classify_fit(plan: RunPlan, profile: EnvironmentProfile) -> FitClassificatio
                 "physical-plan estimator; no native residency or controlled-fit claim was made."
             ),
         )
+    if plan.resolved_pretraining_execution is not None:
+        # Full-parameter from-scratch / continued pretraining: the LoRA/QLoRA VRAM estimator below does
+        # NOT apply (there is no adapter, and a full-parameter optimizer state dominates), and
+        # ``base_model`` is an architecture id, not a sized checkpoint - so predicting a fit here would be
+        # a FABRICATED claim. cpu_toy runs on CPU; otherwise fit is honestly "not estimated" (only a
+        # measured run is fit evidence).
+        if plan.resolved_pretraining_execution.runtime_mode == "cpu_toy":
+            return FitClassification(
+                classification=FitClass.NATIVE_UNPROVEN,
+                attention_path=plan.attention_backend,
+                rationale="cpu-toy pretraining runs on CPU; GPU VRAM fit is not applicable.",
+            )
+        return FitClassification(
+            classification=FitClass.PLANNED_UNPROVEN,
+            attention_path=plan.attention_backend,
+            rationale=(
+                "full-parameter pretraining has no calibrator VRAM estimator (the LoRA/QLoRA model does "
+                "not apply and the base is an architecture spec, not a sized checkpoint); fit is not "
+                "estimated - a measured run is the only fit evidence."
+            ),
+        )
     from corpus_studio.training.estimators import build_vram_estimate  # noqa: PLC0415 - torch-free
 
     # A cpu-toy plan runs on CPU — GPU VRAM fit is not applicable.

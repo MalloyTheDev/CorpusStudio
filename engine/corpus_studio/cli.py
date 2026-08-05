@@ -1641,6 +1641,16 @@ def create_model(
     except ArchitectureBuilderError as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(2) from exc
+    # No silent truncation of the ask: if the closest valid config is far from a --params target, say so.
+    if target_parameters is not None:
+        drift = abs(built.estimated_parameters - target_parameters) / target_parameters
+        if drift > 0.25:
+            typer.echo(
+                f"note: the nearest valid config is ~{built.estimated_parameters / 1e6:.1f}M, "
+                f"{drift * 100:.0f}% from the {target_parameters / 1e6:.0f}M target "
+                "(constrained by the family or the search range).",
+                err=True,
+            )
     if out is not None:
         out.write_text(json.dumps(built.config, indent=2), encoding="utf-8")
     if json_out:

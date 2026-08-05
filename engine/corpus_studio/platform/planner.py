@@ -966,15 +966,23 @@ def _pretraining_init_spec(constraints: PlannerConstraints) -> ModelInitializati
         if constraints.init_mode == "random":
             if constraints.architecture_ref_id is None or constraints.architecture_ref_sha256 is None:
                 raise PlannerError("random-init pretraining requires an architecture ref (id + sha256)")
-            if constraints.init_vocab_size is None:
-                raise PlannerError("random-init pretraining requires init_vocab_size")
+            # A from-scratch model sizes its embedding to its tokenizer: default the model vocab to the
+            # trained tokenizer's vocab when the operator does not pin one explicitly (the config seal
+            # then enforces they agree).
+            vocab_size = constraints.init_vocab_size
+            if vocab_size is None and constraints.tokenizer_source_mode == "train":
+                vocab_size = constraints.tokenizer_vocab_size
+            if vocab_size is None:
+                raise PlannerError(
+                    "random-init pretraining requires init_vocab_size (or a trained tokenizer vocab_size)"
+                )
             return ModelInitializationSpec(
                 mode="random",
                 architecture_ref=Ref(
                     id=constraints.architecture_ref_id,
                     hash=HashRef(value=constraints.architecture_ref_sha256),
                 ),
-                vocab_size=constraints.init_vocab_size,
+                vocab_size=vocab_size,
                 init_seed=(
                     constraints.init_seed if constraints.init_seed is not None else constraints.seed
                 ),

@@ -506,6 +506,7 @@ class TrainingRunner:
         )
         from corpus_studio.platform.execution_config import (  # noqa: PLC0415
             PREFERENCE_NOT_EXECUTABLE_REASON,
+            PRETRAINING_NOT_EXECUTABLE_REASON,
         )
 
         if plan.resolved_execution is None and plan.resolved_preference_execution is not None:
@@ -517,6 +518,16 @@ class TrainingRunner:
                 taxonomy=FailureTaxonomy.UNSUPPORTED_CONFIGURATION,
                 stage=StageMarker.env_loaded,
                 remediation="await the DPO worker milestone that promotes preference_dpo to "
+                "workload_verified; do not hand-edit the plan to the SFT lane",
+            )
+        if plan.resolved_execution is None and plan.resolved_pretraining_execution is not None:
+            # Same defense-in-depth for a sealed pretraining plan: a typed refusal at the first resolution
+            # step rather than the generic "backend does not implement the sealed execution contract".
+            raise RunnerFailure(
+                PRETRAINING_NOT_EXECUTABLE_REASON,
+                taxonomy=FailureTaxonomy.UNSUPPORTED_CONFIGURATION,
+                stage=StageMarker.env_loaded,
+                remediation="await the pretraining worker milestone that promotes pretraining to "
                 "workload_verified; do not hand-edit the plan to the SFT lane",
             )
         backend_id = plan.backend_ref.id
@@ -567,6 +578,7 @@ class TrainingRunner:
         """Consume the sealed policy and derive only its declared run-scoped output path."""
         from corpus_studio.platform.execution_config import (  # noqa: PLC0415
             PREFERENCE_NOT_EXECUTABLE_REASON,
+            PRETRAINING_NOT_EXECUTABLE_REASON,
             ExecutionConfigurationError,
             run_scoped_training_output,
             verify_execution_configuration_hash,
@@ -586,6 +598,14 @@ class TrainingRunner:
                     taxonomy=FailureTaxonomy.UNSUPPORTED_CONFIGURATION,
                     stage=StageMarker.env_loaded,
                     remediation="await the DPO worker milestone that promotes preference_dpo to "
+                    "workload_verified; do not hand-edit the plan to the SFT lane",
+                )
+            if plan.resolved_pretraining_execution is not None:
+                raise RunnerFailure(
+                    PRETRAINING_NOT_EXECUTABLE_REASON,
+                    taxonomy=FailureTaxonomy.UNSUPPORTED_CONFIGURATION,
+                    stage=StageMarker.env_loaded,
+                    remediation="await the pretraining worker milestone that promotes pretraining to "
                     "workload_verified; do not hand-edit the plan to the SFT lane",
                 )
             raise RunnerFailure(
