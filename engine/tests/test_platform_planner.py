@@ -1210,6 +1210,23 @@ def test_pretraining_plan_seals_a_from_scratch_config():
     assert verify_run_plan_hash(plan)
 
 
+def test_pretraining_config_maps_the_sealed_config_to_the_trainer_boundary():
+    # S3b-1a inc 2: the sealed pretraining config lowers to the torch-free PretrainRunConfig (no torch, no
+    # invented defaults) - the sibling of train_config_from_resolved, SFT seal untouched.
+    from corpus_studio.training.pretraining_config import pretrain_config_from_resolved
+
+    cfg = _pretraining_plan(_profile(cc_major=8), _report()).resolved_pretraining_execution
+    tc = pretrain_config_from_resolved(cfg)
+    assert tc.init_mode == "random"
+    assert tc.architecture_ref_sha256 == "c" * 64 and tc.init_vocab_size == 32000
+    assert tc.tokenizer_mode == "train" and tc.tokenizer_algorithm == "bpe"
+    assert len(tc.corpus_shards) == 1 and tc.corpus_shards[0].token_count == 100_000
+    assert tc.sequence_len == cfg.sequence.max_sequence_len
+    assert tc.output_dir == cfg.output_dir
+    assert tc.cpu_toy is False  # runtime_mode == "training"
+    assert tc.execution_configuration_hash == cfg.configuration_hash
+
+
 def test_pretraining_plan_continued_binds_the_continued_objective():
     plan = _pretraining_plan(
         _profile(cc_major=8),
