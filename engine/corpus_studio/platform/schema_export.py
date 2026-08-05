@@ -31,6 +31,7 @@ from .contracts import (
     FailureRecord,
     FitClassification,
     FrameworkBackend,
+    ModelCodeVettingReport,
     ModelDescriptor,
     ObjectiveCompatibilityReport,
     OrchestratorAdapter,
@@ -98,6 +99,7 @@ ROOT_CONTRACTS: dict[str, type[ContractModel]] = {
     "BackendExecutionVariant": BackendExecutionVariant,
     "PretrainingDataPolicy": PretrainingDataPolicy,
     "PreferenceDataPolicy": PreferenceDataPolicy,
+    "ModelCodeVettingReport": ModelCodeVettingReport,
 }
 
 

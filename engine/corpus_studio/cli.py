@@ -1811,6 +1811,65 @@ def create_model(
         typer.echo(f"wrote architecture config to {out}")
 
 
+@app.command("vet-model-code")
+def vet_model_code(
+    bundle: Path = typer.Argument(
+        ..., help="Local single-file custom-block bundle (.py) to statically screen."
+    ),
+    entry_symbol: str = typer.Option(
+        ...,
+        "--entry-symbol",
+        help="The custom model class defined in the bundle (e.g. MyDecoderForCausalLM).",
+    ),
+    interface_version: str = typer.Option(
+        "custom_decoder_v1", "--interface-version", help="The custom-block ABI the code claims."
+    ),
+    out: Optional[Path] = typer.Option(
+        None, "--out", help="Write the vetting report JSON here (a content-addressed admission token)."
+    ),
+    json_out: bool = typer.Option(False, "--json", help="Emit the vetting report as JSON."),
+):
+    """Statically screen a LOCAL custom-block bundle (mode-3 'your own model code') and record a
+    ModelCodeVettingReport. The screen executes NOTHING and does not prove the code safe - it rejects the
+    obvious dangerous surface fail-closed and pins the exact bytes it looked at, so a later plan can bind
+    admission to them. Admission and execution stay gated. Exits 2 if the bundle is rejected."""
+    from corpus_studio.platform.custom_code_vetting import build_report  # noqa: PLC0415
+
+    try:
+        raw = bundle.read_bytes()
+    except OSError as exc:
+        typer.echo(f"cannot read bundle: {exc}", err=True)
+        raise typer.Exit(2) from exc
+    try:
+        report = build_report(raw, entry_symbol=entry_symbol, interface_version=interface_version)
+    except ValueError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(2) from exc
+    payload = report.model_dump(mode="json")
+    if out is not None:
+        try:
+            out.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        except OSError as exc:
+            typer.echo(f"cannot write --out: {exc}", err=True)
+            raise typer.Exit(2) from exc
+    if json_out:
+        typer.echo(json.dumps(payload, indent=2))
+    else:
+        typer.echo(
+            f"{bundle.name}: {report.verdict} (sha256={report.bundle_sha256[:12]}..., "
+            f"{len(report.findings)} finding(s))"
+        )
+        for finding in report.findings:
+            loc = f":{finding.lineno}" if finding.lineno else ""
+            typer.echo(f"  [{finding.severity}] {finding.code}{loc}: {finding.message}", err=True)
+        if out is not None:
+            typer.echo(f"wrote vetting report to {out}")
+    # Fail closed: a rejected bundle is a non-zero exit so scripts and the (later) plan gate cannot admit
+    # it by accident.
+    if report.verdict == "rejected":
+        raise typer.Exit(2)
+
+
 @app.command("model-inspect")
 def model_inspect(
     path: Path = typer.Argument(..., help="Local model snapshot directory (offline inspection)."),

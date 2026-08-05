@@ -160,6 +160,10 @@
     {
       "contract": "PreferenceDataPolicy",
       "file": "PreferenceDataPolicy.schema.json"
+    },
+    {
+      "contract": "ModelCodeVettingReport",
+      "file": "ModelCodeVettingReport.schema.json"
     }
   ]
 }

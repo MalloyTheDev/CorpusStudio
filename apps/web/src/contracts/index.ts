@@ -16,6 +16,7 @@ export type { EvaluationResult } from "./EvaluationResult";
 export type { FailureRecord } from "./FailureRecord";
 export type { FitClassification } from "./FitClassification";
 export type { FrameworkBackend } from "./FrameworkBackend";
+export type { ModelCodeVettingReport } from "./ModelCodeVettingReport";
 export type { ModelDescriptor } from "./ModelDescriptor";
 export type { ObjectiveCompatibilityReport } from "./ObjectiveCompatibilityReport";
 export type { OrchestratorAdapter } from "./OrchestratorAdapter";
