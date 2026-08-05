@@ -219,6 +219,7 @@ class PlannerConstraints:
     tokenizer_vocab_size: int | None = None
     tokenizer_special_tokens: tuple[str, ...] | None = None
     tokenizer_min_frequency: int | None = None
+    tokenizer_location: str | None = None  # import/freeze: where the worker loads the pinned tokenizer
     # Custom-block (mode 3): a hash-pinned, ADMITTED local code bundle. Set only for a custom_decoder
     # architecture; the platform-plan layer verifies the vetting report admitted these exact bytes first.
     custom_code_bundle_ref_id: str | None = None
@@ -1058,6 +1059,7 @@ def _tokenizer_source_spec(constraints: PlannerConstraints) -> TokenizerSourceSp
             {
                 "mode": constraints.tokenizer_source_mode,
                 "tokenizer_content_sha256": constraints.tokenizer_content_sha256,
+                "tokenizer_location": constraints.tokenizer_location,
             }
         )
     except ValidationError as exc:

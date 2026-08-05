@@ -71,12 +71,27 @@ def _execution(*, init_mode="random", custom_code=None, tokenizer_mode="train"):
 
 def test_refuse_unsupported_modes():
     _refuse_unsupported(_execution())  # random + train is supported (no raise)
+    _refuse_unsupported(_execution(tokenizer_mode="import"))  # import supported now (inc 3b)
     with pytest.raises(PretrainingError, match="continued"):
         _refuse_unsupported(_execution(init_mode="continued"))
     with pytest.raises(PretrainingError, match="custom-block"):
         _refuse_unsupported(_execution(custom_code=object()))
-    with pytest.raises(PretrainingError, match="import/freeze"):
-        _refuse_unsupported(_execution(tokenizer_mode="import"))
+
+
+def test_tokenizer_source_spec_import_requires_a_location():
+    from corpus_studio.platform.contracts import TokenizerSourceSpec
+
+    with pytest.raises(ValueError, match="no pre-existing"):  # a trained tokenizer has no location
+        TokenizerSourceSpec(
+            mode="train", algorithm="bpe", vocab_size=100, special_tokens=["<eos>"],
+            tokenizer_location="/t",
+        )
+    with pytest.raises(ValueError, match="tokenizer_location"):  # import needs WHERE to load from
+        TokenizerSourceSpec(mode="import", tokenizer_content_sha256="a" * 64)
+    ok = TokenizerSourceSpec(mode="import", tokenizer_content_sha256="a" * 64, tokenizer_location="/tok")
+    assert ok.tokenizer_location == "/tok"
+    # freeze reuses the checkpoint's tokenizer - digest but no separate location
+    assert TokenizerSourceSpec(mode="freeze", tokenizer_content_sha256="a" * 64).tokenizer_location is None
 
 
 def test_pretrain_result_bounds_coverage():

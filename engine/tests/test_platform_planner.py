@@ -1263,6 +1263,17 @@ def test_cpu_toy_pretraining_actually_trains_a_from_scratch_model(tmp_path):
     assert (tmp_path / "out" / "model.safetensors").exists()
 
 
+def test_pretraining_import_tokenizer_seals_the_location():
+    # S3b-1a inc 3b: an import tokenizer is sealed with WHERE to load it (location) + its content digest.
+    plan = _pretraining_plan(
+        _profile(cc_major=8), _report(), tokenizer_source_mode="import",
+        tokenizer_content_sha256="b" * 64, tokenizer_location="/tokenizers/mine",
+    )
+    ts = plan.resolved_pretraining_execution.tokenizer_source
+    assert ts.mode == "import"
+    assert ts.tokenizer_location == "/tokenizers/mine" and ts.tokenizer_content_sha256 == "b" * 64
+
+
 def test_pretraining_plan_continued_binds_the_continued_objective():
     plan = _pretraining_plan(
         _profile(cc_major=8),
