@@ -101,6 +101,10 @@ export type EnvironmentBinding = "profile_snapshot" | "managed_lock";
 export type ExportFormat =
   "adapter_peft" | "merged_safetensors" | "merged_fp16" | "gguf" | "onnx" | "awq" | "gptq" | "mlx";
 export type GradientCheckpointing = boolean;
+export type EntrySymbol = string;
+export type InterfaceVersion = "custom_decoder_v1";
+export type TrustRemoteCode = false;
+export type VettingVerdict = "admitted";
 export type InitSeed = number | null;
 export type InitializerRange = number | null;
 export type MaxPositionEmbeddings = number | null;
@@ -164,7 +168,7 @@ export type ReportTo = string[];
 export type RequiredSftConfigFields = [string, ...string[]];
 export type SequenceLengthField = "max_seq_length" | "max_length";
 export type TokenizerParameter = "tokenizer" | "processing_class";
-export type TrustRemoteCode = false;
+export type TrustRemoteCode1 = false;
 export type UseSafetensors = true;
 
 /**
@@ -215,7 +219,7 @@ export interface ResolvedPretrainingExecutionConfiguration {
   sequence: SequenceSpec;
   tokenizer_source: TokenizerSourceSpec;
   trainer_interface: TrainerInterfacePolicy;
-  trust_remote_code?: TrustRemoteCode;
+  trust_remote_code?: TrustRemoteCode1;
   use_safetensors?: UseSafetensors;
 }
 /**
@@ -354,6 +358,7 @@ export interface DeviceMapEntry {
  */
 export interface ModelInitializationSpec {
   architecture_ref?: Ref | null;
+  custom_code?: CustomModelCodeSpec | null;
   init_seed?: InitSeed;
   initializer_range?: InitializerRange;
   max_position_embeddings?: MaxPositionEmbeddings;
@@ -363,6 +368,25 @@ export interface ModelInitializationSpec {
   reset_optimizer?: ResetOptimizer;
   source_checkpoint_ref?: Ref | null;
   vocab_size?: VocabSize;
+}
+/**
+ * A hash-pinned, ADMITTED local custom-block bundle for a from-scratch run - the mode-3 'your own
+ * model code' path (your own IMPLEMENTATION, the only not-borrowed mode). It seals WHICH exact bytes
+ * (``code_bundle_ref``) an ADMITTED :class:`ModelCodeVettingReport` (``vetting_ref``) screened, plus the
+ * entry class + interface. This path NEVER uses HF ``trust_remote_code`` (``Literal[False]``); the
+ * module is loaded locally, by path, from the pinned bundle.
+ *
+ * Sealing this admits the design AT PLANNING; a static screen is not a safety proof, so EXECUTION stays
+ * gated behind the (later) worker sandbox exactly as pretraining itself is refused at the worker today.
+ * Both refs must be hash-pinned so admission binds to specific bytes and cannot silently re-point.
+ */
+export interface CustomModelCodeSpec {
+  code_bundle_ref: Ref;
+  entry_symbol: EntrySymbol;
+  interface_version: InterfaceVersion;
+  trust_remote_code?: TrustRemoteCode;
+  vetting_ref: Ref;
+  vetting_verdict: VettingVerdict;
 }
 export interface OptimizerSpec {
   adam_beta1?: AdamBeta1;

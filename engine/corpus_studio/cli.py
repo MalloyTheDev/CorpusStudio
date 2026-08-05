@@ -925,6 +925,16 @@ def platform_plan(
         "--architecture-config",
         help="Random-init: the model architecture config file (hashed into the sealed init spec).",
     ),
+    custom_code_bundle: Optional[Path] = typer.Option(
+        None,
+        "--custom-code-bundle",
+        help="Mode-3 custom_decoder: the local custom-block bundle (.py); its bytes are pinned into the seal.",
+    ),
+    custom_code_vetting: Optional[Path] = typer.Option(
+        None,
+        "--custom-code-vetting",
+        help="Mode-3 custom_decoder: the ADMITTED vetting report (from vet-model-code) for that bundle.",
+    ),
     init_vocab_size: Optional[int] = typer.Option(
         None, "--init-vocab-size", help="Random-init vocabulary size."
     ),
@@ -1136,7 +1146,24 @@ def platform_plan(
     pretraining_data = None
     pretraining_arch_ref_id = None
     pretraining_arch_ref_sha256 = None
+    custom_code_bundle_ref_id = None
+    custom_code_bundle_ref_sha256 = None
+    custom_code_entry_symbol = None
+    custom_code_interface_version = None
+    custom_code_vetting_ref_id = None
+    custom_code_vetting_ref_sha256 = None
     resolved_tokenizer_digest = model_digest
+    # Custom-code flags are meaningful ONLY for a pretraining run with a custom_decoder architecture; a
+    # non-pretraining task or a missing --architecture-config would silently ignore them, so refuse.
+    if (custom_code_bundle is not None or custom_code_vetting is not None) and (
+        task_type != "pretraining" or architecture_config is None
+    ):
+        typer.echo(
+            "--custom-code-bundle / --custom-code-vetting apply only to a pretraining run with a "
+            "custom_decoder --architecture-config.",
+            err=True,
+        )
+        raise typer.Exit(2)
     if task_type == "pretraining":
         manifest_path = corpus_manifest or Path(dataset_path)
         try:
@@ -1159,19 +1186,55 @@ def platform_plan(
                 raise typer.Exit(2) from exc
             pretraining_arch_ref_id = str(architecture_config)
             pretraining_arch_ref_sha256 = hashlib.sha256(arch_bytes).hexdigest()
-            # A composed design that no reference implementation builds is emitted with model_type
-            # "custom_decoder" (and a corpus_studio_needs_custom_code marker): it needs the not-yet-shipped,
-            # security-gated custom-block path. Sealing a plan for an implementation that does not exist
-            # would be a lie, so REFUSE fail-closed rather than warn - honesty invariant "installed !=
-            # supported".
-            if isinstance(arch_config_json, dict) and (
+            # A design no reference implementation builds is emitted with model_type "custom_decoder" (and
+            # a corpus_studio_needs_custom_code marker): the mode-3 custom-block path. It may be sealed ONLY
+            # with an ADMITTED, hash-matching vetting report for the EXACT bundle bytes; without that it is
+            # refused fail-closed. Execution stays gated at the worker regardless of admission.
+            is_custom_decoder = isinstance(arch_config_json, dict) and (
                 arch_config_json.get("model_type") == "custom_decoder"
                 or arch_config_json.get("corpus_studio_needs_custom_code") is True
-            ):
+            )
+            if is_custom_decoder:
+                if custom_code_bundle is None or custom_code_vetting is None:
+                    typer.echo(
+                        "a custom_decoder architecture requires --custom-code-bundle and "
+                        "--custom-code-vetting (an admitted vetting report from vet-model-code).",
+                        err=True,
+                    )
+                    raise typer.Exit(2)
+                from corpus_studio.platform.contracts import ModelCodeVettingReport  # noqa: PLC0415
+
+                try:
+                    bundle_bytes = custom_code_bundle.read_bytes()
+                    vetting_bytes = custom_code_vetting.read_bytes()
+                    vetting_report = ModelCodeVettingReport.model_validate_json(vetting_bytes)
+                except (OSError, ValueError, ValidationError) as exc:
+                    typer.echo(f"cannot read the custom-code inputs: {exc}", err=True)
+                    raise typer.Exit(2) from exc
+                if vetting_report.verdict != "admitted":
+                    typer.echo(
+                        "the vetting report did not admit this bundle; resolve its findings and re-run "
+                        "vet-model-code before planning.",
+                        err=True,
+                    )
+                    raise typer.Exit(2)
+                if vetting_report.bundle_sha256 != hashlib.sha256(bundle_bytes).hexdigest():
+                    typer.echo(
+                        "the vetting report does not match the bundle bytes (it screened different code); "
+                        "re-run vet-model-code on this exact bundle.",
+                        err=True,
+                    )
+                    raise typer.Exit(2)
+                custom_code_bundle_ref_id = str(custom_code_bundle)
+                custom_code_bundle_ref_sha256 = vetting_report.bundle_sha256
+                custom_code_entry_symbol = vetting_report.entry_symbol
+                custom_code_interface_version = vetting_report.interface_version
+                custom_code_vetting_ref_id = str(custom_code_vetting)
+                custom_code_vetting_ref_sha256 = hashlib.sha256(vetting_bytes).hexdigest()
+            elif custom_code_bundle is not None or custom_code_vetting is not None:
                 typer.echo(
-                    "cannot plan a run against a custom_decoder architecture: no reference implementation "
-                    "builds it, and the custom-block path (your own model code) is not yet available. "
-                    "Compose onto a known block, or base on a family.",
+                    "--custom-code-bundle / --custom-code-vetting apply only to a custom_decoder "
+                    "architecture (a family or composed-on-standard-blocks design needs no custom code).",
                     err=True,
                 )
                 raise typer.Exit(2)
@@ -1224,6 +1287,12 @@ def platform_plan(
         init_mode=init_mode,
         architecture_ref_id=pretraining_arch_ref_id,
         architecture_ref_sha256=pretraining_arch_ref_sha256,
+        custom_code_bundle_ref_id=custom_code_bundle_ref_id,
+        custom_code_bundle_ref_sha256=custom_code_bundle_ref_sha256,
+        custom_code_entry_symbol=custom_code_entry_symbol,
+        custom_code_interface_version=custom_code_interface_version,
+        custom_code_vetting_ref_id=custom_code_vetting_ref_id,
+        custom_code_vetting_ref_sha256=custom_code_vetting_ref_sha256,
         init_vocab_size=init_vocab_size,
         init_seed=init_seed,
         source_checkpoint_ref_id=(base_model if init_mode == "continued" else None),

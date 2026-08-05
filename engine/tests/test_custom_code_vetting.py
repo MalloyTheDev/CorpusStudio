@@ -147,3 +147,39 @@ def test_cli_reports_an_unreadable_bundle(tmp_path):
     result = _runner.invoke(app, ["vet-model-code", str(missing), "--entry-symbol", "C"])
     assert result.exit_code == 2
     assert "cannot read bundle" in result.output
+
+
+# ---- the sealed CustomModelCodeSpec (slice 1b contract) --------------------------------------------
+
+
+def _pinned(ref_id):
+    from corpus_studio.platform.common import HashRef, Ref
+
+    return Ref(id=ref_id, hash=HashRef(value="a" * 64))
+
+
+def test_custom_model_code_spec_requires_pinned_refs():
+    from corpus_studio.platform.common import Ref
+    from corpus_studio.platform.contracts import CustomModelCodeSpec
+
+    ok = CustomModelCodeSpec(
+        code_bundle_ref=_pinned("bundle"), entry_symbol="C", interface_version="custom_decoder_v1",
+        vetting_ref=_pinned("vet"), vetting_verdict="admitted",
+    )
+    assert ok.trust_remote_code is False
+    with pytest.raises(ValidationError):  # an UNPINNED code bundle cannot be sealed
+        CustomModelCodeSpec(
+            code_bundle_ref=Ref(id="bundle"), entry_symbol="C", interface_version="custom_decoder_v1",
+            vetting_ref=_pinned("vet"), vetting_verdict="admitted",
+        )
+
+
+def test_continued_init_forbids_custom_code():
+    from corpus_studio.platform.contracts import CustomModelCodeSpec, ModelInitializationSpec
+
+    cc = CustomModelCodeSpec(
+        code_bundle_ref=_pinned("b"), entry_symbol="C", interface_version="custom_decoder_v1",
+        vetting_ref=_pinned("v"), vetting_verdict="admitted",
+    )
+    with pytest.raises(ValidationError):  # continued init derives its architecture from the checkpoint
+        ModelInitializationSpec(mode="continued", source_checkpoint_ref=_pinned("ck"), custom_code=cc)

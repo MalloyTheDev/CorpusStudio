@@ -196,6 +196,48 @@
       "title": "CheckpointPolicy",
       "type": "object"
     },
+    "CustomModelCodeSpec": {
+      "additionalProperties": false,
+      "description": "A hash-pinned, ADMITTED local custom-block bundle for a from-scratch run - the mode-3 'your own\nmodel code' path (your own IMPLEMENTATION, the only not-borrowed mode). It seals WHICH exact bytes\n(``code_bundle_ref``) an ADMITTED :class:`ModelCodeVettingReport` (``vetting_ref``) screened, plus the\nentry class + interface. This path NEVER uses HF ``trust_remote_code`` (``Literal[False]``); the\nmodule is loaded locally, by path, from the pinned bundle.\n\nSealing this admits the design AT PLANNING; a static screen is not a safety proof, so EXECUTION stays\ngated behind the (later) worker sandbox exactly as pretraining itself is refused at the worker today.\nBoth refs must be hash-pinned so admission binds to specific bytes and cannot silently re-point.",
+      "properties": {
+        "code_bundle_ref": {
+          "$ref": "#/$defs/Ref"
+        },
+        "entry_symbol": {
+          "minLength": 1,
+          "title": "Entry Symbol",
+          "type": "string"
+        },
+        "interface_version": {
+          "const": "custom_decoder_v1",
+          "title": "Interface Version",
+          "type": "string"
+        },
+        "trust_remote_code": {
+          "const": false,
+          "default": false,
+          "title": "Trust Remote Code",
+          "type": "boolean"
+        },
+        "vetting_ref": {
+          "$ref": "#/$defs/Ref"
+        },
+        "vetting_verdict": {
+          "const": "admitted",
+          "title": "Vetting Verdict",
+          "type": "string"
+        }
+      },
+      "required": [
+        "code_bundle_ref",
+        "entry_symbol",
+        "interface_version",
+        "vetting_ref",
+        "vetting_verdict"
+      ],
+      "title": "CustomModelCodeSpec",
+      "type": "object"
+    },
     "DeviceMapEntry": {
       "additionalProperties": false,
       "properties": {
@@ -304,6 +346,17 @@
           "anyOf": [
             {
               "$ref": "#/$defs/Ref"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "custom_code": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CustomModelCodeSpec"
             },
             {
               "type": "null"
