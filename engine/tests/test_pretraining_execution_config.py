@@ -157,16 +157,40 @@ def test_continued_pretraining_config_seals():
 
 def test_seal_changes_when_the_init_vocab_changes():
     base = _pretrain_config()
+    # A different vocab is a different sealed identity - and the model + tokenizer vocab move together
+    # (the config seal enforces they agree).
     other = _pretrain_config(
         init=ModelInitializationSpec(
             mode="random",
             architecture_ref=Ref(id="arch:demo-small", hash=HashRef(value="c" * 64)),
             vocab_size=50000,
             init_seed=42,
-        )
+        ),
+        tokenizer_source=TokenizerSourceSpec(
+            mode="train",
+            algorithm="bpe",
+            vocab_size=50000,
+            special_tokens=["<bos>", "<eos>", "<pad>", "<unk>"],
+        ),
     )
     assert base.configuration_hash != other.configuration_hash
     assert verify_pretraining_execution_configuration_hash(other)
+
+
+def test_model_vocab_must_match_the_trained_tokenizer():
+    # A from-scratch model whose embedding vocab disagrees with its freshly-trained tokenizer would fail
+    # at train time; the seal refuses it fail-closed rather than sealing a guaranteed mismatch.
+    with pytest.raises(ValueError, match="must equal the trained tokenizer's vocab_size"):
+        ResolvedPretrainingExecutionConfiguration(
+            **_pretrain_fields(
+                tokenizer_source=TokenizerSourceSpec(
+                    mode="train",
+                    algorithm="bpe",
+                    vocab_size=16000,  # != the init/model vocab (32000)
+                    special_tokens=["<eos>"],
+                )
+            )
+        )
 
 
 # ---- fails closed on the pretraining-specific invariants -------------------------------------------

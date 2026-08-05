@@ -4336,6 +4336,19 @@ class ResolvedPretrainingExecutionConfiguration(ContractModel):
             raise ValueError(
                 "continued pretraining cannot train a new tokenizer (it must match the checkpoint)"
             )
+        # A from-scratch model's embedding must match the tokenizer it is trained with: a model vocab
+        # that disagrees with a freshly-trained tokenizer's vocab is a GUARANTEED embedding/vocab mismatch
+        # at train time. (import/freeze pin a tokenizer by hash - verified at load - so there is no count
+        # to compare there.)
+        if (
+            self.init.mode == "random"
+            and self.tokenizer_source.mode == "train"
+            and self.init.vocab_size != self.tokenizer_source.vocab_size
+        ):
+            raise ValueError(
+                "init.vocab_size must equal the trained tokenizer's vocab_size (the model embedding "
+                "must match its tokenizer)"
+            )
         # Full-parameter: an unquantized base with coherent storage/forward dtypes (no 4-bit path).
         if self.precision.quantized_storage_format != QuantizationMode.none:
             raise ValueError("full-parameter pretraining does not quantize the base (no 4-bit)")
