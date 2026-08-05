@@ -1551,6 +1551,125 @@ def platform_backends(
         )
 
 
+def _parse_param_count(text: str) -> int:
+    """Parse a friendly parameter target ('125M', '1B', '350000000') into an int (fail-closed)."""
+    cleaned = text.strip().upper()
+    multiplier = 1
+    if cleaned.endswith("K"):
+        multiplier, cleaned = 1_000, cleaned[:-1]
+    elif cleaned.endswith("M"):
+        multiplier, cleaned = 1_000_000, cleaned[:-1]
+    elif cleaned.endswith("B"):
+        multiplier, cleaned = 1_000_000_000, cleaned[:-1]
+    value = float(cleaned) * multiplier
+    if value <= 0:
+        raise ValueError("must be a positive parameter count (e.g. 125M, 1B)")
+    return int(value)
+
+
+@app.command("create-model")
+def create_model(
+    family: str = typer.Option("llama", "--family", help="Architecture family: llama or gpt2."),
+    preset: Optional[str] = typer.Option(
+        None, "--preset", help="Named starting point: tiny / small / base / large."
+    ),
+    params: Optional[str] = typer.Option(
+        None,
+        "--params",
+        help="Target parameter count (e.g. 125M, 1B) - solved to the nearest valid config.",
+    ),
+    hidden_size: Optional[int] = typer.Option(
+        None, "--hidden-size", help="Explicit hidden size (instead of --preset / --params)."
+    ),
+    num_layers: Optional[int] = typer.Option(None, "--num-layers", help="Explicit layer count."),
+    num_heads: Optional[int] = typer.Option(None, "--num-heads", help="Explicit attention heads."),
+    num_kv_heads: Optional[int] = typer.Option(
+        None, "--num-kv-heads", help="Grouped-query KV heads (defaults to --num-heads)."
+    ),
+    intermediate_size: Optional[int] = typer.Option(
+        None, "--intermediate-size", help="Explicit MLP intermediate size."
+    ),
+    vocab_size: int = typer.Option(
+        32000, "--vocab-size", help="Vocabulary size (match your tokenizer)."
+    ),
+    context_length: int = typer.Option(
+        4096, "--context-length", help="Maximum sequence length."
+    ),
+    tie_embeddings: Optional[bool] = typer.Option(
+        None,
+        "--tie-embeddings/--no-tie-embeddings",
+        help="Tie input/output embeddings (family default if unset).",
+    ),
+    out: Optional[Path] = typer.Option(
+        None,
+        "--out",
+        help="Write the architecture config JSON here (feeds 'platform-plan --architecture-config').",
+    ),
+    json_out: bool = typer.Option(
+        False, "--json", help="Emit the build result (config + estimate) as JSON to stdout."
+    ),
+):
+    """Create a fresh FROM-SCRATCH model architecture config - pick a --preset, a --params target, or
+    explicit dims. Writes a hash-pinnable architecture config for 'platform-plan --task-type pretraining
+    --architecture-config'. Torch-free: no model is instantiated here (that is the pretraining worker)."""
+    from corpus_studio.platform.architecture_builder import (  # noqa: PLC0415
+        ArchitectureBuilderError,
+        build_architecture,
+    )
+
+    target_parameters = None
+    if params is not None:
+        try:
+            target_parameters = _parse_param_count(params)
+        except ValueError as exc:
+            typer.echo(f"invalid --params: {exc}", err=True)
+            raise typer.Exit(2) from exc
+    try:
+        built = build_architecture(
+            family,  # type: ignore[arg-type]
+            preset=preset,
+            target_parameters=target_parameters,
+            hidden_size=hidden_size,
+            num_hidden_layers=num_layers,
+            num_attention_heads=num_heads,
+            num_key_value_heads=num_kv_heads,
+            intermediate_size=intermediate_size,
+            vocab_size=vocab_size,
+            max_position_embeddings=context_length,
+            tie_word_embeddings=tie_embeddings,
+        )
+    except ArchitectureBuilderError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(2) from exc
+    if out is not None:
+        out.write_text(json.dumps(built.config, indent=2), encoding="utf-8")
+    if json_out:
+        typer.echo(
+            json.dumps(
+                {
+                    "family": built.family,
+                    "config": built.config,
+                    "estimated_parameters": built.estimated_parameters,
+                    "hidden_size": built.hidden_size,
+                    "num_hidden_layers": built.num_hidden_layers,
+                    "num_attention_heads": built.num_attention_heads,
+                    "intermediate_size": built.intermediate_size,
+                    "vocab_size": built.vocab_size,
+                },
+                indent=2,
+            )
+        )
+        return
+    approx_m = built.estimated_parameters / 1e6
+    typer.echo(
+        f"{built.family}: hidden={built.hidden_size} layers={built.num_hidden_layers} "
+        f"heads={built.num_attention_heads} intermediate={built.intermediate_size} "
+        f"vocab={built.vocab_size} -> ~{approx_m:.1f}M parameters (estimate)"
+    )
+    if out is not None:
+        typer.echo(f"wrote architecture config to {out}")
+
+
 @app.command("model-inspect")
 def model_inspect(
     path: Path = typer.Argument(..., help="Local model snapshot directory (offline inspection)."),
