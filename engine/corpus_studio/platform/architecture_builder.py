@@ -327,18 +327,19 @@ def _finalize(
     # a cross-cutting GQA knob, honored in every mode).
     if preset is not None or target_parameters is not None:
         ignored = [
-            flag
-            for flag, val in (
-                ("num_hidden_layers", num_hidden_layers),
-                ("num_attention_heads", num_attention_heads),
-                ("intermediate_size", intermediate_size),
+            label
+            for label, val in (
+                ("layer count", num_hidden_layers),
+                ("head count", num_attention_heads),
+                ("intermediate size", intermediate_size),
             )
             if val is not None
         ]
         if ignored:
+            # Plain labels, not internal field names: this error surfaces at the CLI.
             raise ArchitectureBuilderError(
-                f"{', '.join(ignored)} apply only to explicit hidden_size sizing; a preset or a target "
-                "parameter count computes them"
+                f"an explicit {', '.join(ignored)} applies only to explicit hidden_size sizing; a preset "
+                "or a target parameter count computes it"
             )
     if preset is not None:
         if preset not in _PRESETS:

@@ -1685,19 +1685,22 @@ def create_model(
     # Block-shape flags DESIGN a composed architecture; a family's shape is fixed. Refuse them in family
     # mode rather than silently ignoring what the user typed (an ignored flag is a broken control).
     if from_family is not None:
-        block_flags = {
-            "positions": "--positions", "mlp": "--mlp", "activation": "--activation",
-            "norm": "--norm", "attention_bias": "--attention-bias", "mlp_bias": "--mlp-bias",
-            "intermediate_ratio": "--intermediate-ratio",
-        }
+        block_params = (
+            "positions", "mlp", "activation", "norm", "attention_bias", "mlp_bias", "intermediate_ratio",
+        )
         # Compare the ParameterSource by NAME, not identity: click re-exports the enum such that the
         # imported member is not the same object the Context returns, so `== COMMANDLINE` is False.
-        supplied = [
-            flag
-            for param, flag in block_flags.items()
-            if getattr(ctx.get_parameter_source(param), "name", "") == "COMMANDLINE"
+        supplied_names = [
+            p for p in block_params
+            if getattr(ctx.get_parameter_source(p), "name", "") == "COMMANDLINE"
         ]
-        if supplied:
+        if supplied_names:
+            # Derive each flag's spelling from the command's own parameters - no hand-maintained mapping
+            # to drift if an option is renamed.
+            flag_by_name = {
+                p.name: (p.opts[0] if p.opts else f"--{p.name}") for p in ctx.command.params
+            }
+            supplied = [flag_by_name.get(n, f"--{n}") for n in supplied_names]
             typer.echo(
                 f"{', '.join(supplied)} only apply to --compose (a family's architecture is fixed); "
                 "use --compose to design your own block shape.",

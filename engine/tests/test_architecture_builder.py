@@ -318,7 +318,7 @@ def test_composed_standard_mlp_is_not_undersized_via_cli():
 def test_explicit_dims_with_a_preset_are_refused_not_ignored():
     # AUDIT: num_layers / num_heads / intermediate_size refine explicit hidden_size sizing only; combining
     # them with a preset once silently ignored them.
-    with pytest.raises(ArchitectureBuilderError, match="apply only to explicit hidden_size"):
+    with pytest.raises(ArchitectureBuilderError, match="explicit hidden_size sizing"):
         build_from_family("llama", preset="small", num_hidden_layers=8)
     result = _runner.invoke(
         app, ["create-model", "--from-family", "llama", "--preset", "small", "--num-layers", "8"]
