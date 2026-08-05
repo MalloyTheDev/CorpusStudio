@@ -414,8 +414,9 @@ def test_planner_admits_the_dense_qlora_sft_task_and_refuses_unexecutable_varian
     # to it and the plan builds; a task whose shape the first-party harness cannot execute is refused
     # FAIL-CLOSED at planning - never silently downgraded to dense_qlora_sft.
     assert _plan(_profile(cc_major=8), _report(), task_type="sft").resolved_execution is not None
-    # pretraining maps to a contract_validated shape -> ADMITTED at planning (like DPO); its dedicated
-    # builder then requires a corpus, so without one it fails THERE, not at the variant admission gate.
+    # pretraining maps to a worker_implemented shape -> ADMITTED at planning (below workload_verified, so
+    # still refused at execution); its dedicated builder then requires a corpus, so without one it fails
+    # THERE, not at the variant admission gate.
     with pytest.raises(PlannerError, match="requires a corpus"):
         _plan(_profile(cc_major=8), _report(), task_type="pretraining")
     # a preference request must name its objective; without one it maps to no shape -> refused.

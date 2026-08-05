@@ -63,8 +63,9 @@ PREFERENCE_NOT_EXECUTABLE_REASON = (
 
 PRETRAINING_NOT_EXECUTABLE_REASON = (
     "this is a sealed pretraining plan - admitted at planning but not yet executable: 'pretraining' is "
-    "contract_validated, not workload_verified. The pretraining worker loop (from_config init, corpus "
-    "streaming, packing), a workload-verified run, and the milestone wheel are the gated next step."
+    "worker_implemented (the from_config worker loop + packed corpus + both tokenizer paths exist and are "
+    "CPU-proven), not workload_verified. The sealed runner dispatch + execution-evidence, a measured GPU "
+    "run, and the milestone wheel are the gated next step."
 )
 
 

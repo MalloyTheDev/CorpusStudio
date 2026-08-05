@@ -115,7 +115,10 @@ def reference_execution_variants() -> tuple[BackendExecutionVariant, ...]:
         BackendExecutionVariant(
             backend_id="corpus_studio",
             variant_kind=ExecutionVariantKind.pretraining,
-            support=ExecutionVariantSupport.contract_validated,
+            # worker_implemented: run_pretraining (from_config init + packed corpus + both tokenizer paths)
+            # exists and is CPU-proven (#799/#801/#802); still below workload_verified, so refused at
+            # execution until a measured GPU run + the milestone wheel earn it.
+            support=ExecutionVariantSupport.worker_implemented,
         ),
         BackendExecutionVariant(
             backend_id="corpus_studio",
