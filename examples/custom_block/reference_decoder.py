@@ -38,7 +38,12 @@ class ReferenceDecoderForCausalLM(nn.Module):
         self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
 
     def forward(self, input_ids, attention_mask=None, labels=None):
-        causal = nn.Transformer.generate_square_subsequent_mask(input_ids.size(1)).to(input_ids.device)
+        # attention_mask (padding) is accepted for interface compatibility with HF-style trainers; this
+        # minimal reference trains on packed sequences and relies on the causal mask alone.
+        seq_len = input_ids.size(1)
+        causal = torch.triu(
+            torch.full((seq_len, seq_len), float("-inf"), device=input_ids.device), diagonal=1
+        )
         hidden = self.embed_tokens(input_ids)
         for layer in self.layers:
             hidden = layer(hidden, src_mask=causal)

@@ -137,7 +137,9 @@ def _entry_class_present(tree: ast.Module, entry_symbol: str, findings: list[Vet
             _err("entry-class-missing", f"the entry class '{entry_symbol}' is not defined at module level")
         )
         return
-    base_names = {_base_name(b) for b in entry.bases}
+    # Drop empty names (an exotic base expression that is neither a Name nor an Attribute) so a diagnostic
+    # never reads "bases are ['']".
+    base_names = {name for name in (_base_name(b) for b in entry.bases) if name}
     if not (base_names & _MODEL_BASES):
         findings.append(
             _err(
