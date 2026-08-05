@@ -955,3 +955,65 @@ def test_platform_plan_pretraining_from_scratch_through_the_cli(monkeypatch, tmp
     assert cfg["objective_ref"]["id"] == "pretraining"
     assert cfg["tokenizer_source"]["mode"] == "train"
     assert cfg["tokenizer_source"]["vocab_size"] == 32000
+
+
+def _pretraining_cli_args(tmp_path):
+    manifest = tmp_path / "corpus.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "shards": [
+                    {
+                        "shard_id": "s0",
+                        "location": "corpus/s0.jsonl",
+                        "source": "web",
+                        "row_count": 100,
+                        "token_count": 100000,
+                        "content_sha256": "d" * 64,
+                    }
+                ],
+                "data_seed": 42,
+                "global_batch_size": 8,
+                "token_budget": 1000000,
+            }
+        ),
+        encoding="utf-8",
+    )
+    arch = tmp_path / "config.json"
+    arch.write_text(
+        json.dumps({"model_type": "llama", "hidden_size": 256, "vocab_size": 32000}),
+        encoding="utf-8",
+    )
+    return [
+        "platform-plan",
+        "--base-model", "arch:demo",
+        "--dataset", str(manifest),
+        "--task-type", "pretraining",
+        "--init-mode", "random",
+        "--architecture-config", str(arch),
+        "--tokenizer-source", "train",
+        "--tokenizer-algorithm", "bpe",
+        "--tokenizer-vocab-size", "32000",
+        "--tokenizer-special-tokens", "<eos>",
+    ]
+
+
+def test_platform_plan_pretraining_defaults_model_vocab_to_the_arch_config(monkeypatch, tmp_path):
+    # AUDIT fix: the architecture config's vocab_size is the model's embedding size - default the model
+    # vocab to it (the operator need not re-type it), and it flows into the sealed init spec.
+    _ready_host(monkeypatch)
+    result = runner.invoke(app, [*_pretraining_cli_args(tmp_path), "--json"])
+    assert result.exit_code == 0, result.output
+    cfg = json.loads(result.stdout)["run_plan"]["resolved_pretraining_execution"]
+    assert cfg["init"]["vocab_size"] == 32000
+
+
+def test_platform_plan_pretraining_refuses_a_vocab_that_contradicts_the_arch_config(monkeypatch, tmp_path):
+    # AUDIT fix: an explicit --init-vocab-size that disagrees with the architecture config is refused
+    # fail-closed (a silent mismatch would seal a broken model).
+    _ready_host(monkeypatch)
+    result = runner.invoke(
+        app, [*_pretraining_cli_args(tmp_path), "--init-vocab-size", "50000", "--json"]
+    )
+    assert result.exit_code == 2
+    assert "contradicts the architecture config" in result.output
