@@ -1019,23 +1019,41 @@ def test_platform_plan_pretraining_refuses_a_vocab_that_contradicts_the_arch_con
     assert "contradicts the architecture config" in result.output
 
 
-def test_platform_plan_refuses_a_custom_decoder_arch_config(monkeypatch, tmp_path):
-    # AUDIT (Codex): a composed design no reference implementation builds (model_type "custom_decoder")
-    # needs the not-yet-shipped custom-block path - sealing a plan for an implementation that does not
-    # exist would be a lie, so planning must REFUSE fail-closed, not warn-and-seal.
-    _ready_host(monkeypatch)
+def _admitted_custom_decoder(tmp_path):
+    """A custom_decoder arch config + an admitted vetting report for a clean bundle. Returns
+    (pretraining args, bundle path, vetting path)."""
+    from corpus_studio.platform.custom_code_vetting import build_report
+
     args = _pretraining_cli_args(tmp_path)
     (tmp_path / "config.json").write_text(
-        json.dumps({"model_type": "custom_decoder", "hidden_size": 256, "vocab_size": 32000}),
+        json.dumps(
+            {"model_type": "custom_decoder", "corpus_studio_needs_custom_code": True, "vocab_size": 32000}
+        ),
         encoding="utf-8",
     )
+    bundle = tmp_path / "block.py"
+    bundle.write_text(
+        "import torch\n\nclass MyBlock(torch.nn.Module):\n    def forward(self, x):\n        return x\n",
+        encoding="utf-8",
+    )
+    report = build_report(bundle.read_bytes(), entry_symbol="MyBlock")
+    vetting = tmp_path / "vetting.json"
+    vetting.write_text(json.dumps(report.model_dump(mode="json")), encoding="utf-8")
+    return args, bundle, vetting
+
+
+def test_platform_plan_refuses_a_custom_decoder_without_admission(monkeypatch, tmp_path):
+    # The mode-3 gate: a custom_decoder plan is refused WITHOUT an admitted custom-block bundle. Execution
+    # stays gated at the worker regardless of admission.
+    _ready_host(monkeypatch)
+    args, _bundle, _vetting = _admitted_custom_decoder(tmp_path)
     result = runner.invoke(app, [*args, "--json"])
     assert result.exit_code == 2, result.output
-    assert "custom_decoder" in result.output
+    assert "custom_decoder architecture requires" in result.output
 
 
 def test_platform_plan_refuses_a_needs_custom_code_marker(monkeypatch, tmp_path):
-    # The durable marker is honored even if model_type is renamed - defense in depth.
+    # The durable marker triggers the same admission gate even if model_type is renamed - defense in depth.
     _ready_host(monkeypatch)
     args = _pretraining_cli_args(tmp_path)
     (tmp_path / "config.json").write_text(
@@ -1046,3 +1064,65 @@ def test_platform_plan_refuses_a_needs_custom_code_marker(monkeypatch, tmp_path)
     )
     result = runner.invoke(app, [*args, "--json"])
     assert result.exit_code == 2, result.output
+
+
+def test_platform_plan_seals_an_admitted_custom_decoder(monkeypatch, tmp_path):
+    # The valid mode-3 path: an admitted, hash-matching bundle seals a CustomModelCodeSpec into the init.
+    _ready_host(monkeypatch)
+    args, bundle, vetting = _admitted_custom_decoder(tmp_path)
+    result = runner.invoke(
+        app,
+        [*args, "--custom-code-bundle", str(bundle), "--custom-code-vetting", str(vetting), "--json"],
+    )
+    assert result.exit_code == 0, result.output
+    cc = json.loads(result.stdout)["run_plan"]["resolved_pretraining_execution"]["init"]["custom_code"]
+    assert cc is not None
+    assert cc["entry_symbol"] == "MyBlock" and cc["vetting_verdict"] == "admitted"
+    assert cc["trust_remote_code"] is False
+    assert cc["code_bundle_ref"]["hash"]["value"] == cc["code_bundle_ref"]["hash"]["value"]
+
+
+def test_platform_plan_refuses_a_rejected_vetting(monkeypatch, tmp_path):
+    _ready_host(monkeypatch)
+    from corpus_studio.platform.custom_code_vetting import build_report
+
+    args, bundle, vetting = _admitted_custom_decoder(tmp_path)
+    rejected = build_report(b"import os\nclass MyBlock:\n    pass\n", entry_symbol="MyBlock")
+    vetting.write_text(json.dumps(rejected.model_dump(mode="json")), encoding="utf-8")
+    result = runner.invoke(
+        app,
+        [*args, "--custom-code-bundle", str(bundle), "--custom-code-vetting", str(vetting), "--json"],
+    )
+    assert result.exit_code == 2, result.output
+
+
+def test_platform_plan_refuses_a_vetting_that_does_not_match_the_bundle(monkeypatch, tmp_path):
+    # An admitted report for DIFFERENT bytes must not admit a tampered bundle (the hash binds admission).
+    _ready_host(monkeypatch)
+    args, bundle, vetting = _admitted_custom_decoder(tmp_path)
+    bundle.write_text(
+        "import torch\n\nclass MyBlock(torch.nn.Module):\n    def forward(self, x):\n        return x + 1\n",
+        encoding="utf-8",
+    )
+    result = runner.invoke(
+        app,
+        [*args, "--custom-code-bundle", str(bundle), "--custom-code-vetting", str(vetting), "--json"],
+    )
+    assert result.exit_code == 2, result.output
+    assert "does not match the bundle bytes" in result.output
+
+
+def test_platform_plan_refuses_custom_code_flags_on_a_standard_arch(monkeypatch, tmp_path):
+    # A family / composed-on-standard-blocks design needs no custom code; flags there are refused.
+    _ready_host(monkeypatch)
+    args = _pretraining_cli_args(tmp_path)  # a llama arch config
+    bundle = tmp_path / "b.py"
+    bundle.write_text("class C:\n    pass\n", encoding="utf-8")
+    vetting = tmp_path / "v.json"
+    vetting.write_text("{}", encoding="utf-8")
+    result = runner.invoke(
+        app,
+        [*args, "--custom-code-bundle", str(bundle), "--custom-code-vetting", str(vetting), "--json"],
+    )
+    assert result.exit_code == 2, result.output
+    assert "custom_decoder" in result.output

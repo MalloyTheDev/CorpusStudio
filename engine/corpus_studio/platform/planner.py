@@ -50,6 +50,7 @@ from corpus_studio.platform.backends import (
 from corpus_studio.platform.contracts import (
     AttentionExecutionPolicy,
     CapabilityReport,
+    CustomModelCodeSpec,
     DeviceMapEntry,
     EnvironmentProfile,
     ExecutionInputBinding,
@@ -218,6 +219,14 @@ class PlannerConstraints:
     tokenizer_vocab_size: int | None = None
     tokenizer_special_tokens: tuple[str, ...] | None = None
     tokenizer_min_frequency: int | None = None
+    # Custom-block (mode 3): a hash-pinned, ADMITTED local code bundle. Set only for a custom_decoder
+    # architecture; the platform-plan layer verifies the vetting report admitted these exact bytes first.
+    custom_code_bundle_ref_id: str | None = None
+    custom_code_bundle_ref_sha256: str | None = None
+    custom_code_entry_symbol: str | None = None
+    custom_code_interface_version: str | None = None
+    custom_code_vetting_ref_id: str | None = None
+    custom_code_vetting_ref_sha256: str | None = None
 
 
 def _require_enum(value: str, enum_cls: type[Enum], label: str) -> None:
@@ -959,6 +968,26 @@ def _resolve_preference_execution(
     )
 
 
+def _custom_code_spec(constraints: PlannerConstraints) -> CustomModelCodeSpec | None:
+    """The ADMITTED custom-block spec when platform-plan verified + set its fields (all-or-nothing); else
+    None. Any partial set trips the contract validators, surfaced as a PlannerError by the caller."""
+    if constraints.custom_code_bundle_ref_id is None:
+        return None
+    return CustomModelCodeSpec(
+        code_bundle_ref=Ref(
+            id=constraints.custom_code_bundle_ref_id,
+            hash=HashRef(value=constraints.custom_code_bundle_ref_sha256),
+        ),
+        entry_symbol=constraints.custom_code_entry_symbol or "",
+        interface_version=constraints.custom_code_interface_version,  # type: ignore[arg-type]
+        vetting_ref=Ref(
+            id=constraints.custom_code_vetting_ref_id or "",
+            hash=HashRef(value=constraints.custom_code_vetting_ref_sha256),
+        ),
+        vetting_verdict="admitted",
+    )
+
+
 def _pretraining_init_spec(constraints: PlannerConstraints) -> ModelInitializationSpec:
     """Lower the operator's init knobs into a sealed :class:`ModelInitializationSpec`, fail-closed with a
     clean :class:`PlannerError` (never a raw pydantic error) so missing intent surfaces, not hides."""
@@ -987,6 +1016,7 @@ def _pretraining_init_spec(constraints: PlannerConstraints) -> ModelInitializati
                     constraints.init_seed if constraints.init_seed is not None else constraints.seed
                 ),
                 initializer_range=constraints.init_initializer_range,
+                custom_code=_custom_code_spec(constraints),
             )
         if (
             constraints.source_checkpoint_ref_id is None

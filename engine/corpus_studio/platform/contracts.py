@@ -4165,6 +4165,33 @@ class ResolvedPreferenceExecutionConfiguration(ContractModel):
         return self
 
 
+class CustomModelCodeSpec(ContractModel):
+    """A hash-pinned, ADMITTED local custom-block bundle for a from-scratch run - the mode-3 'your own
+    model code' path (your own IMPLEMENTATION, the only not-borrowed mode). It seals WHICH exact bytes
+    (``code_bundle_ref``) an ADMITTED :class:`ModelCodeVettingReport` (``vetting_ref``) screened, plus the
+    entry class + interface. This path NEVER uses HF ``trust_remote_code`` (``Literal[False]``); the
+    module is loaded locally, by path, from the pinned bundle.
+
+    Sealing this admits the design AT PLANNING; a static screen is not a safety proof, so EXECUTION stays
+    gated behind the (later) worker sandbox exactly as pretraining itself is refused at the worker today.
+    Both refs must be hash-pinned so admission binds to specific bytes and cannot silently re-point."""
+
+    code_bundle_ref: Ref
+    entry_symbol: str = Field(min_length=1)
+    interface_version: Literal["custom_decoder_v1"]
+    vetting_ref: Ref
+    vetting_verdict: Literal["admitted"]
+    trust_remote_code: Literal[False] = False
+
+    @model_validator(mode="after")
+    def _validate_custom_code(self) -> CustomModelCodeSpec:
+        if not _is_pinned_ref(self.code_bundle_ref):
+            raise ValueError("custom code requires a hash-pinned code_bundle_ref")
+        if not _is_pinned_ref(self.vetting_ref):
+            raise ValueError("custom code requires a hash-pinned vetting_ref")
+        return self
+
+
 class ModelInitializationSpec(ContractModel):
     """How a PRETRAINING run instantiates its model. From-scratch has NO source weights: it builds a
     model from an architecture config with reproducible random init (the worker's ``from_config`` path,
@@ -4180,6 +4207,9 @@ class ModelInitializationSpec(ContractModel):
     max_position_embeddings: int | None = Field(default=None, ge=1)
     init_seed: int | None = Field(default=None, ge=0)
     initializer_range: float | None = Field(default=None, gt=0)
+    # random init, mode-3 only: an ADMITTED custom-block bundle (else the architecture is a known family
+    # or a composed-on-standard-blocks design that needs no custom code).
+    custom_code: CustomModelCodeSpec | None = None
     # continued init: the exact source checkpoint + what carries vs resets.
     source_checkpoint_ref: Ref | None = None
     reset_optimizer: bool = True
@@ -4202,6 +4232,8 @@ class ModelInitializationSpec(ContractModel):
                 raise ValueError("continued init requires a hash-pinned source_checkpoint_ref")
             if self.architecture_ref is not None:
                 raise ValueError("continued init derives its architecture from the checkpoint")
+            if self.custom_code is not None:
+                raise ValueError("continued init derives its architecture from the checkpoint (no custom code)")
         return self
 
 
@@ -6315,6 +6347,14 @@ class TrainingPlanParameters(ContractModel):
     tokenizer_vocab_size: int | None = None
     tokenizer_special_tokens: tuple[str, ...] | None = None
     tokenizer_min_frequency: int | None = None
+    # Custom-block (mode 3): mirror of the PlannerConstraints admission fields (kept field-for-field so
+    # the resolver copies parameters -> constraints verbatim). Set only for an admitted custom_decoder.
+    custom_code_bundle_ref_id: str | None = None
+    custom_code_bundle_ref_sha256: str | None = None
+    custom_code_entry_symbol: str | None = None
+    custom_code_interface_version: str | None = None
+    custom_code_vetting_ref_id: str | None = None
+    custom_code_vetting_ref_sha256: str | None = None
 
 
 class TrainingPlanComposition(ContractModel):

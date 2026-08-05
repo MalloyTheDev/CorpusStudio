@@ -309,6 +309,78 @@
           "default": null,
           "title": "Checkpoint Steps"
         },
+        "custom_code_bundle_ref_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Custom Code Bundle Ref Id"
+        },
+        "custom_code_bundle_ref_sha256": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Custom Code Bundle Ref Sha256"
+        },
+        "custom_code_entry_symbol": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Custom Code Entry Symbol"
+        },
+        "custom_code_interface_version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Custom Code Interface Version"
+        },
+        "custom_code_vetting_ref_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Custom Code Vetting Ref Id"
+        },
+        "custom_code_vetting_ref_sha256": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Custom Code Vetting Ref Sha256"
+        },
         "data_seed": {
           "anyOf": [
             {
