@@ -1159,6 +1159,22 @@ def platform_plan(
                 raise typer.Exit(2) from exc
             pretraining_arch_ref_id = str(architecture_config)
             pretraining_arch_ref_sha256 = hashlib.sha256(arch_bytes).hexdigest()
+            # A composed design that no reference implementation builds is emitted with model_type
+            # "custom_decoder" (and a corpus_studio_needs_custom_code marker): it needs the not-yet-shipped,
+            # security-gated custom-block path. Sealing a plan for an implementation that does not exist
+            # would be a lie, so REFUSE fail-closed rather than warn - honesty invariant "installed !=
+            # supported".
+            if isinstance(arch_config_json, dict) and (
+                arch_config_json.get("model_type") == "custom_decoder"
+                or arch_config_json.get("corpus_studio_needs_custom_code") is True
+            ):
+                typer.echo(
+                    "cannot plan a run against a custom_decoder architecture: no reference implementation "
+                    "builds it, and the custom-block path (your own model code) is not yet available. "
+                    "Compose onto a known block, or base on a family.",
+                    err=True,
+                )
+                raise typer.Exit(2)
             # The architecture config's vocab_size IS the model's embedding size: default --init-vocab-size
             # to it, and refuse an explicit value that contradicts it (a silent mismatch = a broken model).
             arch_vocab = (
@@ -1587,18 +1603,44 @@ def _parse_param_count(text: str) -> int:
 
 @app.command("create-model")
 def create_model(
-    family: str = typer.Option("llama", "--family", help="Architecture family: llama or gpt2."),
+    from_family: Optional[str] = typer.Option(
+        None,
+        "--from-family",
+        help="BASE ON a known architecture (llama / mistral / qwen2 / qwen3 / gemma / gemma2 / phi / "
+        "phi3 / starcoder2 / stablelm / gpt2 / gpt_neox). The result is BASED ON that family - not your "
+        "own design. Use --compose to design your own.",
+    ),
+    compose: bool = typer.Option(
+        False,
+        "--compose",
+        help="COMPOSE your OWN architecture from building blocks (--positions / --mlp / --norm / ...) "
+        "+ your --name. Your design; realized on the matching reference block implementation.",
+    ),
+    name: Optional[str] = typer.Option(
+        None, "--name", help="Your model's name (required for --compose; defaults to the family name)."
+    ),
+    positions: str = typer.Option(
+        "rope", "--positions", help="Compose: position scheme - rope or learned."
+    ),
+    mlp: str = typer.Option("gated", "--mlp", help="Compose: MLP shape - gated (SwiGLU) or standard."),
+    activation: str = typer.Option("silu", "--activation", help="Compose: MLP activation."),
+    norm: str = typer.Option("rmsnorm", "--norm", help="Compose: normalization - rmsnorm or layernorm."),
+    attention_bias: bool = typer.Option(
+        False, "--attention-bias/--no-attention-bias", help="Compose: bias on attention projections."
+    ),
+    mlp_bias: bool = typer.Option(
+        False, "--mlp-bias/--no-mlp-bias", help="Compose: bias on MLP projections."
+    ),
+    intermediate_ratio: float = typer.Option(
+        2.6667, "--intermediate-ratio", help="Compose: MLP intermediate / hidden default ratio."
+    ),
     preset: Optional[str] = typer.Option(
-        None, "--preset", help="Named starting point: tiny / small / base / large."
+        None, "--preset", help="Size: tiny / small / base / large."
     ),
     params: Optional[str] = typer.Option(
-        None,
-        "--params",
-        help="Target parameter count (e.g. 125M, 1B) - solved to the nearest valid config.",
+        None, "--params", help="Size: target parameter count (e.g. 125M, 1B) - solved to the nearest config."
     ),
-    hidden_size: Optional[int] = typer.Option(
-        None, "--hidden-size", help="Explicit hidden size (instead of --preset / --params)."
-    ),
+    hidden_size: Optional[int] = typer.Option(None, "--hidden-size", help="Size: explicit hidden size."),
     num_layers: Optional[int] = typer.Option(None, "--num-layers", help="Explicit layer count."),
     num_heads: Optional[int] = typer.Option(None, "--num-heads", help="Explicit attention heads."),
     num_kv_heads: Optional[int] = typer.Option(
@@ -1610,13 +1652,9 @@ def create_model(
     vocab_size: int = typer.Option(
         32000, "--vocab-size", help="Vocabulary size (match your tokenizer)."
     ),
-    context_length: int = typer.Option(
-        4096, "--context-length", help="Maximum sequence length."
-    ),
+    context_length: int = typer.Option(4096, "--context-length", help="Maximum sequence length."),
     tie_embeddings: Optional[bool] = typer.Option(
-        None,
-        "--tie-embeddings/--no-tie-embeddings",
-        help="Tie input/output embeddings (family default if unset).",
+        None, "--tie-embeddings/--no-tie-embeddings", help="Tie input/output embeddings."
     ),
     out: Optional[Path] = typer.Option(
         None,
@@ -1624,17 +1662,23 @@ def create_model(
         help="Write the architecture config JSON here (feeds 'platform-plan --architecture-config').",
     ),
     json_out: bool = typer.Option(
-        False, "--json", help="Emit the build result (config + estimate) as JSON to stdout."
+        False, "--json", help="Emit the build result (config + estimate + provenance) as JSON."
     ),
 ):
-    """Create a fresh FROM-SCRATCH model architecture config - pick a --preset, a --params target, or
-    explicit dims. Writes a hash-pinnable architecture config for 'platform-plan --task-type pretraining
-    --architecture-config'. Torch-free: no model is instantiated here (that is the pretraining worker)."""
+    """Create a from-scratch model architecture config. Two HONEST modes:
+    --from-family <name> configures a KNOWN architecture (based on that family, NOT your own); --compose
+    designs YOUR OWN from building blocks (--positions / --mlp / --norm / ...) + --name. Torch-free: no
+    model is instantiated here (that is the pretraining worker). A composed design no reference
+    implementation builds is flagged 'needs custom code' (the custom-block path)."""
     from corpus_studio.platform.architecture_builder import (  # noqa: PLC0415
         ArchitectureBuilderError,
-        build_architecture,
+        build_composed,
+        build_from_family,
     )
 
+    if (from_family is not None) == compose:
+        typer.echo("specify exactly one of --from-family <name> or --compose", err=True)
+        raise typer.Exit(2)
     target_parameters = None
     if params is not None:
         try:
@@ -1642,31 +1686,54 @@ def create_model(
         except ValueError as exc:
             typer.echo(f"invalid --params: {exc}", err=True)
             raise typer.Exit(2) from exc
+    sizing: dict[str, Any] = dict(
+        preset=preset,
+        target_parameters=target_parameters,
+        hidden_size=hidden_size,
+        num_hidden_layers=num_layers,
+        num_attention_heads=num_heads,
+        num_key_value_heads=num_kv_heads,
+        intermediate_size=intermediate_size,
+        vocab_size=vocab_size,
+        max_position_embeddings=context_length,
+    )
     try:
-        built = build_architecture(
-            family,  # type: ignore[arg-type]
-            preset=preset,
-            target_parameters=target_parameters,
-            hidden_size=hidden_size,
-            num_hidden_layers=num_layers,
-            num_attention_heads=num_heads,
-            num_key_value_heads=num_kv_heads,
-            intermediate_size=intermediate_size,
-            vocab_size=vocab_size,
-            max_position_embeddings=context_length,
-            tie_word_embeddings=tie_embeddings,
-        )
+        if compose:
+            if name is None:
+                typer.echo("--compose requires --name (name your own model)", err=True)
+                raise typer.Exit(2)
+            if mlp not in {"gated", "standard"}:
+                typer.echo("--mlp must be 'gated' or 'standard'", err=True)
+                raise typer.Exit(2)
+            built = build_composed(
+                name=name,
+                positions=positions,
+                gated_mlp=(mlp == "gated"),
+                activation=activation,
+                norm=norm,
+                attention_bias=attention_bias,
+                mlp_bias=mlp_bias,
+                tie_embeddings=bool(tie_embeddings),
+                intermediate_ratio=intermediate_ratio,
+                **sizing,
+            )
+        else:
+            built = build_from_family(
+                from_family,  # type: ignore[arg-type]
+                name=name,
+                tie_word_embeddings=tie_embeddings,
+                **sizing,
+            )
     except ArchitectureBuilderError as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(2) from exc
-    # No silent truncation of the ask: if the closest valid config is far from a --params target, say so.
+    # No silent truncation of a --params ask.
     if target_parameters is not None:
         drift = abs(built.estimated_parameters - target_parameters) / target_parameters
         if drift > 0.25:
             typer.echo(
                 f"note: the nearest valid config is ~{built.estimated_parameters / 1e6:.1f}M, "
-                f"{drift * 100:.0f}% from the {target_parameters / 1e6:.0f}M target "
-                "(constrained by the family or the search range).",
+                f"{drift * 100:.0f}% from the {target_parameters / 1e6:.0f}M target.",
                 err=True,
             )
     if out is not None:
@@ -1679,12 +1746,16 @@ def create_model(
         typer.echo(
             json.dumps(
                 {
-                    "family": built.family,
+                    "name": built.name,
+                    "design_source": built.design_source,
+                    "realizing_family": built.realizing_family,
+                    "needs_custom_code": built.needs_custom_code,
                     "config": built.config,
                     "estimated_parameters": built.estimated_parameters,
                     "hidden_size": built.hidden_size,
                     "num_hidden_layers": built.num_hidden_layers,
                     "num_attention_heads": built.num_attention_heads,
+                    "num_key_value_heads": built.num_key_value_heads,
                     "intermediate_size": built.intermediate_size,
                     "vocab_size": built.vocab_size,
                 },
@@ -1692,12 +1763,22 @@ def create_model(
             )
         )
         return
-    approx_m = built.estimated_parameters / 1e6
+    if built.design_source.startswith("family:"):
+        provenance = f"based on the {built.design_source.split(':', 1)[1]} architecture (not your own design)"
+    elif built.needs_custom_code:
+        provenance = (
+            "YOUR OWN design - NOVEL: no reference implementation builds this block combination, so "
+            "training it needs the custom-block path (custom model code)."
+        )
+    else:
+        provenance = f"YOUR OWN design - realized on the '{built.realizing_family}' block implementation."
     typer.echo(
-        f"{built.family}: hidden={built.hidden_size} layers={built.num_hidden_layers} "
-        f"heads={built.num_attention_heads} intermediate={built.intermediate_size} "
-        f"vocab={built.vocab_size} -> ~{approx_m:.1f}M parameters (estimate)"
+        f"{built.name}: hidden={built.hidden_size} layers={built.num_hidden_layers} "
+        f"heads={built.num_attention_heads} kv_heads={built.num_key_value_heads} "
+        f"intermediate={built.intermediate_size} vocab={built.vocab_size} -> "
+        f"~{built.estimated_parameters / 1e6:.1f}M parameters (estimate)"
     )
+    typer.echo(provenance, err=True)
     if out is not None:
         typer.echo(f"wrote architecture config to {out}")
 

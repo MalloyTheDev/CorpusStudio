@@ -1017,3 +1017,32 @@ def test_platform_plan_pretraining_refuses_a_vocab_that_contradicts_the_arch_con
     )
     assert result.exit_code == 2
     assert "contradicts the architecture config" in result.output
+
+
+def test_platform_plan_refuses_a_custom_decoder_arch_config(monkeypatch, tmp_path):
+    # AUDIT (Codex): a composed design no reference implementation builds (model_type "custom_decoder")
+    # needs the not-yet-shipped custom-block path - sealing a plan for an implementation that does not
+    # exist would be a lie, so planning must REFUSE fail-closed, not warn-and-seal.
+    _ready_host(monkeypatch)
+    args = _pretraining_cli_args(tmp_path)
+    (tmp_path / "config.json").write_text(
+        json.dumps({"model_type": "custom_decoder", "hidden_size": 256, "vocab_size": 32000}),
+        encoding="utf-8",
+    )
+    result = runner.invoke(app, [*args, "--json"])
+    assert result.exit_code == 2, result.output
+    assert "custom_decoder" in result.output
+
+
+def test_platform_plan_refuses_a_needs_custom_code_marker(monkeypatch, tmp_path):
+    # The durable marker is honored even if model_type is renamed - defense in depth.
+    _ready_host(monkeypatch)
+    args = _pretraining_cli_args(tmp_path)
+    (tmp_path / "config.json").write_text(
+        json.dumps(
+            {"model_type": "llama", "corpus_studio_needs_custom_code": True, "vocab_size": 32000}
+        ),
+        encoding="utf-8",
+    )
+    result = runner.invoke(app, [*args, "--json"])
+    assert result.exit_code == 2, result.output
