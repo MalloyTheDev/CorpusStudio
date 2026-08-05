@@ -1603,6 +1603,7 @@ def _parse_param_count(text: str) -> int:
 
 @app.command("create-model")
 def create_model(
+    ctx: typer.Context,
     from_family: Optional[str] = typer.Option(
         None,
         "--from-family",
@@ -1631,8 +1632,10 @@ def create_model(
     mlp_bias: bool = typer.Option(
         False, "--mlp-bias/--no-mlp-bias", help="Compose: bias on MLP projections."
     ),
-    intermediate_ratio: float = typer.Option(
-        2.6667, "--intermediate-ratio", help="Compose: MLP intermediate / hidden default ratio."
+    intermediate_ratio: Optional[float] = typer.Option(
+        None,
+        "--intermediate-ratio",
+        help="Compose: MLP intermediate / hidden ratio (default: gated 8/3, standard 4).",
     ),
     preset: Optional[str] = typer.Option(
         None, "--preset", help="Size: tiny / small / base / large."
@@ -1679,6 +1682,31 @@ def create_model(
     if (from_family is not None) == compose:
         typer.echo("specify exactly one of --from-family <name> or --compose", err=True)
         raise typer.Exit(2)
+    # Block-shape flags DESIGN a composed architecture; a family's shape is fixed. Refuse them in family
+    # mode rather than silently ignoring what the user typed (an ignored flag is a broken control).
+    if from_family is not None:
+        block_params = (
+            "positions", "mlp", "activation", "norm", "attention_bias", "mlp_bias", "intermediate_ratio",
+        )
+        # Compare the ParameterSource by NAME, not identity: click re-exports the enum such that the
+        # imported member is not the same object the Context returns, so `== COMMANDLINE` is False.
+        supplied_names = [
+            p for p in block_params
+            if getattr(ctx.get_parameter_source(p), "name", "") == "COMMANDLINE"
+        ]
+        if supplied_names:
+            # Derive each flag's spelling from the command's own parameters - no hand-maintained mapping
+            # to drift if an option is renamed.
+            flag_by_name = {
+                p.name: (p.opts[0] if p.opts else f"--{p.name}") for p in ctx.command.params
+            }
+            supplied = [flag_by_name.get(n, f"--{n}") for n in supplied_names]
+            typer.echo(
+                f"{', '.join(supplied)} only apply to --compose (a family's architecture is fixed); "
+                "use --compose to design your own block shape.",
+                err=True,
+            )
+            raise typer.Exit(2)
     target_parameters = None
     if params is not None:
         try:

@@ -286,3 +286,46 @@ def test_custom_decoder_config_carries_a_durable_marker():
         name="Novel", positions="learned", gated_mlp=True, norm="layernorm", preset="small"
     )
     assert built.config["corpus_studio_needs_custom_code"] is True
+
+
+# ---- audit round 2: no silently-ignored controls (wiring) ------------------------------------------
+
+
+def test_family_mode_refuses_compose_only_block_flags():
+    # AUDIT: block-shape flags are meaningless for a fixed family; silently ignoring them is a broken
+    # control (memory: "a control that is tested but UNREACHABLE is not a control"). Refuse fail-closed.
+    result = _runner.invoke(
+        app, ["create-model", "--from-family", "llama", "--norm", "layernorm", "--preset", "small"]
+    )
+    assert result.exit_code == 2
+    assert "--norm" in result.output and "--compose" in result.output
+
+
+def test_composed_standard_mlp_is_not_undersized_via_cli():
+    # AUDIT: the CLI must not pin an intermediate ratio that starves a standard MLP - a standard FFN is 4x,
+    # not the gated 8/3. Regression: a hardcoded 2.6667 CLI default once bypassed the shape default.
+    result = _runner.invoke(
+        app,
+        [
+            "create-model", "--compose", "--name", "S", "--mlp", "standard",
+            "--norm", "layernorm", "--positions", "learned", "--preset", "small", "--json",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout)["intermediate_size"] == 3072  # 768 * 4, not 768 * 2.6667
+
+
+def test_explicit_dims_with_a_preset_are_refused_not_ignored():
+    # AUDIT: num_layers / num_heads / intermediate_size refine explicit hidden_size sizing only; combining
+    # them with a preset once silently ignored them.
+    with pytest.raises(ArchitectureBuilderError, match="explicit hidden_size sizing"):
+        build_from_family("llama", preset="small", num_hidden_layers=8)
+    result = _runner.invoke(
+        app, ["create-model", "--from-family", "llama", "--preset", "small", "--num-layers", "8"]
+    )
+    assert result.exit_code == 2
+
+
+def test_zero_attention_heads_fails_closed():
+    with pytest.raises(ArchitectureBuilderError, match="num_attention_heads must be positive"):
+        build_composed(name="x", hidden_size=256, num_attention_heads=0)
