@@ -58,6 +58,14 @@ _ALLOWED_MODULE_STMTS: tuple[type[ast.stmt], ...] = (
     ast.Import, ast.ImportFrom, ast.ClassDef, ast.FunctionDef, ast.Assign, ast.AnnAssign,
 )
 
+# custom_decoder_v1 interface conformance: the entry class must be a plausible causal-LM model - it
+# subclasses a recognized model base (torch ``nn.Module`` / HF ``PreTrainedModel`` / a CorpusStudio base)
+# and defines a ``forward`` method. Checked statically by the base/method NAME in the AST (no import, no
+# torch); a non-model class is not something the worker could ever instantiate as a model.
+_MODEL_BASES: frozenset[str] = frozenset(
+    {"Module", "PreTrainedModel", "CustomDecoderBase"}
+)
+
 
 def _err(code: str, message: str, lineno: int | None = None) -> VettingFinding:
     return VettingFinding(severity="error", code=code, message=message, lineno=lineno)
@@ -112,6 +120,15 @@ def _is_docstring(stmt: ast.stmt) -> bool:
     )
 
 
+def _base_name(node: ast.expr) -> str:
+    """The trailing name of a base-class expression (``nn.Module`` / ``torch.nn.Module`` -> ``Module``)."""
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        return node.attr
+    return ""
+
+
 def _entry_class_present(tree: ast.Module, entry_symbol: str, findings: list[VettingFinding]) -> None:
     classes = {n.name: n for n in tree.body if isinstance(n, ast.ClassDef)}
     entry = classes.get(entry_symbol)
@@ -120,11 +137,19 @@ def _entry_class_present(tree: ast.Module, entry_symbol: str, findings: list[Vet
             _err("entry-class-missing", f"the entry class '{entry_symbol}' is not defined at module level")
         )
         return
-    if not entry.bases:
-        # Full ABI conformance (must subclass the custom-block base) lands with that base in a later slice;
-        # for now a base is expected but only warned, so the screen does not couple to an unshipped symbol.
+    base_names = {_base_name(b) for b in entry.bases}
+    if not (base_names & _MODEL_BASES):
         findings.append(
-            _warn("entry-class-no-base", f"'{entry_symbol}' declares no base class", entry.lineno)
+            _err(
+                "entry-not-a-model",
+                f"'{entry_symbol}' must subclass a model base ({', '.join(sorted(_MODEL_BASES))}); "
+                f"bases are {sorted(base_names) or 'none'}",
+                entry.lineno,
+            )
+        )
+    if not any(isinstance(n, ast.FunctionDef) and n.name == "forward" for n in entry.body):
+        findings.append(
+            _err("entry-no-forward", f"'{entry_symbol}' must define a forward() method", entry.lineno)
         )
 
 

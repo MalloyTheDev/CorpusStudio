@@ -33,10 +33,6 @@ class MyDecoderForCausalLM(nn.Module):
 """
 
 
-def _codes(findings):
-    return {f.code for f in findings}
-
-
 def _errors(findings):
     return {f.code for f in findings if f.severity == "error"}
 
@@ -76,10 +72,34 @@ def test_missing_entry_class_is_an_error():
     assert "entry-class-missing" in _errors(findings)
 
 
-def test_entry_class_without_a_base_is_a_warning_not_an_error():
+def test_a_non_model_entry_class_is_rejected():
+    # Interface conformance (slice 2): a class that is not a plausible model (no model base, no forward)
+    # cannot be admitted AS your model.
     findings = vet_source("class Bare:\n    pass\n", entry_symbol="Bare")
-    assert "entry-class-no-base" in _codes(findings)
-    assert _errors(findings) == set()  # a warning does not reject
+    assert "entry-not-a-model" in _errors(findings)
+    assert "entry-no-forward" in _errors(findings)
+
+
+def test_a_model_base_without_forward_is_rejected():
+    findings = vet_source("import torch\n\nclass M(torch.nn.Module):\n    x = 1\n", entry_symbol="M")
+    assert "entry-no-forward" in _errors(findings)
+    assert "entry-not-a-model" not in _errors(findings)  # torch.nn.Module IS a model base
+
+
+def test_a_model_subclass_with_forward_conforms():
+    src = (
+        "import torch\n\nclass M(torch.nn.Module):\n"
+        "    def forward(self, input_ids):\n        return input_ids\n"
+    )
+    assert _errors(vet_source(src, entry_symbol="M")) == set()
+
+
+def test_the_reference_example_block_is_admitted():
+    from pathlib import Path
+
+    ref = Path(__file__).resolve().parents[2] / "examples" / "custom_block" / "reference_decoder.py"
+    report = build_report(ref.read_bytes(), entry_symbol="ReferenceDecoderForCausalLM")
+    assert report.verdict == "admitted", [f.model_dump() for f in report.findings]
 
 
 # ---- the report (content-addressed, self-consistent) -----------------------------------------------
