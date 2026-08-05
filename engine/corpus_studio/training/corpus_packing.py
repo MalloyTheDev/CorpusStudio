@@ -7,8 +7,12 @@ path than SFT's one-example-per-row. This module is the packing primitive + its 
 
 Honesty invariant (no silent truncation): EVERY token is accounted for. A trailing remainder shorter than
 one block is REPORTED - dropped (``drop_remainder=True``) or explicitly padded (``drop_remainder=False``)
-- never hidden. The worker's data loader (a later slice) streams shards through this; here it is a pure
-function so the packing math is unit-tested without torch or a tokenizer.
+- never hidden. Empty documents contribute no tokens and are skipped (no spurious EOS-only segment); since
+they carry no tokens this is not a truncation.
+
+Scope: this is the PURE primitive over a materialized stream, so the packing math is unit-tested without
+torch or a tokenizer. Memory-bounded STREAMING over shards (yielding blocks incrementally rather than
+materializing a whole corpus) is the worker's data loader - a later slice (S3b-1c) that calls this.
 """
 
 from __future__ import annotations
@@ -62,6 +66,8 @@ def pack_documents(
     stream: list[int] = []
     num_documents = 0
     for document in documents:
+        if not document:
+            continue  # an empty document has no tokens; do not emit a spurious EOS-only segment
         num_documents += 1
         stream.extend(document)
         stream.append(eos_id)  # EOS separator bounds cross-document continuation

@@ -52,6 +52,14 @@ def test_empty_corpus():
     assert cov.total_tokens == 0 and cov.coverage_ratio == 0.0
 
 
+def test_empty_documents_are_skipped_not_given_a_spurious_eos():
+    # AUDIT (Sourcery): an empty document has no tokens, so it must not emit an EOS-only segment.
+    packed = pack_documents([[], [1, 2, 3], []], sequence_len=4, eos_id=0)
+    assert packed.blocks == [[1, 2, 3, 0]]  # only the one real document + its EOS
+    assert packed.coverage.num_documents == 1
+    assert packed.coverage.total_tokens == 4
+
+
 @pytest.mark.parametrize("kwargs", [{"sequence_len": 0, "eos_id": 0}, {"sequence_len": 4, "eos_id": -1}])
 def test_invalid_arguments_fail_closed(kwargs):
     with pytest.raises(ValueError):
