@@ -164,6 +164,10 @@
     {
       "contract": "ModelCodeVettingReport",
       "file": "ModelCodeVettingReport.schema.json"
+    },
+    {
+      "contract": "SandboxPolicy",
+      "file": "SandboxPolicy.schema.json"
     }
   ]
 }

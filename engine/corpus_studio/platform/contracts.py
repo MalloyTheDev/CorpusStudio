@@ -4315,6 +4315,35 @@ class ModelCodeVettingReport(ContractModel):
         return self
 
 
+class SandboxPolicy(ContractModel):
+    """The OS-level containment policy for executing VETTED-BUT-UNTRUSTED custom-block code (mode 3, slice
+    3). A static screen is not a safety proof; this policy is the real blast-radius limit. Three invariants
+    are TYPE-LOCKED so an untrusted-code sandbox can never be weakened: no network, a read-only root, and
+    no-new-privileges. ``writable_paths`` are the only rw exceptions (the run-scoped output dir);
+    ``gpu_devices`` is an HONEST, documented hole - a GPU training block must reach the CUDA devices, so a
+    GPU workload is blast-radius-limited, NOT fully isolated. Enforced by the sandbox launcher; a host with
+    no usable backend refuses to run custom code (fail-closed). ``bubblewrap`` is the primary backend, with
+    an ``unshare`` + rlimits fallback that is weaker (no filesystem confinement)."""
+
+    contract_version: CONTRACT_VERSION_LITERAL = "1.0.0"
+    network_isolated: Literal[True] = True
+    readonly_root: Literal[True] = True
+    no_new_privileges: Literal[True] = True
+    writable_paths: list[str] = Field(default_factory=list)
+    gpu_devices: list[str] = Field(default_factory=list)
+    rlimit_address_space_bytes: int | None = Field(default=None, ge=1)
+    rlimit_cpu_seconds: int | None = Field(default=None, ge=1)
+    rlimit_open_files: int | None = Field(default=None, ge=1)
+    rlimit_processes: int | None = Field(default=None, ge=0)
+
+    @model_validator(mode="after")
+    def _validate_sandbox_policy(self) -> SandboxPolicy:
+        for path in (*self.writable_paths, *self.gpu_devices):
+            if not path or not path.startswith("/"):
+                raise ValueError(f"sandbox paths must be absolute, got {path!r}")
+        return self
+
+
 class ResolvedPretrainingExecutionConfiguration(ContractModel):
     """The hash-sealed configuration for a from-scratch / continued PRETRAINING run - the sibling of
     :class:`ResolvedExecutionConfiguration` for the ``pretraining`` execution variant.
