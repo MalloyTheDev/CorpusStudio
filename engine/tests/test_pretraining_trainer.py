@@ -108,3 +108,12 @@ def test_pretrain_result_bounds_coverage():
             output_dir="/o", cpu_toy=True, vocab_size=300, num_blocks=2, coverage_ratio=1.5,
             tokenizer_source="trained",
         )
+
+
+def test_canonical_config_sha256_is_stable_and_order_independent():
+    from corpus_studio.training.pretraining_trainer import _canonical_config_sha256
+
+    first = _canonical_config_sha256({"model_type": "llama", "hidden_size": 64})
+    reordered = _canonical_config_sha256({"hidden_size": 64, "model_type": "llama"})
+    assert first == reordered and len(first) == 64
+    assert _canonical_config_sha256({"model_type": "gpt2", "hidden_size": 64}) != first

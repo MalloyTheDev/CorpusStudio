@@ -17,13 +17,27 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
+from collections.abc import Mapping
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from corpus_studio.platform.common import Ref
-from corpus_studio.platform.contracts import ResolvedPretrainingExecutionConfiguration
+from corpus_studio.platform.contracts import (
+    PretrainingExecutionEvidence,
+    PretrainingSuccessEvidence,
+    ResolvedPretrainingExecutionConfiguration,
+)
+from corpus_studio.platform.enums import StageMarker
 from corpus_studio.training.corpus_packing import pack_documents
+from corpus_studio.training.pretraining_evidence import (
+    PretrainingExecutionTracker,
+    register_full_model_gradient_hooks,
+)
+from corpus_studio.training.trainer import (
+    capture_adapter_export_state,
+    capture_trainable_state,
+)
 
 # Keys create-model writes that are provenance, not transformers config fields - stripped before build.
 _NON_HF_CONFIG_KEYS = ("architectures", "corpus_studio_name", "corpus_studio_needs_custom_code")
@@ -46,6 +60,9 @@ class PretrainResult(BaseModel):
     num_blocks: int = Field(ge=0)
     coverage_ratio: float = Field(ge=0, le=1)
     tokenizer_source: str
+    # Sealed proof that a real full-parameter optimization happened (optimizer + per-step loss + gradient
+    # coverage + before != after model bytes). None only for a run that predates evidence capture.
+    execution_evidence: PretrainingSuccessEvidence | None = None
 
 
 def load_corpus_documents(
@@ -164,6 +181,34 @@ def _load_imported_tokenizer(tokenizer_source: Any) -> Any:  # pragma: no cover
     return tokenizer
 
 
+def _canonical_config_sha256(config: Mapping[str, Any]) -> str:
+    """A stable semantic digest of the from-scratch model architecture config (order-independent)."""
+    encoded = json.dumps(config, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode(
+        "utf-8"
+    )
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _build_success_evidence(  # pragma: no cover - filesystem/torch integration; proven by a run
+    out: Path, execution: PretrainingExecutionEvidence
+) -> PretrainingSuccessEvidence:
+    """Verify the saved model artifacts exist and seal the pretraining success evidence."""
+    model_safetensors = out / "model.safetensors"
+    config_json = out / "config.json"
+    if not model_safetensors.is_file():
+        raise PretrainingError("training completed without a saved model.safetensors")
+    if not config_json.is_file():
+        raise PretrainingError("training completed without a saved config.json")
+    return PretrainingSuccessEvidence(
+        execution=execution,
+        output_path_verified=True,
+        model_bytes_verified=True,
+        artifact_integrity_verified=True,
+        model_safetensors_sha256=hashlib.sha256(model_safetensors.read_bytes()).hexdigest(),
+        model_config_sha256=hashlib.sha256(config_json.read_bytes()).hexdigest(),
+    )
+
+
 def run_pretraining(  # pragma: no cover - torch/tokenizers integration; proven by a CPU run
     execution: ResolvedPretrainingExecutionConfiguration,
     *,
@@ -178,6 +223,7 @@ def run_pretraining(  # pragma: no cover - torch/tokenizers integration; proven 
         AutoConfig,
         AutoModelForCausalLM,
         Trainer,
+        TrainerCallback,
         TrainingArguments,
         set_seed,
     )
@@ -205,6 +251,7 @@ def run_pretraining(  # pragma: no cover - torch/tokenizers integration; proven 
     arch = load_architecture_config(execution.init.architecture_ref, corpus_root=corpus_root)
     model_type = arch.pop("model_type")
     arch["vocab_size"] = int(tokenizer.vocab_size)  # from-scratch: size the embedding to THIS tokenizer
+    model_config_semantic_sha256 = _canonical_config_sha256({"model_type": model_type, **arch})
     model = AutoModelForCausalLM.from_config(AutoConfig.for_model(model_type, **arch))
 
     packed = pack_documents(
@@ -220,6 +267,40 @@ def run_pretraining(  # pragma: no cover - torch/tokenizers integration; proven 
         input_ids = torch.tensor([feature["input_ids"] for feature in features], dtype=torch.long)
         return {"input_ids": input_ids, "labels": input_ids.clone()}  # causal LM shifts internally
 
+    # Execution-evidence capture: register gradient-observation hooks and snapshot the trainable state
+    # BEFORE training, so the finalized evidence proves a real optimizer stepped the complete inventory,
+    # gradients materialized on trainable tensors, and both the trainable state and the exported model
+    # tensors changed. Full-parameter throughout (no adapter, no nf4 / master-dtype enforcement).
+    gradient_tracker = register_full_model_gradient_hooks(model, torch)
+    execution_tracker = PretrainingExecutionTracker(
+        expected_steps=execution.schedule.max_steps or 1, gradients=gradient_tracker
+    )
+
+    def _trainable_mapping() -> dict[str, Any]:
+        return {n: p for n, p in model.named_parameters() if p.requires_grad}
+
+    before_trainable = capture_trainable_state(model, torch, stage=StageMarker.optimizer_step)
+    before_export = capture_adapter_export_state(
+        _trainable_mapping(), torch, stage=StageMarker.optimizer_step
+    )
+
+    class _EvidenceCallback(TrainerCallback):  # type: ignore[misc]
+        def on_train_begin(self, args: Any, state: Any, control: Any, **kwargs: Any) -> None:
+            execution_tracker.on_train_begin(kwargs.get("optimizer"))
+
+        def on_step_end(self, args: Any, state: Any, control: Any, **kwargs: Any) -> None:
+            execution_tracker.on_step_end(int(state.global_step), kwargs.get("optimizer"))
+
+        def on_log(
+            self,
+            args: Any,
+            state: Any,
+            control: Any,
+            logs: Mapping[str, Any] | None = None,
+            **kwargs: Any,
+        ) -> None:
+            execution_tracker.on_log(int(state.global_step), logs)
+
     optimizer = execution.optimizer
     arguments = TrainingArguments(
         output_dir=str(out),
@@ -234,24 +315,52 @@ def run_pretraining(  # pragma: no cover - torch/tokenizers integration; proven 
         seed=execution.seed,
         data_seed=execution.data_seed,
         logging_steps=1,
+        logging_nan_inf_filter=False,  # log one loss per step, even a non-finite one, for the evidence
         save_strategy="no",
         report_to=[],
         use_cpu=cpu_toy,
         gradient_checkpointing=execution.gradient_checkpointing and not cpu_toy,
     )
-    trainer = Trainer(model=model, args=arguments, train_dataset=dataset, data_collator=_collate)
+    trainer = Trainer(
+        model=model,
+        args=arguments,
+        train_dataset=dataset,
+        data_collator=_collate,
+        callbacks=[_EvidenceCallback()],
+    )
     train_output = trainer.train()
+    steps = int(getattr(train_output, "global_step", 0) or 0)
+
+    # After training: verify the trainable inventory is unchanged, snapshot the trained state, and seal
+    # the execution evidence BEFORE saving. Finalizing first keeps a tampered export from being admitted;
+    # the saved model.safetensors / config.json are then hashed into the success evidence.
+    gradient_tracker.verify_model_inventory(model, stage=StageMarker.optimizer_step)
+    after_trainable = capture_trainable_state(model, torch, stage=StageMarker.optimizer_step)
+    after_export = capture_adapter_export_state(
+        _trainable_mapping(), torch, stage=StageMarker.optimizer_step
+    )
+    execution_detail = execution_tracker.finalize(
+        steps=steps,
+        before=before_trainable,
+        after=after_trainable,
+        before_export=before_export,
+        after_export=after_export,
+        model_config_semantic_sha256=model_config_semantic_sha256,
+    )
+
     trainer.save_model(str(out))
     tokenizer.save_pretrained(str(out))
+    success_evidence = _build_success_evidence(out, execution_detail)
 
     metrics = getattr(train_output, "metrics", {}) or {}
     return PretrainResult(
         output_dir=str(out),
         cpu_toy=cpu_toy,
-        steps=int(getattr(train_output, "global_step", 0) or 0),
+        steps=steps,
         final_loss=metrics.get("train_loss"),
         vocab_size=int(tokenizer.vocab_size),
         num_blocks=packed.coverage.num_blocks,
         coverage_ratio=packed.coverage.coverage_ratio,
         tokenizer_source=tokenizer_source,
+        execution_evidence=success_evidence,
     )
