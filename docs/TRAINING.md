@@ -96,9 +96,11 @@ experiments, dataset versions, artifact tracking, and richer comparison views.
 
 Registered training-backend manifests (selectable for admission via `platform-plan --backend`):
 
-- **`corpus_studio`** — the first-party HF + TRL + PEFT QLoRA trainer (LoRA/QLoRA; math/eager/sdpa/
-  flash attention). New plans require its exact Phase 9B execution-contract declaration and matching
-  functional proof.
+- **`corpus_studio`** — the first-party HF trainer, in two lanes: the TRL + PEFT **QLoRA/LoRA adapter**
+  trainer (SFT/DPO; math/eager/sdpa/flash attention) and the full-parameter **`PretrainingRunner`** lane
+  for from-scratch / continued pretraining (random-init or checkpoint-init, a corpus-trained or imported
+  tokenizer, packed-corpus training). New plans require its exact Phase 9B execution-contract declaration
+  and matching functional proof.
 - **`unsloth`** — a registered accelerated 4-bit QLoRA manifest, not currently executable through new
   Phase 9B plans. It does not yet declare/prove the complete effective execution contract, so it is
   refused on every host. Native-Windows Blackwell/sm_120 also requires a math path Unsloth does not

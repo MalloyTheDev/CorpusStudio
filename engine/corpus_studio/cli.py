@@ -512,6 +512,13 @@ def platform_run(
         "--max-steps",
         help="Compatibility assertion only; must equal the schedule already sealed in the RunPlan.",
     ),
+    corpus_root: str = typer.Option(
+        ".",
+        "--corpus-root",
+        help="Directory a from-scratch / continued pretraining plan's RELATIVE shard locations resolve "
+        "against (default: the current directory). Absolute shard paths and non-pretraining lanes "
+        "ignore it.",
+    ),
     out_dir: Optional[Path] = typer.Option(
         None, "--out", help="Write the terminal RunManifest.json to this directory (atomic)."
     ),
@@ -557,8 +564,19 @@ def platform_run(
     from corpus_studio.platform.contracts import RunPlan
     from corpus_studio.platform.supervisor import EchoRunner, Runner, demo_run_plan, execute_run
 
-    if runner_name not in ("auto", "echo", "cpu_toy", "training"):
-        typer.echo(f"Unknown runner '{runner_name}' (auto | echo | cpu_toy | training).", err=True)
+    if runner_name not in (
+        "auto",
+        "echo",
+        "cpu_toy",
+        "training",
+        "pretraining",
+        "pretraining_cpu_toy",
+    ):
+        typer.echo(
+            f"Unknown runner '{runner_name}' (auto | echo | cpu_toy | training | pretraining | "
+            "pretraining_cpu_toy).",
+            err=True,
+        )
         raise typer.Exit(2)
 
     if demo:
@@ -659,6 +677,10 @@ def platform_run(
             from corpus_studio.platform.subprocess_supervisor import worker_identity_argv
 
             managed_worker_argv += worker_identity_argv(plan)
+            # A non-default corpus root anchors a managed pretraining plan's relative shard locations
+            # inside the isolated interpreter; the default is left off so ordinary argv is unchanged.
+            if corpus_root != ".":
+                managed_worker_argv += ["--corpus-root", corpus_root]
         except EnvironmentManagerError as exc:
             managed_lease.close()
             typer.echo(exc.failure.model_dump_json(indent=2), err=True)
@@ -698,6 +720,7 @@ def platform_run(
                 plan,
                 run_id=run_identity,
                 runner_name=runner_name,
+                corpus_root=corpus_root,
                 max_steps=max_steps,
                 silence_timeout_s=silence_timeout,
                 preflight_timeout_s=preflight_timeout,
@@ -713,7 +736,9 @@ def platform_run(
                 # SFT/DPO adapter runner (which execute_run's runner-type gate would reject).
                 from corpus_studio.platform.runners import PretrainingRunner
 
-                runner = PretrainingRunner(cpu_toy=(runner_name == "pretraining_cpu_toy"))
+                runner = PretrainingRunner(
+                    cpu_toy=(runner_name == "pretraining_cpu_toy"), corpus_root=corpus_root
+                )
             else:
                 from corpus_studio.platform.runners import TrainingRunner
 

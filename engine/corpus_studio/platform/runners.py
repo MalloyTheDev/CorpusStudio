@@ -527,8 +527,8 @@ class TrainingRunner:
                 PRETRAINING_NOT_EXECUTABLE_REASON,
                 taxonomy=FailureTaxonomy.UNSUPPORTED_CONFIGURATION,
                 stage=StageMarker.env_loaded,
-                remediation="await the pretraining worker milestone that promotes pretraining to "
-                "workload_verified; do not hand-edit the plan to the SFT lane",
+                remediation="dispatch the plan through platform-run so required_runner_lane selects "
+                "the pretraining lane; do not hand-edit the plan to the SFT lane",
             )
         backend_id = plan.backend_ref.id
         backend = get_backend(backend_id)
@@ -605,8 +605,8 @@ class TrainingRunner:
                     PRETRAINING_NOT_EXECUTABLE_REASON,
                     taxonomy=FailureTaxonomy.UNSUPPORTED_CONFIGURATION,
                     stage=StageMarker.env_loaded,
-                    remediation="await the pretraining worker milestone that promotes pretraining to "
-                    "workload_verified; do not hand-edit the plan to the SFT lane",
+                    remediation="dispatch the plan through platform-run so required_runner_lane "
+                    "selects the pretraining lane; do not hand-edit the plan to the SFT lane",
                 )
             raise RunnerFailure(
                 "the RunPlan carries no ResolvedExecutionConfiguration to execute",
@@ -695,9 +695,16 @@ class PretrainingRunner:
                 taxonomy=FailureTaxonomy.UNSUPPORTED_CONFIGURATION,
                 stage=StageMarker.process_start,
             )
-        # NOTE: the SFT lexical run-scoped-output verification (verify_run_scoped_output_path) is typed
-        # for the SFT ResolvedExecutionConfiguration; extending it to the pretraining config is a small
-        # follow-up hardening. The worker writes to the sealed execution.output_dir.
+        # Run-scope the output exactly like the SFT lane: derive <output_dir>/runs/<run_id>/artifacts/
+        # model from the sealed root + fresh run id, so two runs of one plan never collide and the sealed
+        # output_layout="run_scoped_v1" claim is ENFORCED, not merely declared.
+        from corpus_studio.platform.execution_config import (  # noqa: PLC0415
+            ExecutionConfigurationError,
+            run_scoped_pretraining_output,
+            verify_run_scoped_pretraining_output_path,
+        )
+
+        scoped_output = run_scoped_pretraining_output(execution, ctx.run_id)
         ctx.emit_stage(
             StageMarker.process_start,
             f"pretraining run [{self.name}]: dispatching the full-parameter worker",
@@ -709,7 +716,7 @@ class PretrainingRunner:
 
         try:
             result = run_pretraining(
-                execution, corpus_root=self.corpus_root, output_dir=execution.output_dir
+                execution, corpus_root=self.corpus_root, output_dir=str(scoped_output)
             )
         except PretrainingError as exc:
             raise RunnerFailure(
@@ -717,6 +724,18 @@ class PretrainingRunner:
                 taxonomy=FailureTaxonomy.UPDATE_FAILURE,
                 stage=StageMarker.optimizer_step,
                 remediation="preserve the failed run and inspect the first-party pretraining worker",
+            ) from exc
+
+        try:
+            verify_run_scoped_pretraining_output_path(
+                execution, ctx.run_id, observed_path=result.output_dir, require_exists=True
+            )
+        except ExecutionConfigurationError as exc:
+            raise RunnerFailure(
+                str(exc),
+                taxonomy=FailureTaxonomy.ARTIFACT_FAILURE,
+                stage=StageMarker.export,
+                remediation="preserve the failed run and repair the pretraining run-scoped output layout",
             ) from exc
 
         if result.execution_evidence is None:

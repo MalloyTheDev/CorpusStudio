@@ -215,6 +215,24 @@ def test_build_runner_selects_the_runner():
     assert isinstance(pretrain, PretrainingRunner) and pretrain.cpu_toy is False
     pretrain_toy = _build_runner("pretraining_cpu_toy")
     assert isinstance(pretrain_toy, PretrainingRunner) and pretrain_toy.cpu_toy is True
+    # corpus_root threads to the pretraining runner (relative shard anchor); default is CWD.
+    assert _build_runner("pretraining", corpus_root="/data/corpus").corpus_root == "/data/corpus"
+
+
+def test_worker_arg_parser_accepts_the_pretraining_lanes():
+    # Regression: the pretraining subprocess lane shipped broken because worker.main's argparse choices
+    # omitted it - _build_runner mapped it, but argparse exited 2 ("invalid choice") first, so a managed
+    # pretraining plan (forced to --subprocess) could never run. Gate on what the parser ACCEPTS.
+    from corpus_studio.platform.worker import _build_arg_parser
+
+    parser = _build_arg_parser()
+    base = ["--backend-id", "b", "--environment-id", "e"]
+    for lane in ("echo", "cpu_toy", "training", "pretraining", "pretraining_cpu_toy"):
+        assert parser.parse_args(["--runner", lane, *base]).runner == lane
+    assert parser.parse_args(base).corpus_root == "."
+    assert parser.parse_args([*base, "--corpus-root", "/data/corpus"]).corpus_root == "/data/corpus"
+    with pytest.raises(SystemExit):
+        parser.parse_args(["--runner", "not-a-lane", *base])
 
 
 def test_worker_main_runs_from_stdin(monkeypatch, capsys):

@@ -64,9 +64,10 @@ def _send(
     stream.flush()
 
 
-def _build_runner(runner_name: str) -> Any:
+def _build_runner(runner_name: str, corpus_root: str = ".") -> Any:
     """The Runner for ``runner_name`` — mirrors the ``platform-run`` selection (echo needs nothing;
-    cpu_toy/training lazy-import the trainer)."""
+    cpu_toy/training/pretraining lazy-import the trainer). ``corpus_root`` anchors a pretraining plan's
+    relative shard locations (ignored by the other lanes)."""
     from corpus_studio.platform.supervisor import EchoRunner  # noqa: PLC0415
 
     if runner_name == "echo":
@@ -74,7 +75,9 @@ def _build_runner(runner_name: str) -> Any:
     if runner_name in ("pretraining", "pretraining_cpu_toy"):
         from corpus_studio.platform.runners import PretrainingRunner  # noqa: PLC0415
 
-        return PretrainingRunner(cpu_toy=(runner_name == "pretraining_cpu_toy"))
+        return PretrainingRunner(
+            cpu_toy=(runner_name == "pretraining_cpu_toy"), corpus_root=corpus_root
+        )
     from corpus_studio.platform.runners import TrainingRunner  # noqa: PLC0415
 
     return TrainingRunner(cpu_toy=(runner_name == "cpu_toy"))
@@ -134,6 +137,7 @@ def run_worker(
     runner_name: str,
     backend_id: str,
     environment_ref: Ref,
+    corpus_root: str = ".",
     out: Any = None,
 ) -> int:
     """Execute one dispatched run and stream it back. ``dispatch_line`` is the raw ``run_dispatch``
@@ -232,7 +236,7 @@ def run_worker(
         out=stream,
     )
 
-    runner = _build_runner(runner_name)
+    runner = _build_runner(runner_name, corpus_root=corpus_root)
     # Stream each RunEvent to the parent as it is produced (the sink runs synchronously inside
     # execute_run, so ordering + backpressure are preserved over the pipe). Each metric event is a
     # COMPLETED STEP — real progress — which is what resets the parent's silence timer; a hung training
@@ -266,17 +270,31 @@ def run_worker(
     return 0
 
 
-def main() -> None:
-    """CLI entrypoint: read the single ``run_dispatch`` line from stdin and run it. Invoked as
-    ``python -m corpus_studio.platform.worker --runner <name>`` by the subprocess supervisor."""
+_RUNNER_CHOICES = ("echo", "cpu_toy", "training", "pretraining", "pretraining_cpu_toy")
+
+
+def _build_arg_parser() -> Any:
+    """The worker CLI parser. Extracted from ``main`` so the accepted ``--runner`` lanes are unit
+    testable: a lane the parser rejects is a dead runner no matter what ``_build_runner`` maps, which is
+    exactly how the pretraining subprocess lane shipped broken (argparse ``invalid choice`` before
+    ``run_worker`` ever ran)."""
     import argparse  # noqa: PLC0415
 
     parser = argparse.ArgumentParser(prog="corpus-studio-worker")
-    parser.add_argument("--runner", default="echo", choices=["echo", "cpu_toy", "training"])
+    parser.add_argument("--runner", default="echo", choices=list(_RUNNER_CHOICES))
     parser.add_argument("--backend-id", required=True)
     parser.add_argument("--environment-id", required=True)
     parser.add_argument("--environment-hash")
-    args = parser.parse_args()
+    # Anchors a pretraining plan's relative shard locations against a corpus directory (the process CWD
+    # by default). Absolute shard paths ignore it; the other lanes ignore it entirely.
+    parser.add_argument("--corpus-root", default=".")
+    return parser
+
+
+def main() -> None:
+    """CLI entrypoint: read the single ``run_dispatch`` line from stdin and run it. Invoked as
+    ``python -m corpus_studio.platform.worker --runner <name>`` by the subprocess supervisor."""
+    args = _build_arg_parser().parse_args()
 
     environment_ref = Ref(
         id=args.environment_id,
@@ -318,6 +336,7 @@ def main() -> None:
             runner_name=args.runner,
             backend_id=args.backend_id,
             environment_ref=environment_ref,
+            corpus_root=args.corpus_root,
         )
     )
 

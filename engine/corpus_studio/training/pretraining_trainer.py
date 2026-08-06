@@ -291,8 +291,18 @@ def run_pretraining(  # pragma: no cover - torch/tokenizers integration; proven 
     # gradients materialized on trainable tensors, and both the trainable state and the exported model
     # tensors changed. Full-parameter throughout (no adapter, no nf4 / master-dtype enforcement).
     gradient_tracker = register_full_model_gradient_hooks(model, torch)
+    # The sealed schedule is exactly one of max_steps XOR num_train_epochs. In step mode the ceiling is
+    # the sealed max_steps; in epoch mode it is the Trainer's data-derived total-step plan for the sealed
+    # epochs over the sealed packed corpus, bound AFTER trainer.train() computes it (deterministic in the
+    # sealed inputs). A hardcoded `or 1` silently collapsed an epoch plan to a single optimizer step.
+    sealed_max_steps = execution.schedule.max_steps
+    epoch_mode = sealed_max_steps is None
+    sealed_epochs = execution.schedule.num_train_epochs
+    if epoch_mode and sealed_epochs is None:  # pragma: no cover - contract guarantees exactly-one-of
+        raise PretrainingError("the sealed schedule set neither max_steps nor num_train_epochs")
     execution_tracker = PretrainingExecutionTracker(
-        expected_steps=execution.schedule.max_steps or 1, gradients=gradient_tracker
+        expected_steps=sealed_max_steps if sealed_max_steps is not None else 0,
+        gradients=gradient_tracker,
     )
 
     def _trainable_mapping() -> dict[str, Any]:
@@ -323,7 +333,12 @@ def run_pretraining(  # pragma: no cover - torch/tokenizers integration; proven 
     optimizer = execution.optimizer
     arguments = TrainingArguments(
         output_dir=str(out),
-        max_steps=execution.schedule.max_steps or 1,
+        # max_steps=-1 hands control to num_train_epochs (HF's epoch mode); a sealed max_steps overrides
+        # epochs. Either way the sealed schedule - not a hardcoded 1 - drives how long training runs.
+        max_steps=sealed_max_steps if sealed_max_steps is not None else -1,
+        num_train_epochs=(
+            float(sealed_epochs) if epoch_mode and sealed_epochs is not None else 1.0
+        ),
         per_device_train_batch_size=execution.batching.micro_batch_size,
         gradient_accumulation_steps=execution.batching.fallback_grad_accumulation_steps or 1,
         learning_rate=optimizer.learning_rate,
@@ -349,6 +364,15 @@ def run_pretraining(  # pragma: no cover - torch/tokenizers integration; proven 
     )
     train_output = trainer.train()
     steps = int(getattr(train_output, "global_step", 0) or 0)
+    if epoch_mode:
+        # Now that the Trainer has computed its total optimizer-step plan for the sealed epochs, bind it
+        # as the finalize ceiling (the placeholder above was 0). Deterministic in the sealed inputs.
+        planned_steps = int(getattr(trainer.state, "max_steps", 0) or 0)
+        if planned_steps < 1:
+            raise PretrainingError(
+                "epoch-scheduled pretraining computed a non-positive optimizer-step plan"
+            )
+        execution_tracker.expected_steps = planned_steps
 
     # After training: verify the trainable inventory is unchanged, snapshot the trained state, and seal
     # the execution evidence BEFORE saving. Finalizing first keeps a tampered export from being admitted;
@@ -367,7 +391,11 @@ def run_pretraining(  # pragma: no cover - torch/tokenizers integration; proven 
         model_config_semantic_sha256=model_config_semantic_sha256,
     )
 
-    trainer.save_model(str(out))
+    # Save the full model as a SINGLE safetensors file (no size-based sharding) so the single-file
+    # success-evidence and the supervisor's independent reload-verify hold for large from-scratch /
+    # continued models too - safetensors serves a multi-GB single file via mmap. save_model delegates to
+    # save_pretrained; we call it directly only to pass an effectively-unbounded max_shard_size.
+    trainer.model.save_pretrained(str(out), safe_serialization=True, max_shard_size="1000GB")
     tokenizer.save_pretrained(str(out))
     success_evidence = _build_success_evidence(out, execution_detail)
 

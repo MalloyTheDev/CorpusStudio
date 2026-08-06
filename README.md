@@ -42,6 +42,10 @@ cleaning and gating, evaluation and model comparison, to launching and tracking
 a training run — its own opt-in first-party backend through the sealed Platform lifecycle, or your
 installed external trainer:
 
+> **On "desktop" / "... tab" phrasings below:** these name surfaces of the WPF/Avalonia desktop
+> **prototype**, which was **removed (#545)**. The engine **CLI is the current surface** and the
+> Tauri/React `apps/web` client is in progress; the per-bullet reframe is tracked in #560.
+
 **Author & validate**
 - create projects from built-in schema templates with pre-filled examples
 - author and validate examples through the Python engine (required fields,

@@ -1746,13 +1746,25 @@ def _fetch_index_artifact_bytes(
     url: str, *, timeout: float = 120.0, max_bytes: int = 1_073_741_824
 ) -> bytes:
     """Fetch a pinned wheel from an already-validated (https + configured-index host) URL so its content
-    hash can be computed. Bounded by timeout and size, and fail-closed. A module-level seam so tests
+    hash can be computed. Bounded by timeout and size, and fail-closed. A redirect is REFUSED, not
+    followed: the host allowlist is enforced on THIS exact URL, so following a 3xx off it (to an
+    arbitrary or link-local host) would both break the every-artifact-hash-bound-to-a-configured-index
+    invariant and open a blind SSRF from a privileged operation. A module-level seam so tests
     monkeypatch it and the base gate never touches the network."""
     import urllib.request  # noqa: PLC0415
 
+    class _RefuseRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, *args: object, **kwargs: object) -> None:
+            raise EnvironmentManagerError(
+                "pip install evidence artifact URL returned a redirect; refusing to follow it off "
+                "the configured index host (the allowlist is enforced on the original URL only)"
+            )
+
+    opener = urllib.request.build_opener(_RefuseRedirect)
     try:
-        # nosec B310 - the caller has validated scheme==https and host in the configured index set.
-        with urllib.request.urlopen(url, timeout=timeout) as response:  # noqa: S310
+        # nosec B310 - the caller validated scheme==https and host in the configured index set, and a
+        # redirect off that host is refused above (never followed to an arbitrary host).
+        with opener.open(url, timeout=timeout) as response:  # noqa: S310
             data = response.read(max_bytes + 1)
     except Exception as exc:  # noqa: BLE001 - any fetch failure is fail-closed, never a silent pass
         raise EnvironmentManagerError(

@@ -549,12 +549,20 @@ def validate_pretraining_success_evidence(
             taxonomy=FailureTaxonomy.UPDATE_FAILURE,
             stage=StageMarker.optimizer_step,
         )
-    if (
-        execution.schedule.max_steps is not None
-        and proposed.execution.completed_optimizer_steps != execution.schedule.max_steps
-    ):
+    if execution.schedule.max_steps is not None:
+        if proposed.execution.completed_optimizer_steps != execution.schedule.max_steps:
+            raise RunnerFailure(
+                "completed optimizer steps do not match the sealed schedule",
+                taxonomy=FailureTaxonomy.OPTIMIZER_FAILURE,
+                stage=StageMarker.optimizer_step,
+            )
+    elif proposed.execution.completed_optimizer_steps < 1:
+        # Epoch-scheduled: the exact optimizer-step total is the worker's data-derived plan over the
+        # sealed corpus, which the supervisor cannot recompute without loading the dataset. But a
+        # zero-step "success" is never admissible - the worker's evidence enforces the true per-epoch
+        # ceiling, and the independent reload-verify below proves a real trained model was produced.
         raise RunnerFailure(
-            "completed optimizer steps do not match the sealed schedule",
+            "epoch-scheduled pretraining admitted zero completed optimizer steps",
             taxonomy=FailureTaxonomy.OPTIMIZER_FAILURE,
             stage=StageMarker.optimizer_step,
         )
