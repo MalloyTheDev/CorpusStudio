@@ -456,6 +456,40 @@ def test_preference_dpo_resolves_to_a_sealed_config_and_routes_to_the_preference
     assert required_runner_lane(plan) == "preference"
 
 
+def test_full_parameter_sft_seals_a_full_model_config_and_refuses_at_execution():
+    from corpus_studio.platform.execution_config import (
+        ExecutionConfigurationError,
+        full_finetune_execution_configuration_hash_for,
+        required_runner_lane,
+    )
+
+    # --adapter-method full_finetune (task=sft) seals the full-MODEL sibling config, NOT the adapter one.
+    plan = _plan(
+        _profile(cc_major=8), _report(), task_type="sft",
+        adapter_method="full_finetune", export_format="merged_safetensors",
+    )
+    ff = plan.resolved_full_finetune_execution
+    assert ff is not None and plan.resolved_execution is None
+    assert ff.configuration_hash == full_finetune_execution_configuration_hash_for(ff)
+    assert ff.adapter.method.value == "full_finetune"
+    assert ff.export_format.value == "merged_safetensors"
+    assert ff.checkpoint_policy.impl.value == "full_state"
+    assert ff.precision.quantized_storage_format.value == "none"  # full-param is unquantized
+    assert ff.objective_ref.id == "full_parameter_sft"
+    # admitted at planning even though the backend does not prove full_finetune; refused at EXECUTION until
+    # dense_full_finetune is workload_verified (the full-parameter worker + full-model evidence + a run).
+    with pytest.raises(ExecutionConfigurationError, match="full_finetune"):
+        required_runner_lane(plan)
+
+
+def test_a_dense_qlora_sft_plan_is_unchanged_by_the_full_finetune_path():
+    # the byte-locked adapter path stays: no full_finetune constraint -> the SFT adapter config, executable.
+    plan = _plan(_profile(cc_major=8), _report(), task_type="sft")
+    assert plan.resolved_execution is not None
+    assert plan.resolved_full_finetune_execution is None
+    assert plan.resolved_execution.adapter.method.value in {"lora", "qlora"}
+
+
 def test_preference_resolver_threads_the_dpo_knobs():
     # beta / label_smoothing / max_prompt_length are operator knobs, not fixed defaults - they flow from
     # PlannerConstraints into the sealed preference config.
