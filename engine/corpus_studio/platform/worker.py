@@ -71,6 +71,10 @@ def _build_runner(runner_name: str) -> Any:
 
     if runner_name == "echo":
         return EchoRunner()
+    if runner_name in ("pretraining", "pretraining_cpu_toy"):
+        from corpus_studio.platform.runners import PretrainingRunner  # noqa: PLC0415
+
+        return PretrainingRunner(cpu_toy=(runner_name == "pretraining_cpu_toy"))
     from corpus_studio.platform.runners import TrainingRunner  # noqa: PLC0415
 
     return TrainingRunner(cpu_toy=(runner_name == "cpu_toy"))
