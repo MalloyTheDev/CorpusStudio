@@ -364,6 +364,18 @@ per-item error isolation, and off-thread document opens.
   functional proof, so newly planned training is refused on every host rather than inferred from an
   import or static feature list. Native-Windows/WDDM Blackwell remains an additional hard refusal
   because its required math path is unavailable there.
+- **From-scratch full-parameter pretraining (`workload_verified`, EXECUTABLE)**: `create-model` composes a
+  from-scratch architecture config (compose-your-own / base-on-a-family; the custom-block path is
+  security-gated and not built). `platform-plan --task-type pretraining` seals a random-init / continued
+  plan (`ModelInitializationSpec` + a `TokenizerSourceSpec` that trains a BPE tokenizer from the corpus OR
+  imports a hash-pinned one + the sharded `PretrainingDataPolicy`), and `platform-run` routes it to the
+  first-party full-parameter `PretrainingRunner` - NOT the SFT/DPO adapter lane. The worker packs the corpus,
+  random-inits from the arch config, trains full-parameter, and returns `PretrainingSuccessEvidence`; the
+  supervisor INDEPENDENTLY reload-verifies the saved `model.safetensors` reproduces the trained export state
+  before admitting `RunManifest.pretraining_success_evidence`. Promoted to `workload_verified` by a measured
+  GPU bring-up (a 124M GPT-2 trained on the RTX 5070, seq 1024, supervisor-admitted evidence; see
+  [`HOST_STATE.md`](HOST_STATE.md)). A PRODUCT claim, not a sealed IEEE cell; continued-pretraining from a
+  checkpoint is the main remaining slice.
 - **Offline DPO (preference) planning** (`platform-plan --task-type preference --objective dpo_qlora`):
   a QLoRA-DPO plan is admitted AT PLANNING and lowered into a sealed `ResolvedPreferenceExecutionConfiguration`
   (its own byte-locked seal, sibling to the SFT config) - a `PreferenceDataPolicy` (pair schema +

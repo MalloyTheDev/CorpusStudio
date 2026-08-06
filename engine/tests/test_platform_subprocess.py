@@ -201,7 +201,7 @@ def test_parent_refuses_wrong_runner_lane_before_spawning_worker():
 
 
 def test_build_runner_selects_the_runner():
-    from corpus_studio.platform.runners import TrainingRunner
+    from corpus_studio.platform.runners import PretrainingRunner, TrainingRunner
     from corpus_studio.platform.supervisor import EchoRunner
     from corpus_studio.platform.worker import _build_runner
 
@@ -209,6 +209,12 @@ def test_build_runner_selects_the_runner():
     trainer = _build_runner("cpu_toy")
     assert isinstance(trainer, TrainingRunner)
     assert trainer.cpu_toy is True and trainer.max_steps is None
+    # the workload_verified pretraining lanes route to the full-parameter PretrainingRunner, never SFT
+    assert isinstance(_build_runner("training"), TrainingRunner)
+    pretrain = _build_runner("pretraining")
+    assert isinstance(pretrain, PretrainingRunner) and pretrain.cpu_toy is False
+    pretrain_toy = _build_runner("pretraining_cpu_toy")
+    assert isinstance(pretrain_toy, PretrainingRunner) and pretrain_toy.cpu_toy is True
 
 
 def test_worker_main_runs_from_stdin(monkeypatch, capsys):

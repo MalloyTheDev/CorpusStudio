@@ -708,6 +708,12 @@ def platform_run(
         else:
             if runner_name == "echo":
                 runner: Runner = EchoRunner()
+            elif runner_name in ("pretraining", "pretraining_cpu_toy"):
+                # A workload_verified pretraining plan runs the first-party full-parameter runner, NOT the
+                # SFT/DPO adapter runner (which execute_run's runner-type gate would reject).
+                from corpus_studio.platform.runners import PretrainingRunner
+
+                runner = PretrainingRunner(cpu_toy=(runner_name == "pretraining_cpu_toy"))
             else:
                 from corpus_studio.platform.runners import TrainingRunner
 

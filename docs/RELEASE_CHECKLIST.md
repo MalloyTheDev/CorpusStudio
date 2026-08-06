@@ -45,7 +45,7 @@ These are the paths a first-time user exercises; capture output as evidence.
 
 ## 4. Screenshots
 
-- [ ] **Deferred until the production UI is settled.** The desktop is currently a
+- [ ] **Deferred until the production UI is settled.** The WPF/Avalonia desktop was (removed in #545) a
       high-fidelity **prototype**, so the README no longer ships a screenshot
       gallery. Re-introduce the workflow screenshots (Start Center, wizard,
       Explorer, Studio dashboard, Problems, Output, Debt) and the Evaluation-tab

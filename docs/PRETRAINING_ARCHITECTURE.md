@@ -1,7 +1,12 @@
 # Pretraining Architecture
 
-**Status: architecture proposal for review. Docs-only. No pretraining code, dependency, model, dataset,
-GPU, or corpus action is part of this document.** Part of
+**Status: LARGELY IMPLEMENTED (2026-08-06).** From-scratch full-parameter pretraining is now
+`workload_verified` and executable on the first-party backend: `create-model` composes an architecture
+config, `platform-plan --task-type pretraining` seals the plan, the packed-corpus + train-from-corpus
+tokenizer + `PretrainingDataPolicy` primitives ship, and `run_pretraining` (via the first-party
+`PretrainingRunner`) trains a random-init model end to end (a 124M GPT-2 on the RTX 5070; see
+[`HOST_STATE.md`](HOST_STATE.md)). This document is the original architecture proposal; the support table
+below is annotated where reality now differs (continued-pretraining is the main remaining P2 item). Part of
 [`TRAINING_SYSTEMS_ARCHITECTURE.md`](TRAINING_SYSTEMS_ARCHITECTURE.md).
 
 Pretraining (from-scratch and continued) is a **first-class objective**, not an SFT config with a
