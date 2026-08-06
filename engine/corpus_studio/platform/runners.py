@@ -22,7 +22,7 @@ import re
 import sys
 import time
 from collections.abc import Callable, Sequence
-from typing import TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 from pydantic import ValidationError
 
@@ -762,6 +762,25 @@ class PretrainingRunner:
         ctx.emit_stage(StageMarker.export, f"full model saved: {result.output_dir}")
         ctx.emit_artifact(artifact)
         return [artifact]
+
+
+def build_lane_runner(
+    runner_name: str, *, max_steps: int | None = None, corpus_root: str = "."
+) -> Any:
+    """Single source of truth for lane name -> Runner, shared by the in-process ``platform_run`` path and
+    the subprocess worker (``worker._build_runner``) so the two cannot drift. The in-process CLI path once
+    lacked the pretraining lanes while the worker had them - exactly the drift one factory prevents.
+    ``max_steps`` is the CLI compatibility cap for the SFT trainer lane; ``corpus_root`` anchors a
+    pretraining plan's relative shard locations. Echo / cpu_toy / training fall through as before."""
+    from corpus_studio.platform.supervisor import EchoRunner  # noqa: PLC0415
+
+    if runner_name == "echo":
+        return EchoRunner()
+    if runner_name in ("pretraining", "pretraining_cpu_toy"):
+        return PretrainingRunner(
+            cpu_toy=(runner_name == "pretraining_cpu_toy"), corpus_root=corpus_root
+        )
+    return TrainingRunner(cpu_toy=(runner_name == "cpu_toy"), max_steps=max_steps)
 
 
 def demo_training_plan(plan_id: str = "demo-cpu-toy") -> RunPlan:

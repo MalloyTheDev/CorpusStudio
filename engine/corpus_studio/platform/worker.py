@@ -65,22 +65,13 @@ def _send(
 
 
 def _build_runner(runner_name: str, corpus_root: str = ".") -> Any:
-    """The Runner for ``runner_name`` — mirrors the ``platform-run`` selection (echo needs nothing;
-    cpu_toy/training/pretraining lazy-import the trainer). ``corpus_root`` anchors a pretraining plan's
-    relative shard locations (ignored by the other lanes)."""
-    from corpus_studio.platform.supervisor import EchoRunner  # noqa: PLC0415
+    """The Runner for ``runner_name`` in the subprocess worker - delegates to the shared
+    ``runners.build_lane_runner`` factory so the worker and the in-process ``platform_run`` path route
+    lanes identically (the two used to drift). ``corpus_root`` anchors a pretraining plan's relative
+    shard locations."""
+    from corpus_studio.platform.runners import build_lane_runner  # noqa: PLC0415
 
-    if runner_name == "echo":
-        return EchoRunner()
-    if runner_name in ("pretraining", "pretraining_cpu_toy"):
-        from corpus_studio.platform.runners import PretrainingRunner  # noqa: PLC0415
-
-        return PretrainingRunner(
-            cpu_toy=(runner_name == "pretraining_cpu_toy"), corpus_root=corpus_root
-        )
-    from corpus_studio.platform.runners import TrainingRunner  # noqa: PLC0415
-
-    return TrainingRunner(cpu_toy=(runner_name == "cpu_toy"))
+    return build_lane_runner(runner_name, corpus_root=corpus_root)
 
 
 def _apply_allocator_policy(plan: Any) -> str:

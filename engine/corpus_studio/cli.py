@@ -562,7 +562,7 @@ def platform_run(
     becomes a real KERNEL_STALL; a crash is isolated). The RunManifest classifies the terminal state
     (succeeded / failed / cancelled) with a FailureRecord taxonomy on abnormal termination."""
     from corpus_studio.platform.contracts import RunPlan
-    from corpus_studio.platform.supervisor import EchoRunner, Runner, demo_run_plan, execute_run
+    from corpus_studio.platform.supervisor import Runner, demo_run_plan, execute_run
 
     if runner_name not in (
         "auto",
@@ -729,20 +729,15 @@ def platform_run(
                 telemetry=sampler,
             )
         else:
-            if runner_name == "echo":
-                runner: Runner = EchoRunner()
-            elif runner_name in ("pretraining", "pretraining_cpu_toy"):
-                # A workload_verified pretraining plan runs the first-party full-parameter runner, NOT the
-                # SFT/DPO adapter runner (which execute_run's runner-type gate would reject).
-                from corpus_studio.platform.runners import PretrainingRunner
+            # The SAME lane factory the subprocess worker uses, so the in-process path can't drift (it
+            # once lacked the pretraining lanes while the worker had them). A workload_verified
+            # pretraining plan gets the full-parameter runner, never the SFT/DPO adapter runner (which
+            # execute_run's runner-type gate would reject).
+            from corpus_studio.platform.runners import build_lane_runner
 
-                runner = PretrainingRunner(
-                    cpu_toy=(runner_name == "pretraining_cpu_toy"), corpus_root=corpus_root
-                )
-            else:
-                from corpus_studio.platform.runners import TrainingRunner
-
-                runner = TrainingRunner(cpu_toy=(runner_name == "cpu_toy"), max_steps=max_steps)
+            runner: Runner = build_lane_runner(
+                runner_name, max_steps=max_steps, corpus_root=corpus_root
+            )
             result = execute_run(
                 plan, runner, run_id=run_identity, out_dir=out_dir, telemetry=sampler
             )

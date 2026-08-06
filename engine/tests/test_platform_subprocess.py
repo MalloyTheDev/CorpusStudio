@@ -219,6 +219,28 @@ def test_build_runner_selects_the_runner():
     assert _build_runner("pretraining", corpus_root="/data/corpus").corpus_root == "/data/corpus"
 
 
+def test_build_lane_runner_is_the_shared_factory():
+    # The SINGLE lane->Runner mapping that BOTH the in-process platform_run path and the subprocess
+    # worker call, so they cannot drift - the exact defect where the in-process CLI path lacked the
+    # pretraining lanes while the worker had them. max_steps is the CLI-only trainer cap; corpus_root
+    # anchors a pretraining plan's relative shards.
+    from corpus_studio.platform.runners import (
+        PretrainingRunner,
+        TrainingRunner,
+        build_lane_runner,
+    )
+    from corpus_studio.platform.supervisor import EchoRunner
+
+    assert isinstance(build_lane_runner("echo"), EchoRunner)
+    train = build_lane_runner("training", max_steps=7)
+    assert isinstance(train, TrainingRunner) and train.cpu_toy is False and train.max_steps == 7
+    assert build_lane_runner("cpu_toy").cpu_toy is True
+    pre = build_lane_runner("pretraining", corpus_root="/data/corpus")
+    assert isinstance(pre, PretrainingRunner) and pre.cpu_toy is False
+    assert pre.corpus_root == "/data/corpus"
+    assert build_lane_runner("pretraining_cpu_toy").cpu_toy is True
+
+
 def test_worker_arg_parser_accepts_the_pretraining_lanes():
     # Regression: the pretraining subprocess lane shipped broken because worker.main's argparse choices
     # omitted it - _build_runner mapped it, but argparse exited 2 ("invalid choice") first, so a managed
