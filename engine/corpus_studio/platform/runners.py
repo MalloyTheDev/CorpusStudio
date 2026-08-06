@@ -679,14 +679,12 @@ class PretrainingRunner:
         cpu_toy: bool = False,
         corpus_root: str = ".",
         memory_sampler: MemorySampler = sample_gpu_memory,
-        heartbeat_timeout_s: float = 600.0,
-        poll_interval_s: float = 5.0,
     ) -> None:
+        # No watchdog/heartbeat here yet (the SFT runner's stall-observability is a later slice for the
+        # pretraining lane); expose no no-op knobs until it is wired.
         self.cpu_toy = cpu_toy
         self.corpus_root = corpus_root
         self.memory_sampler = memory_sampler
-        self.heartbeat_timeout_s = heartbeat_timeout_s
-        self.poll_interval_s = poll_interval_s
         self.name = "pretraining_cpu_toy" if cpu_toy else "pretraining"
 
     def run(self, ctx: RunContext) -> Sequence[ProducedArtifact]:
@@ -721,6 +719,15 @@ class PretrainingRunner:
                 remediation="preserve the failed run and inspect the first-party pretraining worker",
             ) from exc
 
+        if result.execution_evidence is None:
+            # The worker must return full-model success evidence; a missing proof is a hard failure,
+            # never a silently-emitted artifact that execute_run would then reject downstream.
+            raise RunnerFailure(
+                "the pretraining worker returned without full-model success evidence",
+                taxonomy=FailureTaxonomy.UPDATE_FAILURE,
+                stage=StageMarker.optimizer_step,
+                remediation="preserve the failed run and repair the first-party pretraining worker",
+            )
         # The runner REPORTS the worker-proposed success evidence; execute_run re-verifies before admit.
         ctx.pretraining_success_evidence = result.execution_evidence
         try:
@@ -728,13 +735,8 @@ class PretrainingRunner:
         except Exception:  # noqa: BLE001 - observability only; a probe fault is not a run failure
             ctx.measured_peak = None
 
-        model_hash = (
-            result.execution_evidence.model_safetensors_sha256[:12]
-            if result.execution_evidence is not None
-            else "nohash"
-        )
         artifact = ProducedArtifact(
-            artifact_id=f"{ctx.run_id}-model-{model_hash}",
+            artifact_id=f"{ctx.run_id}-model-{result.execution_evidence.model_safetensors_sha256[:12]}",
             kind="model",
             path=result.output_dir,
         )

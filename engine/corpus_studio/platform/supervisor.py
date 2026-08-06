@@ -603,6 +603,11 @@ def execute_run(
     cancel = cancel or CancelToken()
     events: list[RunEvent] = []
     sink_errors: list[str] = []
+    # A "resolved" run has a real execution - an SFT adapter OR a full-parameter pretraining plan - as
+    # opposed to an echo plan. Used consistently for promotion, target, and output-dir selection below.
+    resolved_run = (
+        plan.resolved_execution is not None or plan.resolved_pretraining_execution is not None
+    )
     record_dir = run_record_directory(out_dir, rid) if out_dir is not None else None
     events_handle: Any = None
     if record_dir is not None:
@@ -771,9 +776,7 @@ def execute_run(
                     stage=StageMarker.export,
                     remediation="preserve the run directory and repair durable artifact storage",
                 ) from exc
-        if (
-            plan.resolved_execution is not None or plan.resolved_pretraining_execution is not None
-        ) and ctx.measured_peak is not None:
+        if resolved_run and ctx.measured_peak is not None:
             # Promotion follows every semantic, byte-integrity, and durable-artifact gate.
             from corpus_studio.platform.watchdog import (  # noqa: PLC0415
                 reconcile_measured_fit,
@@ -823,7 +826,7 @@ def execute_run(
         base_model=plan.base_model,
         target=(
             plan.backend_ref.id
-            if plan.resolved_execution is not None or plan.resolved_pretraining_execution is not None
+            if resolved_run
             else runner.name
         ),
         output_dir=(
@@ -831,7 +834,7 @@ def execute_run(
                 (artifact.path for artifact in produced if artifact.kind in ("adapter", "model")),
                 plan.export.output_dir,
             )
-            if plan.resolved_execution is not None or plan.resolved_pretraining_execution is not None
+            if resolved_run
             else plan.export.output_dir
         ),
         artifact_ids=artifact_ids,
