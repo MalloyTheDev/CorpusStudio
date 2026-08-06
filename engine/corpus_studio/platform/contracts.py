@@ -5904,7 +5904,8 @@ class RunManifest(ContractModel):
             # success - never none. The one-family XOR guard keeps them from co-existing; this keeps a
             # proven fit from standing on no success evidence at all.
             raise ValueError(
-                "a proven native fit requires complete success evidence (adapter or full-model)"
+                "a proven native fit requires complete success evidence (an SFT adapter, a full-model "
+                "pretraining, or a DPO adapter run)"
             )
         return self
 
