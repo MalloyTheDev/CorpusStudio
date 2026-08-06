@@ -473,6 +473,12 @@ IEEE cell) on the evidence below - from-scratch full-parameter pretraining now r
   workload_verified through the REAL dispatch, not just the direct bypass. (The base recipe source-installs the
   worker; the provenance-sealed wheel `4bacd4ef...` at `.../pretraining-hardened-c0e9870/` is for a future
   HASH-PINNED deployment via the `-verified` recipe, which `env-create` does not yet provision.)
+- **Wheel source-ahead after the 2026-08-06 audit.** The pre-merge audit fixed two pretraining-worker gaps
+  (the sealed optimizer `optim`/betas/eps were not threaded into `TrainingArguments`; an imported tokenizer
+  with no `tokenizer.json` silently skipped its required content pin - now fail-closed). These change
+  pretraining worker bytes, so the milestone wheels above (`8818d3ad`, `4bacd4ef`) are now SOURCE-AHEAD: a
+  fresh provenance-sealed wheel is owed for any hash-pinned deployment. The in-process and base-recipe
+  source-install routes (how the workload_verified evidence was gathered) carry the fix immediately.
 
 ### Offline DPO (preference) `workload_verified` bring-up (PRODUCT), 2026-08-06
 
@@ -499,6 +505,12 @@ IEEE cell) on the evidence below - offline DPO now runs end to end on this host 
   bring-up, not a convergence or preference-quality result (the synthetic pairs are trivially separable - the
   large reward margin reflects that, not model quality). The managed `platform-run --subprocess` route (a DPO
   worker wheel + sealed env) is the deployment follow-up, exactly as for pretraining (in-process routes now).
+- **Pre-merge audit hardening (2026-08-06).** A deep audit before merging the DPO branch found + fixed 5
+  seal-fidelity/integrity gaps (the DPO math, evidence, adapter reload-verify, run-scoping, and fail-closed
+  data guards were all sound). The DPO worker fixes were GPU re-validated on BOTH sealed optimizer paths:
+  `adamw_torch` admitted at peak **5.79 GiB** and `paged_adamw_8bit` admitted at peak **5.56 GiB** (the
+  pre-fix worker silently substituted a full-precision AdamW - dropping both the seal and that headroom).
+  Grad clipping now honors the sealed `max_grad_norm`. Both runs were supervisor-adapter-reload-verified.
 
 ## Verification boundary — what `HARDWARE_VERIFIED` does and does NOT prove
 
