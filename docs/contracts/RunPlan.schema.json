@@ -1835,6 +1835,11 @@
       "additionalProperties": false,
       "description": "The offline preference-optimization loss (TRL ``DPOConfig``): the KL strength ``beta``, the\n``loss_type`` variant, conservative ``label_smoothing`` for noisy preferences, and the frozen\nreference binding. Kept off :class:`PreferenceDataPolicy` (which is only the data contract) so the\ndata policy stays reusable by a non-DPO preference method later.",
       "properties": {
+        "average_log_prob": {
+          "default": true,
+          "title": "Average Log Prob",
+          "type": "boolean"
+        },
         "beta": {
           "default": 0.1,
           "exclusiveMinimum": 0,
@@ -1862,6 +1867,12 @@
         },
         "reference_model": {
           "$ref": "#/$defs/ReferenceModelBinding"
+        },
+        "sequence_chunk_size": {
+          "default": 512,
+          "minimum": 1,
+          "title": "Sequence Chunk Size",
+          "type": "integer"
         }
       },
       "required": [

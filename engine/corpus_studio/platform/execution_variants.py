@@ -131,7 +131,15 @@ def reference_execution_variants() -> tuple[BackendExecutionVariant, ...]:
         BackendExecutionVariant(
             backend_id="corpus_studio",
             variant_kind=ExecutionVariantKind.preference_dpo,
-            support=ExecutionVariantSupport.contract_validated,
+            # workload_verified: offline DPO of Qwen3-4B-Instruct-2507 (nf4 QLoRA r16, seq 1024, 15 steps,
+            # beta 0.1, sequence-chunked log-prob) on the RTX 5070, through the first-party PreferenceRunner
+            # + the supervisor's independent adapter reload-verify - supervisor-admitted
+            # PreferenceSuccessEvidence (optimizer + 15 loss/steps 0.6931 -> 0.0739 + reward margin
+            # 0.0 -> 31.64 + a frozen reference model + 504/504 LoRA tensors changed with observed gradients
+            # + adapter.safetensors reproduced from bytes; peak 5.79 GiB). A PRODUCT claim, not a sealed IEEE
+            # cell. The managed platform-run --subprocess route (a DPO worker wheel + env) is the deployment
+            # follow-up, exactly as for pretraining. See docs/HOST_STATE.md.
+            support=ExecutionVariantSupport.workload_verified,
         ),
     )
 

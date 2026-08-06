@@ -1,5 +1,28 @@
 # CorpusStudio — Session Handoff
 
+**Last updated:** 2026-08-06 - **offline DPO (preference) is now `workload_verified`** - the full first-party
+execution path is built, GPU-proven, and promoted. This session: (1) the pretraining managed
+`platform-run --subprocess` shipping path went GPU-green after fixing 10 bugs (#810/#811/#812; see
+HOST_STATE.md); (2) the DPO **execution-evidence contracts** landed (#813 `PreferenceExecutionEvidence` /
+`PreferenceSuccessEvidence` / reward-margin evidence on `RunManifest.preference_success_evidence` with a
+3-way XOR; merged) + the **evidence bridge** (#814 `PreferenceExecutionTracker` +
+`build_preference_success_evidence`; merged); (3) on branch **#781** (feat/s2b2-dpo-worker) the DPO worker
+was completed into the product path - per-step reward capture in `run_dpo_training`, a config-consuming
+worker `run_preference` (sealed `ResolvedPreferenceExecutionConfiguration` -> `run_dpo_training` kwargs,
+directly, no lossy mirror), a first-party `PreferenceRunner`, the supervisor
+`validate_preference_success_evidence` with an **independent adapter reload-verify**, the `required_runner_lane`
+"preference" routing, and the **`preference_dpo` -> `workload_verified` promotion**. A **sealed GPU bring-up**
+(Qwen3-4B-Instruct-2507, nf4 r16, seq 1024, 15 steps, loss 0.6931->0.0739, reward margin 0.0->31.64,
+`reference_model_frozen`, 504/504 LoRA tensors changed with observed gradients, adapter reload-verified,
+peak 5.79 GiB) through `PreferenceRunner` + the supervisor admission gate is the promotion evidence (a
+PRODUCT claim, not a sealed IEEE cell; see HOST_STATE.md). The bring-up caught + fixed one real worker bug
+(the `all-linear` LoRA sentinel must be lowered to PEFT's string form). Gate green (2776 passed, 88.41% cov),
+doclint clean. **#781 is the retained-human GPU/wheel merge gate** (it carries worker-execution code). **The
+managed `platform-run --subprocess` DPO route (a DPO worker wheel + sealed env) is the remaining deployment
+follow-up, exactly as for pretraining (in-process routes now).** Also still open + retained-human: **#774**
+checkpoint/resume Phase B (v9->v10 wheel + a measured GPU resume). Nothing this session changes the sealed
+IEEE ladder.
+
 **Last updated:** 2026-08-04 - the **offline DPO / preference-optimization vertical (S1 + S2)** is built
 out, and the **hardened DPO worker is GPU-validated**. Merged to `main` this session: **S1** fail-closed
 execution-variant admission wired into planning (#775), **S2a** the `PreferenceDataPolicy` data contract

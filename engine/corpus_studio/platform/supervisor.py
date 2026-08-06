@@ -36,6 +36,7 @@ from corpus_studio.platform.contracts import (
     FailureRecord,
     FitClassification,
     OptimizerStepLossEvidence,
+    PreferenceSuccessEvidence,
     PretrainingSuccessEvidence,
     RunEvent,
     RunManifest,
@@ -196,6 +197,10 @@ class RunContext:
         # RE-VERIFIES it (reload the saved model.safetensors, re-hash, compare to the sealed trained
         # state) before it may reach the manifest - the runner cannot self-admit a success.
         self.pretraining_success_evidence: PretrainingSuccessEvidence | None = None
+        # A preference (DPO) runner reports the worker-proposed adapter success evidence; execute_run
+        # RE-VERIFIES it (reload the saved adapter, re-hash, compare to the sealed trained state) before
+        # it may reach the manifest - the runner cannot self-admit a success.
+        self.preference_success_evidence: PreferenceSuccessEvidence | None = None
 
     @property
     def cancelled(self) -> bool:
@@ -524,6 +529,106 @@ def _reload_verify_full_model(  # pragma: no cover - torch reload; proven by a r
     return True, None
 
 
+def _reload_verify_adapter(  # pragma: no cover - torch reload; proven by a routed run
+    adapter_dir: str,
+    *,
+    expected_after_sha256: str,
+    expected_adapter_sha256: str,
+    expected_config_sha256: str,
+) -> tuple[bool, str | None]:
+    """Independently reload the saved PEFT adapter and assert it reproduces the sealed trained export
+    state, and that the saved adapter + config bytes match the worker's proposal exactly - the adapter
+    sibling of :func:`_reload_verify_full_model`. Loads the adapter weights alone (no base model needed).
+    Returns ``(verified, reason)`` - never a crash of success admission, never a false claim."""
+    import hashlib  # noqa: PLC0415
+    from pathlib import Path  # noqa: PLC0415
+
+    adapter_st = Path(adapter_dir) / "adapter_model.safetensors"
+    adapter_cfg = Path(adapter_dir) / "adapter_config.json"
+    if not adapter_st.is_file():
+        return False, "saved adapter_model.safetensors not found"
+    if not adapter_cfg.is_file():
+        return False, "saved adapter_config.json not found"
+    if hashlib.sha256(adapter_st.read_bytes()).hexdigest() != expected_adapter_sha256:
+        return False, "saved adapter_model.safetensors bytes do not match the proposed digest"
+    if hashlib.sha256(adapter_cfg.read_bytes()).hexdigest() != expected_config_sha256:
+        return False, "saved adapter_config.json bytes do not match the proposed digest"
+    try:
+        import torch  # noqa: PLC0415
+        from safetensors.torch import load_file  # noqa: PLC0415
+
+        from corpus_studio.training.trainer import capture_adapter_export_state  # noqa: PLC0415
+
+        snapshot = capture_adapter_export_state(
+            load_file(str(adapter_st)), torch, stage=StageMarker.export
+        )
+    except Exception as exc:  # noqa: BLE001 - any reload/parse failure is NOT verified, never a crash
+        return False, f"could not reload the saved adapter: {type(exc).__name__}: {exc}"
+    if snapshot.state_sha256 != expected_after_sha256:
+        return False, "the reloaded adapter does not reproduce the trained export state"
+    return True, None
+
+
+def validate_preference_success_evidence(
+    plan: RunPlan,
+    proposed: PreferenceSuccessEvidence | None,
+    produced: Sequence[ProducedArtifact],
+    measured_peak: MemoryMetrics | None,
+) -> PreferenceSuccessEvidence:
+    """Independently re-verify a preference (DPO) runner's PROPOSED adapter success before terminal PASS.
+
+    The worker proposes the success evidence, but execute_run is the only layer that may admit it: it
+    confirms the completed steps match the sealed schedule, then reloads the saved adapter and asserts it
+    reproduces the sealed trained export state (and that the saved bytes match the proposal). Any mismatch
+    is fail-closed. Returns the admitted evidence carrying the supervisor-measured peak."""
+    execution = plan.resolved_preference_execution
+    if execution is None:  # pragma: no cover - caller restricts this to a resolved preference plan.
+        raise RunnerFailure(
+            "preference success evidence requires a resolved preference execution",
+            taxonomy=FailureTaxonomy.UNSUPPORTED_CONFIGURATION,
+            stage=StageMarker.process_start,
+        )
+    if proposed is None:
+        raise RunnerFailure(
+            "resolved preference returned without adapter success evidence",
+            taxonomy=FailureTaxonomy.UPDATE_FAILURE,
+            stage=StageMarker.optimizer_step,
+        )
+    if execution.schedule.max_steps is not None:
+        if proposed.execution.completed_optimizer_steps != execution.schedule.max_steps:
+            raise RunnerFailure(
+                "completed optimizer steps do not match the sealed schedule",
+                taxonomy=FailureTaxonomy.OPTIMIZER_FAILURE,
+                stage=StageMarker.optimizer_step,
+            )
+    elif proposed.execution.completed_optimizer_steps < 1:
+        raise RunnerFailure(
+            "epoch-scheduled preference admitted zero completed optimizer steps",
+            taxonomy=FailureTaxonomy.OPTIMIZER_FAILURE,
+            stage=StageMarker.optimizer_step,
+        )
+    adapter_artifact = next((item for item in produced if item.kind == "adapter"), None)
+    if adapter_artifact is None:
+        raise RunnerFailure(
+            "resolved preference produced no adapter artifact to admit",
+            taxonomy=FailureTaxonomy.ARTIFACT_FAILURE,
+            stage=StageMarker.export,
+        )
+    verified, reason = _reload_verify_adapter(
+        adapter_artifact.path,
+        expected_after_sha256=proposed.execution.adapter_export_state.after_sha256,
+        expected_adapter_sha256=proposed.adapter_safetensors_sha256,
+        expected_config_sha256=proposed.adapter_config_sha256,
+    )
+    if not verified:
+        raise RunnerFailure(
+            f"the preference adapter artifact failed independent re-verification: {reason}",
+            taxonomy=FailureTaxonomy.ARTIFACT_FAILURE,
+            stage=StageMarker.export,
+        )
+    return proposed.model_copy(update={"measured_peak": measured_peak})
+
+
 def validate_pretraining_success_evidence(
     plan: RunPlan,
     proposed: PretrainingSuccessEvidence | None,
@@ -614,7 +719,9 @@ def execute_run(
     # A "resolved" run has a real execution - an SFT adapter OR a full-parameter pretraining plan - as
     # opposed to an echo plan. Used consistently for promotion, target, and output-dir selection below.
     resolved_run = (
-        plan.resolved_execution is not None or plan.resolved_pretraining_execution is not None
+        plan.resolved_execution is not None
+        or plan.resolved_pretraining_execution is not None
+        or plan.resolved_preference_execution is not None
     )
     record_dir = run_record_directory(out_dir, rid) if out_dir is not None else None
     events_handle: Any = None
@@ -671,6 +778,7 @@ def execute_run(
     artifact_manifests: list[ArtifactManifest] = []
     training_success_evidence: TrainingSuccessEvidence | None = None
     pretraining_success_evidence: PretrainingSuccessEvidence | None = None
+    preference_success_evidence: PreferenceSuccessEvidence | None = None
 
     try:
         # Defense in depth: callers can reach this public library boundary without going through the
@@ -728,6 +836,15 @@ def execute_run(
                     taxonomy=FailureTaxonomy.UNSUPPORTED_CONFIGURATION,
                     stage=StageMarker.env_loaded,
                 )
+        elif plan.resolved_preference_execution is not None:
+            from corpus_studio.platform.runners import PreferenceRunner  # noqa: PLC0415
+
+            if type(runner) is not PreferenceRunner:
+                raise RunnerFailure(
+                    "resolved preference (DPO) plans require the first-party PreferenceRunner adapter",
+                    taxonomy=FailureTaxonomy.UNSUPPORTED_CONFIGURATION,
+                    stage=StageMarker.env_loaded,
+                )
         elif not isinstance(runner, EchoRunner):
             raise RunnerFailure(
                 "echo plans require the built-in EchoRunner adapter",
@@ -769,6 +886,13 @@ def execute_run(
             pretraining_success_evidence = validate_pretraining_success_evidence(
                 plan,
                 ctx.pretraining_success_evidence,
+                produced,
+                ctx.measured_peak,
+            )
+        if plan.resolved_preference_execution is not None:
+            preference_success_evidence = validate_preference_success_evidence(
+                plan,
+                ctx.preference_success_evidence,
                 produced,
                 ctx.measured_peak,
             )
@@ -853,6 +977,9 @@ def execute_run(
         ),
         pretraining_success_evidence=(
             pretraining_success_evidence if state == "succeeded" else None
+        ),
+        preference_success_evidence=(
+            preference_success_evidence if state == "succeeded" else None
         ),
         notes=(
             "event sink failures were isolated: " + ", ".join(sink_errors)

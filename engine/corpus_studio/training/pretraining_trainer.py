@@ -162,20 +162,33 @@ def _train_bpe_tokenizer(documents: list[str], tokenizer_source: Any) -> Any:  #
     )
 
 
+def _verify_pinned_tokenizer_content(location: Path, expected_sha256: str) -> None:
+    """PURE fail-closed integrity gate for an imported tokenizer. The seal REQUIRES a
+    tokenizer_content_sha256 for an import (TokenizerSourceSpec validator), and a fast tokenizer's canonical
+    bytes live in tokenizer.json. FAIL CLOSED when there is no tokenizer.json to verify against - a missing
+    file must never silently skip the integrity pin (a swapped tokenizer redefines the whole vocab) - and on
+    any content mismatch. A slow/SentencePiece-only tokenizer is refused on purpose: it cannot be
+    content-verified by this digest."""
+    tokenizer_json = location / "tokenizer.json" if location.is_dir() else location
+    if not tokenizer_json.is_file():
+        raise PretrainingError(
+            "cannot verify the sealed tokenizer_content_sha256: no tokenizer.json at the pinned location "
+            f"{location} - an imported tokenizer must ship a tokenizer.json to be content-pinned."
+        )
+    observed = hashlib.sha256(tokenizer_json.read_bytes()).hexdigest()
+    if observed != expected_sha256:
+        raise PretrainingError(
+            "the imported tokenizer content does not match the sealed tokenizer_content_sha256"
+        )
+
+
 def _load_imported_tokenizer(tokenizer_source: Any) -> Any:  # pragma: no cover
     """Load a pre-built tokenizer pinned by location + content digest (the bring-your-own path)."""
     from transformers import AutoTokenizer  # noqa: PLC0415
 
     location = Path(tokenizer_source.tokenizer_location)
     tokenizer = AutoTokenizer.from_pretrained(str(location))
-    # Verify the pinned content: a fast tokenizer's canonical bytes live in tokenizer.json.
-    tokenizer_json = location / "tokenizer.json" if location.is_dir() else location
-    if tokenizer_json.is_file():
-        observed = hashlib.sha256(tokenizer_json.read_bytes()).hexdigest()
-        if observed != tokenizer_source.tokenizer_content_sha256:
-            raise PretrainingError(
-                "the imported tokenizer content does not match the sealed tokenizer_content_sha256"
-            )
+    _verify_pinned_tokenizer_content(location, tokenizer_source.tokenizer_content_sha256)
     if tokenizer.pad_token is None and tokenizer.eos_token is not None:
         tokenizer.pad_token = tokenizer.eos_token
     return tokenizer
@@ -346,6 +359,13 @@ def run_pretraining(  # pragma: no cover - torch/tokenizers integration; proven 
         max_grad_norm=optimizer.max_grad_norm,
         lr_scheduler_type=(optimizer.lr_scheduler or "linear"),
         warmup_ratio=optimizer.warmup_ratio or 0.0,
+        # Honor the FULL sealed optimizer - impl (adamw_torch vs paged_adamw_8bit) + betas + epsilon - not
+        # just the lr/decay: silently defaulting HF's optim would drop the sealed choice (the same
+        # trainer-field-filtering the SFT path avoids via optim=impl.value).
+        optim=optimizer.impl.value,
+        adam_beta1=optimizer.adam_beta1,
+        adam_beta2=optimizer.adam_beta2,
+        adam_epsilon=optimizer.adam_epsilon,
         seed=execution.seed,
         data_seed=execution.data_seed,
         logging_steps=1,

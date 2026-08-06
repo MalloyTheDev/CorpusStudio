@@ -137,12 +137,14 @@ export type PrecisionMode1 = "fp32" | "tf32" | "fp16" | "bf16" | "fp8" | "mixed_
 export type OptimizerStateDtype = PrecisionMode | QuantizationMode;
 export type QuantizationMode = "none" | "int8" | "int4" | "nf4" | "fp4" | "gptq" | "awq" | "hqq";
 export type QuantizationMode1 = "none" | "int8" | "int4" | "nf4" | "fp4" | "gptq" | "awq" | "hqq";
+export type AverageLogProb = boolean;
 export type Beta = number;
 export type LabelSmoothing = number;
 export type LossType = "sigmoid";
 export type Objective = "dpo";
 export type Mode = "frozen_base";
 export type PrecomputeRefLogProbs = boolean;
+export type SequenceChunkSize = number;
 export type RuntimeMode = "training" | "cpu_toy";
 export type SaveStrategy = "no" | "steps";
 export type MaxSteps = number | null;
@@ -403,11 +405,13 @@ export interface PrecisionExecutionPolicy {
  * data policy stays reusable by a non-DPO preference method later.
  */
 export interface PreferenceOptimizationSpec {
+  average_log_prob?: AverageLogProb;
   beta?: Beta;
   label_smoothing?: LabelSmoothing;
   loss_type?: LossType;
   objective?: Objective;
   reference_model: ReferenceModelBinding;
+  sequence_chunk_size?: SequenceChunkSize;
 }
 /**
  * The frozen reference policy an offline DPO run scores its trainable policy against.
