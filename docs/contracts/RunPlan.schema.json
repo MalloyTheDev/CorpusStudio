@@ -2292,6 +2292,190 @@
       "title": "ResolvedExecutionConfiguration",
       "type": "object"
     },
+    "ResolvedFullFinetuneExecutionConfiguration": {
+      "additionalProperties": false,
+      "description": "The hash-sealed configuration for a FULL-PARAMETER supervised fine-tune - the full-model sibling of\nthe adapter-only :class:`ResolvedExecutionConfiguration`. Same SFT data + objective path, but ALL model\nparameters are trainable and the artifact is a full model (merged safetensors + full-state checkpoints),\nso it is its OWN sealed config: the SFT config's validator hard-requires a PEFT adapter + adapter-only\nexport, which a full fine-tune cannot satisfy. Consumed directly by the first-party full-parameter\nworker; refused at execution until dense_full_finetune is workload_verified.",
+      "properties": {
+        "adapter": {
+          "$ref": "#/$defs/AdapterSpec"
+        },
+        "adapter_task_type": {
+          "const": "CAUSAL_LM",
+          "default": "CAUSAL_LM",
+          "title": "Adapter Task Type",
+          "type": "string"
+        },
+        "attention": {
+          "$ref": "#/$defs/AttentionExecutionPolicy"
+        },
+        "backend_ref": {
+          "$ref": "#/$defs/Ref"
+        },
+        "batching": {
+          "$ref": "#/$defs/BatchingSpec"
+        },
+        "bnb_4bit_use_double_quant": {
+          "title": "Bnb 4Bit Use Double Quant",
+          "type": "boolean"
+        },
+        "capability_report_ref": {
+          "$ref": "#/$defs/Ref"
+        },
+        "checkpoint_policy": {
+          "$ref": "#/$defs/CheckpointPolicy"
+        },
+        "configuration_hash": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Configuration Hash",
+          "type": "string"
+        },
+        "configuration_id": {
+          "pattern": "^[A-Za-z0-9._-]+$",
+          "title": "Configuration Id",
+          "type": "string"
+        },
+        "contract_version": {
+          "const": "1.0.0",
+          "default": "1.0.0",
+          "title": "Contract Version",
+          "type": "string"
+        },
+        "data": {
+          "$ref": "#/$defs/TrainingDataPolicy"
+        },
+        "data_seed": {
+          "default": 42,
+          "minimum": 0,
+          "title": "Data Seed",
+          "type": "integer"
+        },
+        "device_map": {
+          "items": {
+            "$ref": "#/$defs/DeviceMapEntry"
+          },
+          "minItems": 1,
+          "title": "Device Map",
+          "type": "array"
+        },
+        "environment_binding": {
+          "enum": [
+            "profile_snapshot",
+            "managed_lock"
+          ],
+          "title": "Environment Binding",
+          "type": "string"
+        },
+        "environment_ref": {
+          "$ref": "#/$defs/Ref"
+        },
+        "export_format": {
+          "$ref": "#/$defs/ExportFormat"
+        },
+        "gradient_checkpointing": {
+          "default": true,
+          "title": "Gradient Checkpointing",
+          "type": "boolean"
+        },
+        "inputs": {
+          "$ref": "#/$defs/ExecutionInputs"
+        },
+        "loss_impl": {
+          "$ref": "#/$defs/LossImpl"
+        },
+        "objective_ref": {
+          "$ref": "#/$defs/Ref"
+        },
+        "optimizer": {
+          "$ref": "#/$defs/OptimizerSpec"
+        },
+        "output_dir": {
+          "minLength": 1,
+          "title": "Output Dir",
+          "type": "string"
+        },
+        "output_layout": {
+          "const": "run_scoped_v1",
+          "default": "run_scoped_v1",
+          "title": "Output Layout",
+          "type": "string"
+        },
+        "precision": {
+          "$ref": "#/$defs/PrecisionExecutionPolicy"
+        },
+        "runtime_mode": {
+          "enum": [
+            "training",
+            "cpu_toy"
+          ],
+          "title": "Runtime Mode",
+          "type": "string"
+        },
+        "save_strategy": {
+          "default": "steps",
+          "enum": [
+            "no",
+            "steps"
+          ],
+          "title": "Save Strategy",
+          "type": "string"
+        },
+        "schedule": {
+          "$ref": "#/$defs/TrainingSchedule"
+        },
+        "seed": {
+          "default": 42,
+          "minimum": 0,
+          "title": "Seed",
+          "type": "integer"
+        },
+        "sequence": {
+          "$ref": "#/$defs/SequenceSpec"
+        },
+        "trainer_interface": {
+          "$ref": "#/$defs/TrainerInterfacePolicy"
+        },
+        "trust_remote_code": {
+          "const": false,
+          "default": false,
+          "title": "Trust Remote Code",
+          "type": "boolean"
+        },
+        "use_safetensors": {
+          "const": true,
+          "default": true,
+          "title": "Use Safetensors",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "configuration_id",
+        "configuration_hash",
+        "backend_ref",
+        "environment_ref",
+        "environment_binding",
+        "capability_report_ref",
+        "inputs",
+        "objective_ref",
+        "runtime_mode",
+        "precision",
+        "attention",
+        "device_map",
+        "adapter",
+        "optimizer",
+        "loss_impl",
+        "sequence",
+        "batching",
+        "checkpoint_policy",
+        "schedule",
+        "data",
+        "trainer_interface",
+        "export_format",
+        "bnb_4bit_use_double_quant",
+        "output_dir"
+      ],
+      "title": "ResolvedFullFinetuneExecutionConfiguration",
+      "type": "object"
+    },
     "ResolvedPreferenceExecutionConfiguration": {
       "additionalProperties": false,
       "description": "The hash-sealed configuration for an offline preference-optimization (DPO) run - the sibling of\n:class:`ResolvedExecutionConfiguration` for the ``preference_dpo`` execution variant.\n\nThe dense-QLoRA-SFT seal is byte-locked two ways (its own ``configuration_hash`` AND a committed\nsemantic golden over its full field set), so DPO's execution semantics live on THIS separate\ncontract, never as new fields on the SFT config. It reuses every shared execution sub-spec\n(placement / precision / attention / adapter / optimizer / sequence / batching / checkpoint /\nschedule / trainer interface) and adds only what DPO needs: a :class:`PreferenceDataPolicy` (never\nthe SFT ``TrainingDataPolicy``) and a :class:`PreferenceOptimizationSpec` (beta / loss / reference).\n\nCarried on ``RunPlan.resolved_preference_execution`` (a plan holds EITHER the SFT config OR this\none, never both). The matching adapter-based ``dpo_qlora`` objective exists and the admission gate\nbinds the ``preference_dpo`` variant to it; the resolver (a later control-plane step) populates\n``objective_ref`` with that objective's sealed identity - the pure contract cannot dereference the\nregistry itself. What remains gated is EXECUTION: the ``DPOTrainer`` branch, a workload-verified 4B\nrun, and the milestone wheel that promotes ``preference_dpo`` to ``workload_verified``.\n``trainer_interface`` is reused as an execution-shaped placeholder; the exact ``DPOConfig`` trainer\nsurface (distinct from ``SFTConfig``) is sealed with the ``DPOTrainer`` branch, since the contract is\nnot yet executable.",
@@ -3341,6 +3525,17 @@
       "anyOf": [
         {
           "$ref": "#/$defs/ResolvedExecutionConfiguration"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "resolved_full_finetune_execution": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ResolvedFullFinetuneExecutionConfiguration"
         },
         {
           "type": "null"

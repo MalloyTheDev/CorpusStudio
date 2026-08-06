@@ -26,6 +26,7 @@ export type { PretrainingDataPolicy } from "./PretrainingDataPolicy";
 export type { ProjectManifest } from "./ProjectManifest";
 export type { PythonRuntime } from "./PythonRuntime";
 export type { ResolvedExecutionConfiguration } from "./ResolvedExecutionConfiguration";
+export type { ResolvedFullFinetuneExecutionConfiguration } from "./ResolvedFullFinetuneExecutionConfiguration";
 export type { ResolvedPreferenceExecutionConfiguration } from "./ResolvedPreferenceExecutionConfiguration";
 export type { ResolvedPretrainingExecutionConfiguration } from "./ResolvedPretrainingExecutionConfiguration";
 export type { RunEvent } from "./RunEvent";

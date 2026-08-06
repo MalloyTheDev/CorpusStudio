@@ -306,9 +306,28 @@ export type Bnb4BitUseDoubleQuant1 = boolean;
 export type ConfigurationHash1 = string;
 export type ConfigurationId1 = string;
 export type ContractVersion2 = "1.0.0";
-export type ChatTemplateSha2561 = string | null;
-export type ContractVersion3 = "1.0.0";
 export type DataSeed1 = number;
+/**
+ * @minItems 1
+ */
+export type DeviceMap1 = [DeviceMapEntry, ...DeviceMapEntry[]];
+export type EnvironmentBinding1 = "profile_snapshot" | "managed_lock";
+export type GradientCheckpointing2 = boolean;
+export type OutputDir2 = string;
+export type OutputLayout1 = "run_scoped_v1";
+export type RuntimeMode1 = "training" | "cpu_toy";
+export type SaveStrategy1 = "no" | "steps";
+export type Seed1 = number;
+export type TrustRemoteCode1 = false;
+export type UseSafetensors1 = true;
+export type AdapterTaskType2 = "CAUSAL_LM";
+export type Bnb4BitUseDoubleQuant2 = boolean;
+export type ConfigurationHash2 = string;
+export type ConfigurationId2 = string;
+export type ContractVersion3 = "1.0.0";
+export type ChatTemplateSha2561 = string | null;
+export type ContractVersion4 = "1.0.0";
+export type DataSeed2 = number;
 export type FormatterId1 = string;
 export type FormatterSha2561 = string;
 export type MaxLength = number;
@@ -318,15 +337,15 @@ export type SchemaId = string;
 export type SchemaSha256 = string;
 export type SchemaVersion = string;
 export type TruncationPolicy1 = "refuse" | "allow";
-export type DataSeed2 = number;
+export type DataSeed3 = number;
 /**
  * @minItems 1
  */
-export type DeviceMap1 = [DeviceMapEntry, ...DeviceMapEntry[]];
-export type EnvironmentBinding1 = "profile_snapshot" | "managed_lock";
-export type GradientCheckpointing2 = boolean;
-export type OutputDir2 = string;
-export type OutputLayout1 = "run_scoped_v1";
+export type DeviceMap2 = [DeviceMapEntry, ...DeviceMapEntry[]];
+export type EnvironmentBinding2 = "profile_snapshot" | "managed_lock";
+export type GradientCheckpointing3 = boolean;
+export type OutputDir3 = string;
+export type OutputLayout2 = "run_scoped_v1";
 export type AverageLogProb = boolean;
 export type Beta = number;
 export type LabelSmoothing = number;
@@ -335,16 +354,16 @@ export type Objective = "dpo";
 export type Mode = "frozen_base";
 export type PrecomputeRefLogProbs = boolean;
 export type SequenceChunkSize = number;
-export type RuntimeMode1 = "training" | "cpu_toy";
-export type SaveStrategy1 = "no" | "steps";
-export type Seed1 = number;
-export type TrustRemoteCode1 = false;
-export type UseSafetensors1 = true;
-export type ConfigurationHash2 = string;
-export type ConfigurationId2 = string;
-export type ContractVersion4 = "1.0.0";
+export type RuntimeMode2 = "training" | "cpu_toy";
+export type SaveStrategy2 = "no" | "steps";
+export type Seed2 = number;
+export type TrustRemoteCode2 = false;
+export type UseSafetensors2 = true;
+export type ConfigurationHash3 = string;
+export type ConfigurationId3 = string;
 export type ContractVersion5 = "1.0.0";
-export type DataSeed3 = number;
+export type ContractVersion6 = "1.0.0";
+export type DataSeed4 = number;
 export type DocumentBoundaries = boolean;
 export type Epochs = number | null;
 export type GlobalBatchSize = number;
@@ -358,16 +377,16 @@ export type TokenCount = number;
 export type Shards = PretrainingShard[];
 export type Streaming = boolean;
 export type TokenBudget = number | null;
-export type DataSeed4 = number;
+export type DataSeed5 = number;
 /**
  * @minItems 1
  */
-export type DeviceMap2 = [DeviceMapEntry, ...DeviceMapEntry[]];
-export type EnvironmentBinding2 = "profile_snapshot" | "managed_lock";
-export type GradientCheckpointing3 = boolean;
+export type DeviceMap3 = [DeviceMapEntry, ...DeviceMapEntry[]];
+export type EnvironmentBinding3 = "profile_snapshot" | "managed_lock";
+export type GradientCheckpointing4 = boolean;
 export type EntrySymbol = string;
 export type InterfaceVersion = "custom_decoder_v1";
-export type TrustRemoteCode2 = false;
+export type TrustRemoteCode3 = false;
 export type VettingVerdict = "admitted";
 export type InitSeed = number | null;
 export type InitializerRange = number | null;
@@ -377,10 +396,10 @@ export type ResetDataCursor = boolean;
 export type ResetLrScheduler = boolean;
 export type ResetOptimizer = boolean;
 export type VocabSize = number | null;
-export type OutputDir3 = string;
-export type OutputLayout2 = "run_scoped_v1";
-export type RuntimeMode2 = "training" | "cpu_toy";
-export type Seed2 = number;
+export type OutputDir4 = string;
+export type OutputLayout3 = "run_scoped_v1";
+export type RuntimeMode3 = "training" | "cpu_toy";
+export type Seed3 = number;
 export type Algorithm = ("bpe" | "unigram" | "wordpiece") | null;
 export type MinFrequency = number | null;
 export type Mode2 = "train" | "import" | "freeze";
@@ -388,9 +407,9 @@ export type SpecialTokens = string[] | null;
 export type TokenizerContentSha256 = string | null;
 export type TokenizerLocation = string | null;
 export type VocabSize1 = number | null;
-export type TrustRemoteCode3 = false;
-export type UseSafetensors2 = true;
-export type Seed3 = number;
+export type TrustRemoteCode4 = false;
+export type UseSafetensors3 = true;
+export type Seed4 = number;
 export type TaskType =
   | "sft"
   | "pretraining"
@@ -437,9 +456,10 @@ export interface RunPlan {
   precision: PrecisionMode;
   quantization: QuantizationMode;
   resolved_execution?: ResolvedExecutionConfiguration | null;
+  resolved_full_finetune_execution?: ResolvedFullFinetuneExecutionConfiguration | null;
   resolved_preference_execution?: ResolvedPreferenceExecutionConfiguration | null;
   resolved_pretraining_execution?: ResolvedPretrainingExecutionConfiguration | null;
-  seed?: Seed3;
+  seed?: Seed4;
   sequence: SequenceSpec;
   task_type: TaskType;
   training_config_snapshot?: TrainingConfigSnapshot;
@@ -784,6 +804,49 @@ export interface TrainerInterfacePolicy {
   tokenizer_parameter: TokenizerParameter;
 }
 /**
+ * The hash-sealed configuration for a FULL-PARAMETER supervised fine-tune - the full-model sibling of
+ * the adapter-only :class:`ResolvedExecutionConfiguration`. Same SFT data + objective path, but ALL model
+ * parameters are trainable and the artifact is a full model (merged safetensors + full-state checkpoints),
+ * so it is its OWN sealed config: the SFT config's validator hard-requires a PEFT adapter + adapter-only
+ * export, which a full fine-tune cannot satisfy. Consumed directly by the first-party full-parameter
+ * worker; refused at execution until dense_full_finetune is workload_verified.
+ */
+export interface ResolvedFullFinetuneExecutionConfiguration {
+  adapter: AdapterSpec;
+  adapter_task_type?: AdapterTaskType1;
+  attention: AttentionExecutionPolicy;
+  backend_ref: Ref;
+  batching: BatchingSpec;
+  bnb_4bit_use_double_quant: Bnb4BitUseDoubleQuant1;
+  capability_report_ref: Ref;
+  checkpoint_policy: CheckpointPolicy;
+  configuration_hash: ConfigurationHash1;
+  configuration_id: ConfigurationId1;
+  contract_version?: ContractVersion2;
+  data: TrainingDataPolicy;
+  data_seed?: DataSeed1;
+  device_map: DeviceMap1;
+  environment_binding: EnvironmentBinding1;
+  environment_ref: Ref;
+  export_format: ExportFormat;
+  gradient_checkpointing?: GradientCheckpointing2;
+  inputs: ExecutionInputs;
+  loss_impl: LossImpl;
+  objective_ref: Ref;
+  optimizer: OptimizerSpec;
+  output_dir: OutputDir2;
+  output_layout?: OutputLayout1;
+  precision: PrecisionExecutionPolicy;
+  runtime_mode: RuntimeMode1;
+  save_strategy?: SaveStrategy1;
+  schedule: TrainingSchedule;
+  seed?: Seed1;
+  sequence: SequenceSpec;
+  trainer_interface: TrainerInterfacePolicy;
+  trust_remote_code?: TrustRemoteCode1;
+  use_safetensors?: UseSafetensors1;
+}
+/**
  * The hash-sealed configuration for an offline preference-optimization (DPO) run - the sibling of
  * :class:`ResolvedExecutionConfiguration` for the ``preference_dpo`` execution variant.
  *
@@ -806,38 +869,38 @@ export interface TrainerInterfacePolicy {
  */
 export interface ResolvedPreferenceExecutionConfiguration {
   adapter: AdapterSpec;
-  adapter_task_type?: AdapterTaskType1;
+  adapter_task_type?: AdapterTaskType2;
   attention: AttentionExecutionPolicy;
   backend_ref: Ref;
   batching: BatchingSpec;
-  bnb_4bit_use_double_quant: Bnb4BitUseDoubleQuant1;
+  bnb_4bit_use_double_quant: Bnb4BitUseDoubleQuant2;
   capability_report_ref: Ref;
   checkpoint_policy: CheckpointPolicy;
-  configuration_hash: ConfigurationHash1;
-  configuration_id: ConfigurationId1;
-  contract_version?: ContractVersion2;
+  configuration_hash: ConfigurationHash2;
+  configuration_id: ConfigurationId2;
+  contract_version?: ContractVersion3;
   data: PreferenceDataPolicy;
-  data_seed?: DataSeed2;
-  device_map: DeviceMap1;
-  environment_binding: EnvironmentBinding1;
+  data_seed?: DataSeed3;
+  device_map: DeviceMap2;
+  environment_binding: EnvironmentBinding2;
   environment_ref: Ref;
   export_format: ExportFormat;
-  gradient_checkpointing?: GradientCheckpointing2;
+  gradient_checkpointing?: GradientCheckpointing3;
   inputs: ExecutionInputs;
   objective_ref: Ref;
   optimizer: OptimizerSpec;
-  output_dir: OutputDir2;
-  output_layout?: OutputLayout1;
+  output_dir: OutputDir3;
+  output_layout?: OutputLayout2;
   precision: PrecisionExecutionPolicy;
   preference: PreferenceOptimizationSpec;
-  runtime_mode: RuntimeMode1;
-  save_strategy?: SaveStrategy1;
+  runtime_mode: RuntimeMode2;
+  save_strategy?: SaveStrategy2;
   schedule: TrainingSchedule;
-  seed?: Seed1;
+  seed?: Seed2;
   sequence: SequenceSpec;
   trainer_interface: TrainerInterfacePolicy;
-  trust_remote_code?: TrustRemoteCode1;
-  use_safetensors?: UseSafetensors1;
+  trust_remote_code?: TrustRemoteCode2;
+  use_safetensors?: UseSafetensors2;
 }
 /**
  * Additive, dense/MoE-safe preference-pair data policy (S2 / DPO), PARALLEL to the SFT-only
@@ -852,8 +915,8 @@ export interface ResolvedPreferenceExecutionConfiguration {
  */
 export interface PreferenceDataPolicy {
   chat_template_sha256?: ChatTemplateSha2561;
-  contract_version?: ContractVersion3;
-  data_seed?: DataSeed1;
+  contract_version?: ContractVersion4;
+  data_seed?: DataSeed2;
   formatter_id: FormatterId1;
   formatter_sha256: FormatterSha2561;
   max_length: MaxLength;
@@ -920,31 +983,31 @@ export interface ResolvedPretrainingExecutionConfiguration {
   batching: BatchingSpec;
   capability_report_ref: Ref;
   checkpoint_policy: CheckpointPolicy;
-  configuration_hash: ConfigurationHash2;
-  configuration_id: ConfigurationId2;
-  contract_version?: ContractVersion4;
+  configuration_hash: ConfigurationHash3;
+  configuration_id: ConfigurationId3;
+  contract_version?: ContractVersion5;
   data: PretrainingDataPolicy;
-  data_seed?: DataSeed4;
-  device_map: DeviceMap2;
-  environment_binding: EnvironmentBinding2;
+  data_seed?: DataSeed5;
+  device_map: DeviceMap3;
+  environment_binding: EnvironmentBinding3;
   environment_ref: Ref;
   export_format: ExportFormat;
-  gradient_checkpointing?: GradientCheckpointing3;
+  gradient_checkpointing?: GradientCheckpointing4;
   init: ModelInitializationSpec;
   loss_impl: LossImpl;
   objective_ref: Ref;
   optimizer: OptimizerSpec;
-  output_dir: OutputDir3;
-  output_layout?: OutputLayout2;
+  output_dir: OutputDir4;
+  output_layout?: OutputLayout3;
   precision: PrecisionExecutionPolicy;
-  runtime_mode: RuntimeMode2;
+  runtime_mode: RuntimeMode3;
   schedule: TrainingSchedule;
-  seed?: Seed2;
+  seed?: Seed3;
   sequence: SequenceSpec;
   tokenizer_source: TokenizerSourceSpec;
   trainer_interface: TrainerInterfacePolicy;
-  trust_remote_code?: TrustRemoteCode3;
-  use_safetensors?: UseSafetensors2;
+  trust_remote_code?: TrustRemoteCode4;
+  use_safetensors?: UseSafetensors3;
 }
 /**
  * Additive, dense/MoE-safe pretraining data policy (#487), PARALLEL to the SFT-only
@@ -955,8 +1018,8 @@ export interface ResolvedPretrainingExecutionConfiguration {
  * per-rank data cursor + streaming resume is a separate (worker) slice.
  */
 export interface PretrainingDataPolicy {
-  contract_version?: ContractVersion5;
-  data_seed: DataSeed3;
+  contract_version?: ContractVersion6;
+  data_seed: DataSeed4;
   document_boundaries?: DocumentBoundaries;
   epochs?: Epochs;
   global_batch_size: GlobalBatchSize;
@@ -1018,7 +1081,7 @@ export interface CustomModelCodeSpec {
   code_bundle_ref: Ref;
   entry_symbol: EntrySymbol;
   interface_version: InterfaceVersion;
-  trust_remote_code?: TrustRemoteCode2;
+  trust_remote_code?: TrustRemoteCode3;
   vetting_ref: Ref;
   vetting_verdict: VettingVerdict;
 }
