@@ -5699,6 +5699,107 @@ class PretrainingSuccessEvidence(ContractModel):
     measured_peak: MemoryMetrics | None = None
 
 
+class PreferenceRewardMarginEvidence(ContractModel):
+    """One optimizer step's DPO reward signal: the implicit rewards for the chosen and rejected
+    completions (each ``beta * (policy_logratio - reference_logratio)`` against the FROZEN reference)
+    and their margin. A real DPO step separates the pair; recording the margin proves the preference
+    signal was live and not a degenerate copy of an SFT loss."""
+
+    optimizer_step: int = Field(ge=1)
+    chosen_reward: float
+    rejected_reward: float
+    margin: float
+
+    @field_validator("chosen_reward", "rejected_reward", "margin", mode="before")
+    @classmethod
+    def _strict_numeric(cls, value: object) -> object:
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ValueError("preference reward evidence must be JSON numbers")
+        return value
+
+    @field_validator("chosen_reward", "rejected_reward", "margin")
+    @classmethod
+    def _finite(cls, value: float) -> float:
+        if not math.isfinite(value):
+            raise ValueError("preference reward evidence must be finite")
+        return value
+
+    @model_validator(mode="after")
+    def _margin_matches_rewards(self) -> PreferenceRewardMarginEvidence:
+        if not math.isclose(
+            self.margin, self.chosen_reward - self.rejected_reward, rel_tol=1e-6, abs_tol=1e-6
+        ):
+            raise ValueError("preference reward margin must equal chosen_reward - rejected_reward")
+        return self
+
+
+class PreferenceExecutionEvidence(ContractModel):
+    """Trainer-side proof for an offline DPO (preference) run before its adapter is admitted a success.
+
+    The adapter sibling of :class:`TrainingExecutionEvidence` for preference optimization: it REUSES the
+    generic adapter evidence pieces (:class:`TrainableStateChangeEvidence` over the PEFT adapter,
+    :class:`AdapterExportStateEvidence`, :class:`GradientCoverageEvidence`,
+    :class:`OptimizerStepLossEvidence`) and adds the preference-specific honesty signals: the reference
+    model was FROZEN (produced no gradient), real preference PAIRS were consumed, and every completed step
+    carries the DPO reward margin the loss was built from. None of these are part of the sealed execution
+    config, so the reuse cannot perturb the byte-locked SFT / pretraining / preference seals."""
+
+    trainable_state: TrainableStateChangeEvidence
+    adapter_export_state: AdapterExportStateEvidence
+    gradient_coverage: GradientCoverageEvidence
+    optimizer_created: Literal[True]
+    completed_optimizer_steps: int = Field(ge=1)
+    step_losses: list[OptimizerStepLossEvidence] = Field(min_length=1)
+    reference_model_frozen: Literal[True]
+    preference_pairs_consumed: int = Field(ge=1)
+    step_reward_margins: list[PreferenceRewardMarginEvidence] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _one_loss_and_margin_per_completed_step(self) -> PreferenceExecutionEvidence:
+        expected_steps = list(range(1, self.completed_optimizer_steps + 1))
+        if [item.optimizer_step for item in self.step_losses] != expected_steps:
+            raise ValueError(
+                "step_losses must contain exactly one ordered finite loss for every completed step"
+            )
+        if [item.optimizer_step for item in self.step_reward_margins] != expected_steps:
+            raise ValueError(
+                "step_reward_margins must contain exactly one ordered DPO reward margin for every "
+                "completed optimizer step"
+            )
+        changed = set(self.trainable_state.changed_tensor_names)
+        observed_gradients = set(self.gradient_coverage.observed_tensor_names)
+        if (
+            self.gradient_coverage.eligible_tensor_names
+            != self.trainable_state.trainable_tensor_names
+        ):
+            raise ValueError(
+                "gradient eligibility must equal the complete trainable-state inventory"
+            )
+        if not changed.intersection(observed_gradients):
+            raise ValueError(
+                "at least one changed trainable tensor must have an observed materialized gradient"
+            )
+        if self.adapter_export_state.tensor_count != self.trainable_state.trainable_tensor_count:
+            raise ValueError(
+                "adapter export tensor count must equal the complete trainable-state inventory"
+            )
+        return self
+
+
+class PreferenceSuccessEvidence(ContractModel):
+    """All gates required before a resolved offline DPO run may be called successful. The preference
+    sibling of :class:`TrainingSuccessEvidence` - it verifies the exported PEFT adapter bytes
+    (adapter_model.safetensors), not a full model."""
+
+    execution: PreferenceExecutionEvidence
+    output_path_verified: Literal[True]
+    adapter_bytes_verified: Literal[True]
+    artifact_integrity_verified: Literal[True]
+    adapter_safetensors_sha256: str = Field(pattern=SHA256_PATTERN)
+    adapter_config_sha256: str = Field(pattern=SHA256_PATTERN)
+    measured_peak: MemoryMetrics | None = None
+
+
 class RunManifest(ContractModel):
     """A single run INSTANCE: the crash-safe durable record of one execution of a RunPlan.
     Formalizes run_registry.TrainingRunRecord almost field-for-field + its state machine (terminal =
@@ -5735,6 +5836,9 @@ class RunManifest(ContractModel):
     # from-scratch / continued pretraining run (model.safetensors export), mutually exclusive with the
     # adapter evidence above. Absent until the (gated) pretraining worker capture lands.
     pretraining_success_evidence: PretrainingSuccessEvidence | None = None
+    # Offline DPO (preference) run - a PEFT adapter over a frozen reference; mutually exclusive with the
+    # SFT-adapter and full-model evidence above. Absent until the (gated) DPO worker capture lands.
+    preference_success_evidence: PreferenceSuccessEvidence | None = None
     # Present only on a run that resumed from a parent checkpoint - explicit parent-run + parent-
     # checkpoint provenance for a fresh run identity (#440). Absent for an ordinary from-scratch run.
     resume_lineage: ResumeLineage | None = None
@@ -5742,17 +5846,21 @@ class RunManifest(ContractModel):
 
     @model_validator(mode="after")
     def _one_success_evidence_family(self) -> RunManifest:
-        # A run is EITHER an adapter (SFT/DPO) success or a full-model pretraining success, never both -
-        # they describe incompatible artifacts (adapter_model.safetensors vs model.safetensors). Enforce
-        # the invariant the field docs assert rather than leaving conflict resolution to callers. At most
-        # one may be set; a prepared / running / failed run carries neither.
-        if (
-            self.training_success_evidence is not None
-            and self.pretraining_success_evidence is not None
-        ):
+        # A run has AT MOST ONE success-evidence family - they describe incompatible artifacts (an SFT
+        # adapter, a full pretraining model, or a DPO adapter). Enforce the invariant the field docs
+        # assert rather than leaving conflict resolution to callers; a prepared / running / failed run
+        # carries none.
+        families = (
+            self.training_success_evidence is not None,
+            self.pretraining_success_evidence is not None,
+            self.preference_success_evidence is not None,
+        )
+        if sum(families) > 1:
             raise ValueError(
-                "a run carries at most one success-evidence family: adapter "
-                "(training_success_evidence) XOR full-model (pretraining_success_evidence)"
+                "a run carries at most one success-evidence family: SFT adapter "
+                "(training_success_evidence) XOR full-model pretraining "
+                "(pretraining_success_evidence) XOR preference/DPO adapter "
+                "(preference_success_evidence)"
             )
         return self
 
@@ -5777,6 +5885,8 @@ class RunManifest(ContractModel):
             raise ValueError("only a succeeded run may carry training success evidence")
         if self.state != "succeeded" and self.pretraining_success_evidence is not None:
             raise ValueError("only a succeeded run may carry pretraining success evidence")
+        if self.state != "succeeded" and self.preference_success_evidence is not None:
+            raise ValueError("only a succeeded run may carry preference success evidence")
         if (
             self.state != "succeeded"
             and self.final_fit is not None
@@ -5788,12 +5898,14 @@ class RunManifest(ContractModel):
             and self.final_fit.classification in {FitClass.NATIVE_SAFE, FitClass.NATIVE_TIGHT}
             and self.training_success_evidence is None
             and self.pretraining_success_evidence is None
+            and self.preference_success_evidence is None
         ):
-            # A proven native fit is earned by EITHER an adapter (SFT/DPO) success or a full-model
-            # pretraining success - never neither. The one-family XOR guard above keeps both from
-            # co-existing; this keeps a proven fit from standing on no success evidence at all.
+            # A proven native fit is earned by an SFT adapter, a full-model pretraining, or a DPO adapter
+            # success - never none. The one-family XOR guard keeps them from co-existing; this keeps a
+            # proven fit from standing on no success evidence at all.
             raise ValueError(
-                "a proven native fit requires complete success evidence (adapter or full-model)"
+                "a proven native fit requires complete success evidence (an SFT adapter, a full-model "
+                "pretraining, or a DPO adapter run)"
             )
         return self
 

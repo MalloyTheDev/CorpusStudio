@@ -12,6 +12,9 @@ from corpus_studio.platform.contracts import (
     FullModelExportStateEvidence,
     GradientCoverageEvidence,
     OptimizerStepLossEvidence,
+    PreferenceExecutionEvidence,
+    PreferenceRewardMarginEvidence,
+    PreferenceSuccessEvidence,
     PretrainingExecutionEvidence,
     PretrainingSuccessEvidence,
     RunManifest,
@@ -276,3 +279,124 @@ def test_run_manifest_allows_neither_success_evidence() -> None:
     )
     assert manifest.training_success_evidence is None
     assert manifest.pretraining_success_evidence is None
+    assert manifest.preference_success_evidence is None
+
+
+def _preference_adapter_export() -> AdapterExportStateEvidence:
+    return AdapterExportStateEvidence(
+        before_sha256=_C,
+        after_sha256=_D,
+        tensor_count=2,
+        tensor_names=["p.0", "p.1"],
+        changed_tensor_count=1,
+        changed_tensor_names=["p.0"],
+        adapter_config_semantic_sha256=_A,
+    )
+
+
+def _preference_success() -> PreferenceSuccessEvidence:
+    # A minimal valid offline-DPO adapter success: the SFT adapter primitives + the DPO honesty signals.
+    execution = PreferenceExecutionEvidence(
+        trainable_state=_trainable(),
+        adapter_export_state=_preference_adapter_export(),
+        gradient_coverage=_gradients(),
+        optimizer_created=True,
+        completed_optimizer_steps=1,
+        step_losses=[OptimizerStepLossEvidence(optimizer_step=1, loss=0.69)],
+        reference_model_frozen=True,
+        preference_pairs_consumed=8,
+        step_reward_margins=[
+            PreferenceRewardMarginEvidence(
+                optimizer_step=1, chosen_reward=0.5, rejected_reward=-0.3, margin=0.8
+            )
+        ],
+    )
+    return PreferenceSuccessEvidence(
+        execution=execution,
+        output_path_verified=True,
+        adapter_bytes_verified=True,
+        artifact_integrity_verified=True,
+        adapter_safetensors_sha256=_A,
+        adapter_config_sha256=_B,
+    )
+
+
+def test_preference_reward_margin_must_equal_chosen_minus_rejected() -> None:
+    with pytest.raises(ValidationError, match="margin must equal chosen_reward"):
+        PreferenceRewardMarginEvidence(
+            optimizer_step=1, chosen_reward=0.5, rejected_reward=-0.3, margin=0.1
+        )
+
+
+def test_preference_reward_margin_rejects_non_finite() -> None:
+    with pytest.raises(ValidationError, match="finite"):
+        PreferenceRewardMarginEvidence(
+            optimizer_step=1, chosen_reward=float("inf"), rejected_reward=0.0, margin=float("inf")
+        )
+
+
+def test_preference_execution_needs_one_reward_margin_per_step() -> None:
+    # A real DPO step carries its reward margin; a completed step missing its margin is refused.
+    with pytest.raises(ValidationError, match="one ordered DPO reward margin for every"):
+        PreferenceExecutionEvidence(
+            trainable_state=_trainable(),
+            adapter_export_state=_preference_adapter_export(),
+            gradient_coverage=_gradients(),
+            optimizer_created=True,
+            completed_optimizer_steps=2,  # two completed steps ...
+            step_losses=[
+                OptimizerStepLossEvidence(optimizer_step=1, loss=0.7),
+                OptimizerStepLossEvidence(optimizer_step=2, loss=0.6),
+            ],
+            reference_model_frozen=True,
+            preference_pairs_consumed=8,
+            step_reward_margins=[  # ... but only one reward margin
+                PreferenceRewardMarginEvidence(
+                    optimizer_step=1, chosen_reward=0.5, rejected_reward=-0.3, margin=0.8
+                ),
+            ],
+        )
+
+
+def test_preference_success_evidence_rides_a_succeeded_manifest() -> None:
+    manifest = RunManifest(
+        run_id="run-dpo-1",
+        plan_ref=Ref(id="plan-dpo-1"),
+        created_at="2026-08-06T00:00:00+00:00",
+        updated_at="2026-08-06T00:00:03+00:00",
+        state="succeeded",
+        final_fit={"classification": "NATIVE_SAFE"},
+        preference_success_evidence=_preference_success(),
+    )
+    assert manifest.preference_success_evidence is not None
+    assert manifest.training_success_evidence is None
+    assert manifest.pretraining_success_evidence is None
+
+
+def test_run_manifest_refuses_preference_with_another_family() -> None:
+    # 3-way XOR: DPO adapter evidence cannot co-exist with SFT-adapter OR full-model pretraining evidence.
+    for other, value in (
+        ("training_success_evidence", _adapter_success()),
+        ("pretraining_success_evidence", _pretraining_success()),
+    ):
+        with pytest.raises(ValidationError, match="at most one success-evidence family"):
+            RunManifest(
+                run_id="run-dpo-both",
+                plan_ref=Ref(id="plan-dpo-both"),
+                created_at="2026-08-06T00:00:00+00:00",
+                updated_at="2026-08-06T00:00:03+00:00",
+                state="succeeded",
+                preference_success_evidence=_preference_success(),
+                **{other: value},
+            )
+
+
+def test_preference_success_evidence_requires_a_succeeded_run() -> None:
+    with pytest.raises(ValidationError, match="only a succeeded run may carry preference"):
+        RunManifest(
+            run_id="run-dpo-2",
+            plan_ref=Ref(id="plan-dpo-2"),
+            created_at="2026-08-06T00:00:00+00:00",
+            updated_at="2026-08-06T00:00:03+00:00",
+            preference_success_evidence=_preference_success(),
+        )
