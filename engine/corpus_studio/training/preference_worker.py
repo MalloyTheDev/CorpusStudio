@@ -132,6 +132,13 @@ def run_preference(  # pragma: no cover - optional training-stack integration; p
         model, use_gradient_checkpointing=execution.gradient_checkpointing
     )
     adapter = execution.adapter
+    # PEFT reads the "all-linear" sentinel only as a STRING; the sealed config carries it as ["all-linear"]
+    # (a list), which PEFT would treat as a literal module name. Lower it exactly as the SFT trainer does.
+    target_modules: Any = (
+        adapter.target_modules[0]
+        if adapter.target_modules == ["all-linear"]
+        else adapter.target_modules
+    )
     model = get_peft_model(
         model,
         LoraConfig(
@@ -140,7 +147,7 @@ def run_preference(  # pragma: no cover - optional training-stack integration; p
             lora_dropout=adapter.lora_dropout,
             bias=adapter.bias,
             task_type=execution.adapter_task_type,
-            target_modules=adapter.target_modules,
+            target_modules=target_modules,
         ),
     )
     model.train()
