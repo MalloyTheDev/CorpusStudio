@@ -3,15 +3,17 @@
 Single source of truth for what Corpus Studio actually does today. When another
 doc disagrees with this file, this file wins (and the other doc should be fixed).
 
-Last reconciled: 2026-08-06 — **from-scratch pretraining is workload_verified** (the first-party
-`PretrainingRunner` lane trains a random-init model end to end - a 124M GPT-2 GPU bring-up with
-supervisor-admitted evidence, a milestone wheel + sealed env) and **`create-model`** shipped (compose /
-base-on-a-family; #789/#791/#792); this pass also HARDENED the production `platform-run` execute_run +
-managed-subprocess path for pretraining (RunManifest pretraining-fit admission, the subprocess runner
-lane, epoch-scheduled training, single-file large-model saves, run-scoped output) - see the entries below.
-Prior (2026-08-04) - the offline **DPO / preference planning** vertical shipped (admit-at-planning
--> sealed `ResolvedPreferenceExecutionConfiguration` -> refuse-at-execution; #775/#778/#779/#782/#783), see
-the entry below. Prior (2026-07-29) — the bounded autonomous engineering loop was **extracted to a separate
+Last reconciled: 2026-08-06 — **offline DPO (preference) is workload_verified** (the first-party
+`PreferenceRunner` lane trains a QLoRA adapter over a frozen reference model end to end - a Qwen3-4B DPO GPU
+bring-up with supervisor-admitted evidence, adapter reload-verify) and, earlier this pass, **from-scratch
+pretraining is workload_verified** (the `PretrainingRunner` lane, a 124M GPT-2 GPU bring-up, a milestone
+wheel + sealed env) and **`create-model`** shipped (compose / base-on-a-family; #789/#791/#792); this pass
+also HARDENED the production `platform-run` execute_run + managed-subprocess path for pretraining
+(RunManifest pretraining-fit admission, the subprocess runner lane, epoch-scheduled training, single-file
+large-model saves, run-scoped output) - see the entries below. The offline **DPO / preference planning**
+vertical shipped 2026-08-04 (admit-at-planning -> sealed `ResolvedPreferenceExecutionConfiguration`;
+#775/#778/#779/#782/#783) and reached execution this pass (the DPO worker + `PreferenceRunner` + the
+supervisor adapter reload-verify + the workload_verified promotion). Prior (2026-07-29) — the bounded autonomous engineering loop was **extracted to a separate
 repo (`cs-loop`, #729)**; what remains here is the product, the **assurance plane**
 (`scripts/assurance/`, `cs_assure`), and the IEEE research overlay. The 2026-07-18 engine
 bug/hardening cluster is merged (#731-#736: worker fail-closed on a bad stdout byte / failed spawn,
@@ -382,17 +384,22 @@ per-item error isolation, and off-thread document opens.
   GPU bring-up (a 124M GPT-2 trained on the RTX 5070, seq 1024, supervisor-admitted evidence; see
   [`HOST_STATE.md`](HOST_STATE.md)). A PRODUCT claim, not a sealed IEEE cell; continued-pretraining from a
   checkpoint is the main remaining slice.
-- **Offline DPO (preference) planning** (`platform-plan --task-type preference --objective dpo_qlora`):
-  a QLoRA-DPO plan is admitted AT PLANNING and lowered into a sealed `ResolvedPreferenceExecutionConfiguration`
-  (its own byte-locked seal, sibling to the SFT config) - a `PreferenceDataPolicy` (pair schema +
-  preference formatter + prompt/response budget) + a `PreferenceOptimizationSpec` (beta / sigmoid loss /
-  label-smoothing / frozen-base reference) bound to the `dpo_qlora` objective, with `--dpo-beta` /
-  `--dpo-label-smoothing` / `--max-prompt-length` as fail-closed knobs. EXECUTION is refused with a typed
-  reason (`preference_dpo` is `contract_validated`, not `workload_verified`) at every gate until the DPO
-  worker wheel + a sealed run promote it. The worker primitive (a sequence-chunked log-prob that reaches
-  seq 4096 on a 12 GB card where trl/off-the-shelf-liger cap at ~1024) is GPU-validated as correct
-  (exploratory: loss->log2-start curve, held-out ranking 1.0, peak 9.49 GiB) but not yet on the sealed
-  platform-run path.
+- **Offline DPO (preference) (`workload_verified`, EXECUTABLE)**: `platform-plan --task-type preference
+  --objective dpo_qlora` admits a QLoRA-DPO plan AT PLANNING and lowers it into a sealed
+  `ResolvedPreferenceExecutionConfiguration` (its own byte-locked seal, sibling to the SFT config) - a
+  `PreferenceDataPolicy` (pair schema + preference formatter + prompt/response budget) + a
+  `PreferenceOptimizationSpec` (beta / sigmoid loss / label-smoothing / frozen-base reference) bound to the
+  `dpo_qlora` objective, with `--dpo-beta` / `--dpo-label-smoothing` / `--max-prompt-length` as fail-closed
+  knobs. `platform-run` routes it to the first-party `PreferenceRunner` - NOT the SFT/pretraining lane. The
+  worker consumes the sealed config directly, trains via a sequence-chunked log-prob primitive (which
+  reaches seq 4096 on a 12 GB card where trl / off-the-shelf-liger cap at ~1024) over a frozen reference
+  model, and returns `PreferenceExecutionEvidence`; the supervisor INDEPENDENTLY reload-verifies the saved
+  `adapter.safetensors` reproduces the trained export state before admitting
+  `RunManifest.preference_success_evidence`. Promoted to `workload_verified` by a measured GPU bring-up
+  (Qwen3-4B-Instruct-2507, nf4 r16, seq 1024, 15 steps, loss 0.6931->0.0739, reward margin 0.0->31.64,
+  504/504 LoRA tensors changed with observed gradients, peak 5.79 GiB; see [`HOST_STATE.md`](HOST_STATE.md)).
+  A PRODUCT claim, not a sealed IEEE cell. The managed `platform-run --subprocess` route (a DPO worker
+  wheel + sealed env) is the deployment follow-up, exactly as for pretraining (in-process routes now).
 - **Identity-bound backend worker protocol 2.0**: every newly generated RunPlan hash-pins the exact
   static BackendManifest. A subprocess worker must send `hello` first with that manifest and its exact
   environment/lock ref; only then can the core dispatch. The parent enforces protocol/direction/body,
