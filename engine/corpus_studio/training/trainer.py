@@ -3043,6 +3043,8 @@ def run_dpo_training(  # pragma: no cover - optional training-stack integration 
         torch.cuda.reset_peak_memory_stats(cuda_device)
     losses: list[float] = []
     margins: list[float] = []
+    chosen_rewards: list[float] = []
+    rejected_rewards: list[float] = []
     grad_norms: list[float] = []
     length_deltas: list[float] = []
     checked = False
@@ -3051,6 +3053,8 @@ def run_dpo_training(  # pragma: no cover - optional training-stack integration 
         optimizer.zero_grad()
         micro_loss = 0.0
         micro_margin = 0.0
+        micro_chosen = 0.0
+        micro_rejected = 0.0
         micro_delta = 0.0
         for _micro in range(gradient_accumulation_steps):
             row = pairs[pair_cursor % len(pairs)]
@@ -3102,11 +3106,18 @@ def run_dpo_training(  # pragma: no cover - optional training-stack integration 
                 checked = True
             micro_loss += loss.item()  # .item() detaches; float() on a grad tensor warns
             micro_margin += margin.item()
+            # The implicit DPO rewards the margin is built from - the chosen/rejected policy-vs-reference
+            # log-ratios - captured for the formal PreferenceExecutionEvidence (their difference IS the
+            # margin, so the evidence's margin-consistency check holds). .item() detaches (these carry grad).
+            micro_chosen += (policy_chosen - ref_chosen).item()
+            micro_rejected += (policy_rejected - ref_rejected).item()
             micro_delta += float(chosen_len - rejected_len)
         grad_norms.append(float(torch.nn.utils.clip_grad_norm_(trainable, float("inf"))))
         optimizer.step()
         losses.append(micro_loss / gradient_accumulation_steps)
         margins.append(micro_margin / gradient_accumulation_steps)
+        chosen_rewards.append(micro_chosen / gradient_accumulation_steps)
+        rejected_rewards.append(micro_rejected / gradient_accumulation_steps)
         length_deltas.append(micro_delta / gradient_accumulation_steps)
         # Honor the sealed checkpoint cadence: the worker wires this callback to the checkpoint coordinator
         # (which owns the atomic, identity-bound save); the primitive only signals the step boundary.
@@ -3119,6 +3130,8 @@ def run_dpo_training(  # pragma: no cover - optional training-stack integration 
     evidence.update({
         "losses": losses,
         "reward_margins": margins,
+        "chosen_rewards": chosen_rewards,
+        "rejected_rewards": rejected_rewards,
         "grad_norms": grad_norms,
         "final_grad_norm": grad_norms[-1] if grad_norms else 0.0,
         "peak_gib": peak_gib,
