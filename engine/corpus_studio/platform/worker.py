@@ -17,7 +17,7 @@ from __future__ import annotations
 import itertools
 import os
 import sys
-from typing import Any
+from typing import Any, TextIO
 
 from corpus_studio.platform.backends import backend_manifest_digest, get_worker_backend
 from corpus_studio.platform.common import HashRef, JsonObject, Ref
@@ -282,9 +282,11 @@ def _build_arg_parser() -> Any:
     return parser
 
 
-def main() -> None:
+def main(out: TextIO | None = None) -> None:
     """CLI entrypoint: read the single ``run_dispatch`` line from stdin and run it. Invoked as
-    ``python -m corpus_studio.platform.worker --runner <name>`` by the subprocess supervisor."""
+    ``python -m corpus_studio.platform.worker --runner <name>`` by the subprocess supervisor. ``out`` is
+    the protocol stream: the ``__main__`` entrypoint binds a PRIVATE-fd stream (so trainer output on fd 1
+    cannot corrupt the framed protocol); callers/tests that pass ``None`` use ``sys.stdout``."""
     args = _build_arg_parser().parse_args()
 
     environment_ref = Ref(
@@ -299,6 +301,7 @@ def main() -> None:
                 taxonomy=FailureTaxonomy.ENVIRONMENT_FAILURE,
                 message=f"unknown worker backend {args.backend_id!r}",
             ),
+            out=out,
         )
         raise SystemExit(2)
     _send(
@@ -308,6 +311,7 @@ def main() -> None:
             backend=backend,
             environment_ref=environment_ref,
         ),
+        out=out,
     )
 
     dispatch_line = sys.stdin.readline()
@@ -319,6 +323,7 @@ def main() -> None:
                 taxonomy=FailureTaxonomy.ENVIRONMENT_FAILURE,
                 message="no run_dispatch received on stdin",
             ),
+            out=out,
         )
         raise SystemExit(2)
     raise SystemExit(
@@ -328,9 +333,27 @@ def main() -> None:
             backend_id=args.backend_id,
             environment_ref=environment_ref,
             corpus_root=args.corpus_root,
+            out=out,
         )
     )
 
 
+def _bind_protocol_stream() -> TextIO:
+    """Move the framed worker protocol OFF fd 1 onto a private duplicate and point fd 1 at stderr, so NO
+    trainer output can inject a byte into the protocol the parent parses - not a Python ``sys.stdout``
+    write (a Python-level ``redirect_stdout`` already catches those) and CRUCIALLY not a native/C write
+    straight to fd 1 (tokenizer training, some transformers / bitsandbytes paths), which no Python-level
+    redirect can catch. The parent still reads the protocol on the worker's stdout pipe, now fed by the
+    private duplicate; every other fd-1 write lands on stderr, which the parent already captures."""
+    import os  # noqa: PLC0415
+
+    sys.stdout.flush()
+    protocol_fd = os.dup(1)
+    os.dup2(2, 1)  # every write to fd 1 for the rest of the process now lands on stderr
+    # Line-buffered so each newline-framed protocol message is delivered promptly (belt-and-suspenders
+    # with _send's explicit flush), never batched behind an implementation-default block buffer.
+    return os.fdopen(protocol_fd, "w", encoding="utf-8", buffering=1, closefd=True)
+
+
 if __name__ == "__main__":
-    main()
+    main(out=_bind_protocol_stream())
