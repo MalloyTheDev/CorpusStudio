@@ -5229,6 +5229,70 @@
       "title": "PreferenceDataPolicy",
       "type": "object"
     },
+    "PreferenceExecutionEvidence": {
+      "additionalProperties": false,
+      "description": "Trainer-side proof for an offline DPO (preference) run before its adapter is admitted a success.\n\nThe adapter sibling of :class:`TrainingExecutionEvidence` for preference optimization: it REUSES the\ngeneric adapter evidence pieces (:class:`TrainableStateChangeEvidence` over the PEFT adapter,\n:class:`AdapterExportStateEvidence`, :class:`GradientCoverageEvidence`,\n:class:`OptimizerStepLossEvidence`) and adds the preference-specific honesty signals: the reference\nmodel was FROZEN (produced no gradient), real preference PAIRS were consumed, and every completed step\ncarries the DPO reward margin the loss was built from. None of these are part of the sealed execution\nconfig, so the reuse cannot perturb the byte-locked SFT / pretraining / preference seals.",
+      "properties": {
+        "adapter_export_state": {
+          "$ref": "#/$defs/AdapterExportStateEvidence"
+        },
+        "completed_optimizer_steps": {
+          "minimum": 1,
+          "title": "Completed Optimizer Steps",
+          "type": "integer"
+        },
+        "gradient_coverage": {
+          "$ref": "#/$defs/GradientCoverageEvidence"
+        },
+        "optimizer_created": {
+          "const": true,
+          "title": "Optimizer Created",
+          "type": "boolean"
+        },
+        "preference_pairs_consumed": {
+          "minimum": 1,
+          "title": "Preference Pairs Consumed",
+          "type": "integer"
+        },
+        "reference_model_frozen": {
+          "const": true,
+          "title": "Reference Model Frozen",
+          "type": "boolean"
+        },
+        "step_losses": {
+          "items": {
+            "$ref": "#/$defs/OptimizerStepLossEvidence"
+          },
+          "minItems": 1,
+          "title": "Step Losses",
+          "type": "array"
+        },
+        "step_reward_margins": {
+          "items": {
+            "$ref": "#/$defs/PreferenceRewardMarginEvidence"
+          },
+          "minItems": 1,
+          "title": "Step Reward Margins",
+          "type": "array"
+        },
+        "trainable_state": {
+          "$ref": "#/$defs/TrainableStateChangeEvidence"
+        }
+      },
+      "required": [
+        "trainable_state",
+        "adapter_export_state",
+        "gradient_coverage",
+        "optimizer_created",
+        "completed_optimizer_steps",
+        "step_losses",
+        "reference_model_frozen",
+        "preference_pairs_consumed",
+        "step_reward_margins"
+      ],
+      "title": "PreferenceExecutionEvidence",
+      "type": "object"
+    },
     "PreferenceOptimizationSpec": {
       "additionalProperties": false,
       "description": "The offline preference-optimization loss (TRL ``DPOConfig``): the KL strength ``beta``, the\n``loss_type`` variant, conservative ``label_smoothing`` for noisy preferences, and the frozen\nreference binding. Kept off :class:`PreferenceDataPolicy` (which is only the data contract) so the\ndata policy stays reusable by a non-DPO preference method later.",
@@ -5266,6 +5330,92 @@
         "reference_model"
       ],
       "title": "PreferenceOptimizationSpec",
+      "type": "object"
+    },
+    "PreferenceRewardMarginEvidence": {
+      "additionalProperties": false,
+      "description": "One optimizer step's DPO reward signal: the implicit rewards for the chosen and rejected\ncompletions (each ``beta * (policy_logratio - reference_logratio)`` against the FROZEN reference)\nand their margin. A real DPO step separates the pair; recording the margin proves the preference\nsignal was live and not a degenerate copy of an SFT loss.",
+      "properties": {
+        "chosen_reward": {
+          "title": "Chosen Reward",
+          "type": "number"
+        },
+        "margin": {
+          "title": "Margin",
+          "type": "number"
+        },
+        "optimizer_step": {
+          "minimum": 1,
+          "title": "Optimizer Step",
+          "type": "integer"
+        },
+        "rejected_reward": {
+          "title": "Rejected Reward",
+          "type": "number"
+        }
+      },
+      "required": [
+        "optimizer_step",
+        "chosen_reward",
+        "rejected_reward",
+        "margin"
+      ],
+      "title": "PreferenceRewardMarginEvidence",
+      "type": "object"
+    },
+    "PreferenceSuccessEvidence": {
+      "additionalProperties": false,
+      "description": "All gates required before a resolved offline DPO run may be called successful. The preference\nsibling of :class:`TrainingSuccessEvidence` - it verifies the exported PEFT adapter bytes\n(adapter_model.safetensors), not a full model.",
+      "properties": {
+        "adapter_bytes_verified": {
+          "const": true,
+          "title": "Adapter Bytes Verified",
+          "type": "boolean"
+        },
+        "adapter_config_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Adapter Config Sha256",
+          "type": "string"
+        },
+        "adapter_safetensors_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Adapter Safetensors Sha256",
+          "type": "string"
+        },
+        "artifact_integrity_verified": {
+          "const": true,
+          "title": "Artifact Integrity Verified",
+          "type": "boolean"
+        },
+        "execution": {
+          "$ref": "#/$defs/PreferenceExecutionEvidence"
+        },
+        "measured_peak": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MemoryMetrics"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "output_path_verified": {
+          "const": true,
+          "title": "Output Path Verified",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "execution",
+        "output_path_verified",
+        "adapter_bytes_verified",
+        "artifact_integrity_verified",
+        "adapter_safetensors_sha256",
+        "adapter_config_sha256"
+      ],
+      "title": "PreferenceSuccessEvidence",
       "type": "object"
     },
     "PretrainingDataPolicy": {
@@ -6657,6 +6807,17 @@
         },
         "plan_ref": {
           "$ref": "#/$defs/Ref"
+        },
+        "preference_success_evidence": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PreferenceSuccessEvidence"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "pretraining_success_evidence": {
           "anyOf": [
