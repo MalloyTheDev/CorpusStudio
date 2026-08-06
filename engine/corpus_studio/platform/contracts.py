@@ -5215,7 +5215,7 @@ class ArtifactManifest(ContractModel):
     created_at: str | None = None
     updated_at: str | None = None
     kind: Literal[
-        "adapter", "checkpoint", "merged_model", "gguf", "onnx", "quantized", "other"
+        "adapter", "model", "checkpoint", "merged_model", "gguf", "onnx", "quantized", "other"
     ] = "adapter"
     path: str
     status: Literal["candidate", "kept", "rejected"] = "candidate"
