@@ -12,6 +12,7 @@ from corpus_studio.training.pretraining_trainer import (
     PretrainingError,
     PretrainResult,
     _refuse_unsupported,
+    _verify_pinned_tokenizer_content,
     load_architecture_config,
     load_corpus_documents,
 )
@@ -27,6 +28,23 @@ def test_load_corpus_documents_refuses_a_non_json_row(tmp_path):
     (tmp_path / "s0.jsonl").write_text("not json\n", encoding="utf-8")
     with pytest.raises(PretrainingError, match="non-JSON"):
         load_corpus_documents(["s0.jsonl"], corpus_root=tmp_path)
+
+
+def test_verify_pinned_tokenizer_content_enforces_the_pin(tmp_path):
+    import hashlib
+
+    tok = tmp_path / "tok"
+    tok.mkdir()
+    (tok / "tokenizer.json").write_bytes(b'{"model": "bpe"}')
+    good = hashlib.sha256(b'{"model": "bpe"}').hexdigest()
+    # matching content passes
+    _verify_pinned_tokenizer_content(tok, good)
+    # tampered content fails closed
+    with pytest.raises(PretrainingError, match="does not match the sealed"):
+        _verify_pinned_tokenizer_content(tok, "b" * 64)
+    # F5 regression: a location WITHOUT tokenizer.json must FAIL CLOSED, never silently skip the pin.
+    with pytest.raises(PretrainingError, match="no tokenizer.json at the pinned location"):
+        _verify_pinned_tokenizer_content(tmp_path / "empty", good)
 
 
 def test_load_architecture_config_sanitizes_provenance_keys(tmp_path):
