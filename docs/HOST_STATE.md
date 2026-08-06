@@ -457,9 +457,22 @@ IEEE cell) on the evidence below - from-scratch full-parameter pretraining now r
   dispatch gate (`required_runner_lane`) refuses pretraining until it is workload_verified, exactly as here. The
   torch/GPU stack is the sealed HARDWARE_VERIFIED env; the control-plane code is `main` (byte-identical to the
   wheel's fa6ce97 source + the merged #808 fix). This is NOT a 7B, full-corpus, or convergence result - it is a
-  feasibility + honesty-evidence bring-up. Production `platform-run --subprocess` routing of a managed pretraining
-  plan needs a post-promotion worker wheel (the fa6ce97 wheel predates the `required_runner_lane` routing change);
-  the in-process path routes it at merge.
+  feasibility + honesty-evidence bring-up.
+- **Managed `platform-run --subprocess` shipping path GPU-GREEN 2026-08-06 (PR #810 / #811 / #812).** The
+  original bring-up ran the runner + supervisor DIRECTLY (a bypass); running the real managed subprocess path
+  then surfaced 10 shipping-path bugs, all fixed: #810 (7 execution-path defects: a RunManifest terminal-fit
+  validator crash on a proven pretraining fit, a dead subprocess argparse lane, silent epoch collapse, sharded
+  save, un-run-scoped output, unthreaded corpus_root), #811 (env-manager managed capability snapshot for
+  probe-less recipes: `probes=None` -> `"null"`, and a 32 KB probe-log-tail truncation of a big report), and
+  #812 (the worker's native/C fd-1 output corrupting the framed stdout protocol - fixed by binding the protocol
+  onto a private dup of fd 1 and pointing fd 1 at stderr). A managed `platform-run --subprocess` from-scratch
+  run then **SUCCEEDED end to end** on the RTX 5070 (env `backend-corpus-studio-pretraining-hardened-v4`, base
+  recipe source-installing the fixed worker): `STATE succeeded`, `final_fit NATIVE_SAFE`, supervisor-admitted
+  `PretrainingSuccessEvidence`, 15/15 sealed steps, loss 5.158 -> 4.316, 28/28 tensors changed with observed
+  gradients, model reload-verified, run-scoped `model` artifact. So the managed pretraining shipping path is now
+  workload_verified through the REAL dispatch, not just the direct bypass. (The base recipe source-installs the
+  worker; the provenance-sealed wheel `4bacd4ef...` at `.../pretraining-hardened-c0e9870/` is for a future
+  HASH-PINNED deployment via the `-verified` recipe, which `env-create` does not yet provision.)
 
 ## Verification boundary — what `HARDWARE_VERIFIED` does and does NOT prove
 
