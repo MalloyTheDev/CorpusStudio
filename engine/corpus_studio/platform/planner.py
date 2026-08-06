@@ -1381,15 +1381,25 @@ def build_run_plan(
     # backend the first-party PretrainingRunner lane executes it. A MoE topology routes to the
     # declared-only 'moe' shape and stays refused here.
     is_pretraining = constraints.task_type == TaskType.pretraining.value and not plan_targets_moe
+    # A full-parameter dense SFT (--adapter-method full_finetune) seals a reviewable full-model config and
+    # maps to the dense_full_finetune shape. Admitted at planning (contract_validated) and refused at
+    # EXECUTION until that variant is workload_verified - the full-parameter worker + full-model evidence
+    # are the gated milestone, exactly as DPO/pretraining. All OTHER dense SFT stays the QLoRA shape.
+    is_full_finetune = (
+        constraints.task_type == TaskType.sft.value
+        and constraints.adapter_method == AdapterMethod.full_finetune.value
+        and not plan_targets_moe
+    )
     try:
         admit_task_execution_variant(
             TaskType(constraints.task_type),
             is_moe=plan_targets_moe,
             objective_id=admission_objective_id,
+            is_full_parameter=is_full_finetune,
             declared_variants=reference_execution_variants(),
             required_support=(
                 ExecutionVariantSupport.contract_validated
-                if (is_preference_dpo or is_pretraining)
+                if (is_preference_dpo or is_pretraining or is_full_finetune)
                 else ExecutionVariantSupport.workload_verified
             ),
         )
@@ -1482,7 +1492,11 @@ def build_run_plan(
         else:
             raise PlannerError("no functionally proven training precision is available")
         quantization = (
-            "nf4"
+            # Full-parameter fine-tuning trains all weights, so they must stay in a trainable dtype - never
+            # 4-bit frozen. Force 'none' regardless of what the backend proves for nf4.
+            "none"
+            if is_full_finetune
+            else "nf4"
             if capabilities.bitsandbytes_ok and "nf4" in proven_quantization
             else "none"
         )
@@ -1505,8 +1519,16 @@ def build_run_plan(
 
     adapter_method = constraints.adapter_method or ("qlora" if quantization == "nf4" else "lora")
     _require_enum(adapter_method, AdapterMethod, "adapter_method")
-    if adapter_method not in proven_adapters and not cpu_toy:
+    # full_finetune is admitted at PLANNING even though the backend cannot yet prove it (the full-parameter
+    # worker + wheel are the gated milestone); it is refused at EXECUTION by required_runner_lane. Every
+    # other adapter must be functionally proven here.
+    if adapter_method not in proven_adapters and not cpu_toy and not is_full_finetune:
         raise PlannerError(f"adapter '{adapter_method}' is not functionally proven")
+    if is_full_finetune and constraints.export_format == ExportFormat.adapter_peft.value:
+        raise PlannerError(
+            "full-parameter fine-tuning produces a full model, not an adapter - pass "
+            "--export-format merged_safetensors"
+        )
 
     loss_impl = "liger_fused_ce" if constraints.use_liger else "cross_entropy"
     checkpoint_impl = "adapter_only"
@@ -1542,7 +1564,7 @@ def build_run_plan(
         ),
         None,
     )
-    if exact_combination is None:
+    if exact_combination is None and not is_full_finetune:
         rendered = ", ".join(
             f"{key}={value}" for key, value in expected_combination.items()
         )
@@ -1550,24 +1572,28 @@ def build_run_plan(
             "no bounded functional probe demonstrated the complete requested execution tuple "
             f"({rendered})"
         )
-    exact_probe_result = next(
-        (
-            result
-            for result in capabilities.probe_results
-            if result.probe == exact_combination.probe
-            and result.outcome == FailureTaxonomy.PASS
-            and exact_combination in result.execution_combinations
-        ),
-        None,
-    )
-    if exact_probe_result is None:
-        raise PlannerError(
-            "the selected execution combination is not embedded in its named passing probe result"
+    # full_finetune is admitted at planning WITHOUT an exact-combination proof - the tuple cannot be proven
+    # until the full-parameter worker + wheel exist (refused at execution by required_runner_lane). For every
+    # OTHER path a combination WAS found, so its probe-embedding + execution-contract checks still apply.
+    if exact_combination is not None:
+        exact_probe_result = next(
+            (
+                result
+                for result in capabilities.probe_results
+                if result.probe == exact_combination.probe
+                and result.outcome == FailureTaxonomy.PASS
+                and exact_combination in result.execution_combinations
+            ),
+            None,
         )
-    if _EXECUTION_CONTRACT_VERSION not in proven_execution_contracts:
-        raise PlannerError(
-            "the capability report does not prove resolved execution contract 1.0.0"
-        )
+        if exact_probe_result is None:
+            raise PlannerError(
+                "the selected execution combination is not embedded in its named passing probe result"
+            )
+        if _EXECUTION_CONTRACT_VERSION not in proven_execution_contracts:
+            raise PlannerError(
+                "the capability report does not prove resolved execution contract 1.0.0"
+            )
 
     # Validate the chosen training backend can actually run the RESOLVED plan (declared support), so a
     # plan is never sealed for a framework that would silently downgrade or refuse it. This is where
@@ -1617,6 +1643,16 @@ def build_run_plan(
         not_yet_declarable = {
             f"task '{constraints.task_type}' not supported",
             f"loss '{fit_loss}' not supported",
+        }
+        unmet = [reason for reason in unmet if reason not in not_yet_declarable]
+    if is_full_finetune:
+        # The manifest cannot yet DECLARE the full_finetune adapter method or a full-model export format
+        # (declaring either is coupled to a new manifest + milestone wheel), so a full-parameter SFT plan is
+        # admitted at planning despite exactly those not-yet-declarable reasons - every OTHER fit-check still
+        # applies - and required_runner_lane refuses it at execution until the worker + wheel promote it.
+        not_yet_declarable = {
+            f"adapter '{adapter_method}' not supported",
+            f"export format '{constraints.export_format}' not supported",
         }
         unmet = [reason for reason in unmet if reason not in not_yet_declarable]
     if unmet:
@@ -1781,7 +1817,13 @@ def build_run_plan(
             "packing": False,
         }
     )
-    objective = get_objective("qlora" if adapter_method == "qlora" else "lora")
+    objective = get_objective(
+        "full_parameter_sft"
+        if is_full_finetune
+        else "qlora"
+        if adapter_method == "qlora"
+        else "lora"
+    )
     if objective is None:  # pragma: no cover - sealed built-in catalog invariant
         raise PlannerError("the selected training objective is absent from the sealed registry")
     objective_ref = Ref(id=objective.objective_id, hash=HashRef(value=objective.objective_hash))

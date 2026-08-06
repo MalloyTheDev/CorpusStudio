@@ -190,14 +190,16 @@ _PREFERENCE_OBJECTIVE_TO_VARIANT: dict[str, ExecutionVariantKind] = {
 
 
 def execution_variant_kind_for_task(
-    task_type: TaskType, *, is_moe: bool = False, objective_id: str | None = None
+    task_type: TaskType, *, is_moe: bool = False, objective_id: str | None = None,
+    is_full_parameter: bool = False,
 ) -> ExecutionVariantKind | None:
     """The execution-variant SHAPE for a (task, objective, topology) request, or ``None`` when no built
     shape maps. Shape is objective x topology, so a MoE model routes to the ``moe`` shape (declared-only)
-    REGARDLESS of task - never to a dense shape. A dense model maps by task (sft -> dense_qlora_sft,
-    pretraining -> pretraining). A PREFERENCE task maps by its specific ``objective_id`` (only the
-    QLoRA-DPO objective has a built shape; DPO/IPO/KTO/ORPO are NOT interchangeable), so a bare
-    preference task without a recognized objective maps to nothing. ``None`` -> refuse fail-closed."""
+    REGARDLESS of task - never to a dense shape. A dense SFT maps by whether ALL parameters are trainable
+    (full-parameter -> dense_full_finetune, else the QLoRA-adapter dense_qlora_sft); pretraining maps by
+    task. A PREFERENCE task maps by its specific ``objective_id`` (only the QLoRA-DPO objective has a built
+    shape; DPO/IPO/KTO/ORPO are NOT interchangeable), so a bare preference task without a recognized
+    objective maps to nothing. ``None`` -> refuse fail-closed."""
     # A preference task resolves by its specific objective FIRST - before the generic MoE routing - so a
     # MoE preference request (or an absent/unmapped objective) refuses fail-closed instead of being
     # silently routed to the generic ``moe`` shape (there is no built MoE-preference shape).
@@ -207,6 +209,10 @@ def execution_variant_kind_for_task(
         return _PREFERENCE_OBJECTIVE_TO_VARIANT.get(objective_id)
     if is_moe:
         return ExecutionVariantKind.moe
+    # A dense SFT with all parameters trainable is the full-parameter shape, NOT the QLoRA-adapter one -
+    # they have different capability envelopes (full-param update, full-model artifact) and gate separately.
+    if task_type == TaskType.sft and is_full_parameter:
+        return ExecutionVariantKind.dense_full_finetune
     return _TASK_TO_VARIANT_KIND.get(task_type)
 
 
@@ -215,6 +221,7 @@ def admit_task_execution_variant(
     *,
     is_moe: bool = False,
     objective_id: str | None = None,
+    is_full_parameter: bool = False,
     declared_variants: tuple[BackendExecutionVariant, ...],
     required_support: ExecutionVariantSupport = ExecutionVariantSupport.workload_verified,
 ) -> BackendExecutionVariant:
@@ -223,9 +230,11 @@ def admit_task_execution_variant(
     :class:`ExecutionVariantRefused` when the (task, objective, topology) maps to no executable shape,
     the backend does not declare that shape, or the declared support is below ``required_support``. A MoE
     model is routed to the declared-only ``moe`` shape, so it is refused here - never admitted as dense.
-    A preference task resolves by its specific ``objective_id`` (only QLoRA-DPO has a built shape). Never
-    falls back."""
-    kind = execution_variant_kind_for_task(task_type, is_moe=is_moe, objective_id=objective_id)
+    A preference task resolves by its specific ``objective_id`` (only QLoRA-DPO has a built shape); a
+    full-parameter dense SFT resolves to ``dense_full_finetune``. Never falls back."""
+    kind = execution_variant_kind_for_task(
+        task_type, is_moe=is_moe, objective_id=objective_id, is_full_parameter=is_full_parameter
+    )
     if kind is None:
         request = f"task '{task_type.value}'"
         if objective_id:
