@@ -75,6 +75,39 @@ def test_run_scoped_output_is_derived_from_the_sealed_root():
         run_scoped_training_output(execution, "../escape")
 
 
+def test_run_scoped_output_leaf_selects_the_artifact_kind():
+    # The pretraining lane reuses this run-scoping via leaf="model" (run_scoped_pretraining_output /
+    # verify_run_scoped_pretraining_output_path), so a full-parameter run gets a run-scoped ``model``
+    # directory instead of writing to the bare sealed output_dir - two runs of one plan never collide.
+    execution = _execution()
+    model_path = run_scoped_training_output(execution, "run-123", leaf="model")
+    assert model_path == Path(execution.output_dir) / "runs" / "run-123" / "artifacts" / "model"
+    adapter_path = run_scoped_training_output(execution, "run-123")
+    assert adapter_path.parts[-1] == "adapter" and model_path != adapter_path
+    # distinct run ids resolve to distinct directories (the collision-freedom the sealed layout claims).
+    assert run_scoped_training_output(execution, "run-456", leaf="model") != model_path
+    with pytest.raises(ExecutionConfigurationError, match="unsafe"):
+        run_scoped_training_output(execution, "../escape", leaf="model")
+
+
+def test_pretraining_run_scoped_wrappers_bind_the_model_leaf():
+    # The pretraining wrappers the PretrainingRunner calls: they only read output_dir/output_layout, so
+    # the SFT fixture stands in for a pretraining config to exercise the path derivation + verification.
+    from corpus_studio.platform.execution_config import (
+        run_scoped_pretraining_output,
+        verify_run_scoped_pretraining_output_path,
+    )
+
+    execution = _execution()
+    path = run_scoped_pretraining_output(execution, "run-abc")
+    assert path.parts[-1] == "model" and path.parts[-2] == "artifacts"
+    assert verify_run_scoped_pretraining_output_path(
+        execution, "run-abc", observed_path=path
+    ) == path.absolute()
+    with pytest.raises(ExecutionConfigurationError, match="differs from the exact"):
+        verify_run_scoped_pretraining_output_path(execution, "run-abc", observed_path="/wrong/path")
+
+
 def test_formatter_identity_is_implementation_bound_and_fail_closed(monkeypatch):
     formatter_id, digest = formatter_identity("trace")
     assert formatter_id.endswith("structured-trace-renderer-v1")
@@ -87,6 +120,16 @@ def test_formatter_identity_is_implementation_bound_and_fail_closed(monkeypatch)
     monkeypatch.setattr(module.inspect, "getsource", lambda _value: (_ for _ in ()).throw(OSError("x")))
     with pytest.raises(ExecutionConfigurationError, match="cannot inspect"):
         formatter_identity("instruction")
+
+
+def test_preference_formatter_identity_is_the_pair_formatter_not_the_sft_one():
+    from corpus_studio.platform.execution_config import preference_formatter_identity
+
+    formatter_id, digest = preference_formatter_identity()
+    assert formatter_id == "corpus-studio:preference-pair-v1"
+    assert len(digest) == 64
+    # it binds the preference-pair formatter, NOT the SFT format_example_text
+    assert (formatter_id, digest) != formatter_identity("instruction")
 
 
 def test_stable_file_and_directory_bindings_cover_exact_bytes(tmp_path: Path):

@@ -288,6 +288,57 @@ def test_platform_plan_dataset_format_flows_through_the_cli(monkeypatch, tmp_pat
     assert "format" not in data
 
 
+def test_platform_plan_objective_flows_through_the_cli_for_a_preference_plan(monkeypatch, tmp_path):
+    # Reachability: a preference plan is requestable from the SHIPPING CLI via --objective, and lowers to
+    # a sealed preference execution config (admit-at-planning), not the SFT resolved_execution. Without the
+    # option, --task-type preference would always refuse as "no executable variant".
+    _ready_host(monkeypatch)
+    result = runner.invoke(
+        app,
+        [
+            *_platform_plan_args(tmp_path),
+            "--task-type",
+            "preference",
+            "--objective",
+            "dpo_qlora",
+            "--json",
+        ],
+    )
+    assert result.exit_code == 0, result.stdout
+    plan = json.loads(result.stdout)["run_plan"]
+    assert plan["resolved_preference_execution"] is not None
+    assert plan["resolved_execution"] is None
+    assert plan["resolved_preference_execution"]["objective_ref"]["id"] == "dpo_qlora"
+
+
+def test_platform_plan_dpo_knobs_flow_to_the_sealed_preference_config(monkeypatch, tmp_path):
+    # --dpo-beta / --dpo-label-smoothing / --max-prompt-length are the operator's DPO knobs; they seal
+    # into the preference config instead of the resolver's fixed defaults.
+    _ready_host(monkeypatch)
+    result = runner.invoke(
+        app,
+        [
+            *_platform_plan_args(tmp_path),
+            "--task-type",
+            "preference",
+            "--objective",
+            "dpo_qlora",
+            "--dpo-beta",
+            "0.25",
+            "--dpo-label-smoothing",
+            "0.1",
+            "--max-prompt-length",
+            "1000",
+            "--json",
+        ],
+    )
+    assert result.exit_code == 0, result.stdout
+    pref = json.loads(result.stdout)["run_plan"]["resolved_preference_execution"]
+    assert pref["preference"]["beta"] == 0.25
+    assert pref["preference"]["label_smoothing"] == 0.1
+    assert pref["data"]["max_prompt_length"] == 1000
+
+
 def test_platform_plan_allocator_policy_flows_through_the_cli(monkeypatch, tmp_path):
     # --allocator-policy + --max-split-size-mb seal the CUDA allocator config into the plan (so the
     # seq-4096 paged config no longer smuggles it via the dispatch env).
@@ -836,3 +887,259 @@ def test_platform_plan_bundle_records_full_conformance_for_a_clean_dataset(monke
     conformance = json.loads(result.stdout)["dataset_conformance"]
     assert conformance["rejected_rows"] == 0
     assert conformance["compatible_rows"] == conformance["total_rows"] >= 1
+
+
+def test_platform_plan_pretraining_from_scratch_through_the_cli(monkeypatch, tmp_path):
+    # Reachability: a from-scratch pretraining plan is requestable from the SHIPPING CLI. Its corpus is a
+    # PretrainingDataPolicy manifest (NOT an instruction/chat dataset, so the row-conformance preflight is
+    # skipped), and it lowers to a sealed resolved_pretraining_execution (admit-at-planning; the runner
+    # refuses it at execution until the pretraining worker + wheel land).
+    _ready_host(monkeypatch)
+    manifest = tmp_path / "corpus.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "shards": [
+                    {
+                        "shard_id": "s0",
+                        "location": "corpus/s0.jsonl",
+                        "source": "web",
+                        "row_count": 100,
+                        "token_count": 100000,
+                        "content_sha256": "d" * 64,
+                    }
+                ],
+                "data_seed": 42,
+                "global_batch_size": 8,
+                "token_budget": 1000000,
+            }
+        ),
+        encoding="utf-8",
+    )
+    arch = tmp_path / "config.json"
+    arch.write_text(json.dumps({"model_type": "llama", "hidden_size": 256}), encoding="utf-8")
+    result = runner.invoke(
+        app,
+        [
+            "platform-plan",
+            "--base-model",
+            "arch:demo-small",
+            "--dataset",
+            str(manifest),
+            "--task-type",
+            "pretraining",
+            "--init-mode",
+            "random",
+            "--architecture-config",
+            str(arch),
+            "--init-vocab-size",
+            "32000",
+            "--tokenizer-source",
+            "train",
+            "--tokenizer-algorithm",
+            "bpe",
+            "--tokenizer-vocab-size",
+            "32000",
+            "--tokenizer-special-tokens",
+            "<bos>,<eos>,<pad>,<unk>",
+            "--json",
+        ],
+    )
+    assert result.exit_code == 0, result.stdout + result.stderr
+    plan = json.loads(result.stdout)["run_plan"]
+    assert plan["task_type"] == "pretraining"
+    assert plan["resolved_execution"] is None
+    cfg = plan["resolved_pretraining_execution"]
+    assert cfg is not None
+    assert cfg["init"]["mode"] == "random"
+    assert cfg["objective_ref"]["id"] == "pretraining"
+    assert cfg["tokenizer_source"]["mode"] == "train"
+    assert cfg["tokenizer_source"]["vocab_size"] == 32000
+
+
+def _pretraining_cli_args(tmp_path):
+    manifest = tmp_path / "corpus.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "shards": [
+                    {
+                        "shard_id": "s0",
+                        "location": "corpus/s0.jsonl",
+                        "source": "web",
+                        "row_count": 100,
+                        "token_count": 100000,
+                        "content_sha256": "d" * 64,
+                    }
+                ],
+                "data_seed": 42,
+                "global_batch_size": 8,
+                "token_budget": 1000000,
+            }
+        ),
+        encoding="utf-8",
+    )
+    arch = tmp_path / "config.json"
+    arch.write_text(
+        json.dumps({"model_type": "llama", "hidden_size": 256, "vocab_size": 32000}),
+        encoding="utf-8",
+    )
+    return [
+        "platform-plan",
+        "--base-model", "arch:demo",
+        "--dataset", str(manifest),
+        "--task-type", "pretraining",
+        "--init-mode", "random",
+        "--architecture-config", str(arch),
+        "--tokenizer-source", "train",
+        "--tokenizer-algorithm", "bpe",
+        "--tokenizer-vocab-size", "32000",
+        "--tokenizer-special-tokens", "<eos>",
+    ]
+
+
+def test_platform_plan_pretraining_defaults_model_vocab_to_the_arch_config(monkeypatch, tmp_path):
+    # AUDIT fix: the architecture config's vocab_size is the model's embedding size - default the model
+    # vocab to it (the operator need not re-type it), and it flows into the sealed init spec.
+    _ready_host(monkeypatch)
+    result = runner.invoke(app, [*_pretraining_cli_args(tmp_path), "--json"])
+    assert result.exit_code == 0, result.output
+    cfg = json.loads(result.stdout)["run_plan"]["resolved_pretraining_execution"]
+    assert cfg["init"]["vocab_size"] == 32000
+
+
+def test_platform_plan_pretraining_refuses_a_vocab_that_contradicts_the_arch_config(monkeypatch, tmp_path):
+    # AUDIT fix: an explicit --init-vocab-size that disagrees with the architecture config is refused
+    # fail-closed (a silent mismatch would seal a broken model).
+    _ready_host(monkeypatch)
+    result = runner.invoke(
+        app, [*_pretraining_cli_args(tmp_path), "--init-vocab-size", "50000", "--json"]
+    )
+    assert result.exit_code == 2
+    assert "contradicts the architecture config" in result.output
+
+
+def _admitted_custom_decoder(tmp_path):
+    """A custom_decoder arch config + an admitted vetting report for a clean bundle. Returns
+    (pretraining args, bundle path, vetting path)."""
+    from corpus_studio.platform.custom_code_vetting import build_report
+
+    args = _pretraining_cli_args(tmp_path)
+    (tmp_path / "config.json").write_text(
+        json.dumps(
+            {"model_type": "custom_decoder", "corpus_studio_needs_custom_code": True, "vocab_size": 32000}
+        ),
+        encoding="utf-8",
+    )
+    bundle = tmp_path / "block.py"
+    bundle.write_text(
+        "import torch\n\nclass MyBlock(torch.nn.Module):\n"
+        "    def forward(self, input_ids):\n        return input_ids\n",
+        encoding="utf-8",
+    )
+    report = build_report(bundle.read_bytes(), entry_symbol="MyBlock")
+    vetting = tmp_path / "vetting.json"
+    vetting.write_text(json.dumps(report.model_dump(mode="json")), encoding="utf-8")
+    return args, bundle, vetting
+
+
+def test_platform_plan_refuses_a_custom_decoder_without_admission(monkeypatch, tmp_path):
+    # The mode-3 gate: a custom_decoder plan is refused WITHOUT an admitted custom-block bundle. Execution
+    # stays gated at the worker regardless of admission.
+    _ready_host(monkeypatch)
+    args, _bundle, _vetting = _admitted_custom_decoder(tmp_path)
+    result = runner.invoke(app, [*args, "--json"])
+    assert result.exit_code == 2, result.output
+    assert "custom_decoder architecture requires" in result.output
+
+
+def test_platform_plan_refuses_a_needs_custom_code_marker(monkeypatch, tmp_path):
+    # The durable marker triggers the same admission gate even if model_type is renamed - defense in depth.
+    _ready_host(monkeypatch)
+    args = _pretraining_cli_args(tmp_path)
+    (tmp_path / "config.json").write_text(
+        json.dumps(
+            {"model_type": "llama", "corpus_studio_needs_custom_code": True, "vocab_size": 32000}
+        ),
+        encoding="utf-8",
+    )
+    result = runner.invoke(app, [*args, "--json"])
+    assert result.exit_code == 2, result.output
+
+
+def test_platform_plan_seals_an_admitted_custom_decoder(monkeypatch, tmp_path):
+    # The valid mode-3 path: an admitted, hash-matching bundle seals a CustomModelCodeSpec into the init.
+    _ready_host(monkeypatch)
+    args, bundle, vetting = _admitted_custom_decoder(tmp_path)
+    result = runner.invoke(
+        app,
+        [*args, "--custom-code-bundle", str(bundle), "--custom-code-vetting", str(vetting), "--json"],
+    )
+    assert result.exit_code == 0, result.output
+    cc = json.loads(result.stdout)["run_plan"]["resolved_pretraining_execution"]["init"]["custom_code"]
+    assert cc is not None
+    assert cc["entry_symbol"] == "MyBlock" and cc["vetting_verdict"] == "admitted"
+    assert cc["trust_remote_code"] is False
+    assert cc["code_bundle_ref"]["hash"]["value"] == cc["code_bundle_ref"]["hash"]["value"]
+
+
+def test_platform_plan_refuses_a_rejected_vetting(monkeypatch, tmp_path):
+    _ready_host(monkeypatch)
+    from corpus_studio.platform.custom_code_vetting import build_report
+
+    args, bundle, vetting = _admitted_custom_decoder(tmp_path)
+    rejected = build_report(b"import os\nclass MyBlock:\n    pass\n", entry_symbol="MyBlock")
+    vetting.write_text(json.dumps(rejected.model_dump(mode="json")), encoding="utf-8")
+    result = runner.invoke(
+        app,
+        [*args, "--custom-code-bundle", str(bundle), "--custom-code-vetting", str(vetting), "--json"],
+    )
+    assert result.exit_code == 2, result.output
+
+
+def test_platform_plan_refuses_a_vetting_that_does_not_match_the_bundle(monkeypatch, tmp_path):
+    # An admitted report for DIFFERENT bytes must not admit a tampered bundle (the hash binds admission).
+    _ready_host(monkeypatch)
+    args, bundle, vetting = _admitted_custom_decoder(tmp_path)
+    bundle.write_text(
+        "import torch\n\nclass MyBlock(torch.nn.Module):\n"
+        "    def forward(self, input_ids):\n        return input_ids + 1\n",
+        encoding="utf-8",
+    )
+    result = runner.invoke(
+        app,
+        [*args, "--custom-code-bundle", str(bundle), "--custom-code-vetting", str(vetting), "--json"],
+    )
+    assert result.exit_code == 2, result.output
+    assert "does not match the bundle bytes" in result.output
+
+
+def test_platform_plan_refuses_a_stale_analyzer_version(monkeypatch, tmp_path):
+    # A report from an older analyzer (looser rules) must not admit code the current rules would reject.
+    _ready_host(monkeypatch)
+    args, bundle, vetting = _admitted_custom_decoder(tmp_path)
+    report = json.loads(vetting.read_text(encoding="utf-8"))
+    report["analyzer_version"] = "0.9.0"  # pretend an older analyzer produced it
+    vetting.write_text(json.dumps(report), encoding="utf-8")
+    result = runner.invoke(
+        app,
+        [*args, "--custom-code-bundle", str(bundle), "--custom-code-vetting", str(vetting), "--json"],
+    )
+    assert result.exit_code == 2, result.output
+    assert "different analyzer version" in result.output
+
+
+def test_platform_plan_refuses_custom_code_flags_on_a_standard_arch(monkeypatch, tmp_path):
+    # A family / composed-on-standard-blocks design needs no custom code; flags there are refused.
+    _ready_host(monkeypatch)
+    args = _pretraining_cli_args(tmp_path)  # a llama arch config
+    bundle = tmp_path / "b.py"
+    bundle.write_text("class C:\n    pass\n", encoding="utf-8")
+    vetting = tmp_path / "v.json"
+    vetting.write_text("{}", encoding="utf-8")
+    result = runner.invoke(
+        app,
+        [*args, "--custom-code-bundle", str(bundle), "--custom-code-vetting", str(vetting), "--json"],
+    )
+    assert result.exit_code == 2, result.output
+    assert "custom_decoder" in result.output

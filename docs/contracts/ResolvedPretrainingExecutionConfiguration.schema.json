@@ -1,0 +1,1612 @@
+{
+  "$defs": {
+    "AttentionExecutionPolicy": {
+      "additionalProperties": false,
+      "description": "Exact model attention API plus the one runtime kernel that is permitted.",
+      "properties": {
+        "effective_backend_required": {
+          "$ref": "#/$defs/AttentionKernel"
+        },
+        "evidence_kind": {
+          "enum": [
+            "functional_probe",
+            "cpu_reference"
+          ],
+          "title": "Evidence Kind",
+          "type": "string"
+        },
+        "fallback_policy": {
+          "const": "refuse",
+          "default": "refuse",
+          "title": "Fallback Policy",
+          "type": "string"
+        },
+        "flash_attention_package": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PackageLock"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "flash_sdp_enabled": {
+          "title": "Flash Sdp Enabled",
+          "type": "boolean"
+        },
+        "kernel_probe_ref": {
+          "$ref": "#/$defs/Ref"
+        },
+        "math_sdp_enabled": {
+          "title": "Math Sdp Enabled",
+          "type": "boolean"
+        },
+        "mem_efficient_sdp_enabled": {
+          "title": "Mem Efficient Sdp Enabled",
+          "type": "boolean"
+        },
+        "model_attention_api": {
+          "$ref": "#/$defs/ModelAttentionApi"
+        },
+        "safety_mandate": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Safety Mandate"
+        },
+        "verification_requirement": {
+          "$ref": "#/$defs/ExecutionVerificationRequirement",
+          "default": "require_verified"
+        }
+      },
+      "required": [
+        "model_attention_api",
+        "effective_backend_required",
+        "flash_sdp_enabled",
+        "mem_efficient_sdp_enabled",
+        "math_sdp_enabled",
+        "kernel_probe_ref",
+        "evidence_kind"
+      ],
+      "title": "AttentionExecutionPolicy",
+      "type": "object"
+    },
+    "AttentionKernel": {
+      "description": "The exact attention implementation an execution policy permits at runtime.",
+      "enum": [
+        "eager",
+        "torch_sdpa_math",
+        "torch_sdpa_flash",
+        "torch_sdpa_mem_efficient",
+        "flash_attention_2",
+        "flash_attention_3",
+        "xformers"
+      ],
+      "title": "AttentionKernel",
+      "type": "string"
+    },
+    "BatchingSpec": {
+      "additionalProperties": false,
+      "description": "The accumulation TARGET is expressed in SUPERVISED TOKENS, not microbatch count. A\ntoken-target-CAPABLE backend accumulates until summed supervised tokens >= target and normalizes\nthe loss by supervised tokens across the window, so the effective batch is invariant to sequence\nlength + padding. The first-party ``corpus_studio`` reference trainer is NOT token-target-capable\ntoday \u2014 it honors ``fallback_grad_accumulation_steps`` (a fixed microbatch count); the token\ntarget is the contract a future token-aware backend would satisfy.",
+      "properties": {
+        "fallback_grad_accumulation_steps": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fallback Grad Accumulation Steps"
+        },
+        "micro_batch_size": {
+          "default": 1,
+          "minimum": 1,
+          "title": "Micro Batch Size",
+          "type": "integer"
+        },
+        "supervised_token_accumulation_target": {
+          "minimum": 1,
+          "title": "Supervised Token Accumulation Target",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "supervised_token_accumulation_target"
+      ],
+      "title": "BatchingSpec",
+      "type": "object"
+    },
+    "CheckpointImpl": {
+      "enum": [
+        "full_state",
+        "adapter_only",
+        "sharded",
+        "distcp",
+        "safetensors"
+      ],
+      "title": "CheckpointImpl",
+      "type": "string"
+    },
+    "CheckpointPolicy": {
+      "additionalProperties": false,
+      "properties": {
+        "cadence_optimizer_steps": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cadence Optimizer Steps"
+        },
+        "cadence_seconds": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cadence Seconds"
+        },
+        "impl": {
+          "$ref": "#/$defs/CheckpointImpl"
+        },
+        "keep_last": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Keep Last"
+        },
+        "reload_verify": {
+          "default": false,
+          "title": "Reload Verify",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "impl"
+      ],
+      "title": "CheckpointPolicy",
+      "type": "object"
+    },
+    "CustomModelCodeSpec": {
+      "additionalProperties": false,
+      "description": "A hash-pinned, ADMITTED local custom-block bundle for a from-scratch run - the mode-3 'your own\nmodel code' path (your own IMPLEMENTATION, the only not-borrowed mode). It seals WHICH exact bytes\n(``code_bundle_ref``) an ADMITTED :class:`ModelCodeVettingReport` (``vetting_ref``) screened, plus the\nentry class + interface. This path NEVER uses HF ``trust_remote_code`` (``Literal[False]``); the\nmodule is loaded locally, by path, from the pinned bundle.\n\nSealing this admits the design AT PLANNING; a static screen is not a safety proof, so EXECUTION stays\ngated behind the (later) worker sandbox exactly as pretraining itself is refused at the worker today.\nBoth refs must be hash-pinned so admission binds to specific bytes and cannot silently re-point.",
+      "properties": {
+        "code_bundle_ref": {
+          "$ref": "#/$defs/Ref"
+        },
+        "entry_symbol": {
+          "minLength": 1,
+          "title": "Entry Symbol",
+          "type": "string"
+        },
+        "interface_version": {
+          "const": "custom_decoder_v1",
+          "title": "Interface Version",
+          "type": "string"
+        },
+        "trust_remote_code": {
+          "const": false,
+          "default": false,
+          "title": "Trust Remote Code",
+          "type": "boolean"
+        },
+        "vetting_ref": {
+          "$ref": "#/$defs/Ref"
+        },
+        "vetting_verdict": {
+          "const": "admitted",
+          "title": "Vetting Verdict",
+          "type": "string"
+        }
+      },
+      "required": [
+        "code_bundle_ref",
+        "entry_symbol",
+        "interface_version",
+        "vetting_ref",
+        "vetting_verdict"
+      ],
+      "title": "CustomModelCodeSpec",
+      "type": "object"
+    },
+    "DeviceMapEntry": {
+      "additionalProperties": false,
+      "properties": {
+        "device": {
+          "minLength": 1,
+          "title": "Device",
+          "type": "string"
+        },
+        "module": {
+          "title": "Module",
+          "type": "string"
+        }
+      },
+      "required": [
+        "module",
+        "device"
+      ],
+      "title": "DeviceMapEntry",
+      "type": "object"
+    },
+    "ExecutionVerificationRequirement": {
+      "description": "Whether the planner may seal a capability that lacks functional evidence.",
+      "enum": [
+        "require_verified",
+        "allow_unverified"
+      ],
+      "title": "ExecutionVerificationRequirement",
+      "type": "string"
+    },
+    "ExportFormat": {
+      "enum": [
+        "adapter_peft",
+        "merged_safetensors",
+        "merged_fp16",
+        "gguf",
+        "onnx",
+        "awq",
+        "gptq",
+        "mlx"
+      ],
+      "title": "ExportFormat",
+      "type": "string"
+    },
+    "HashRef": {
+      "additionalProperties": false,
+      "description": "An algorithm-tagged digest. The engine emits sha256 today; the algo tag makes a future\nmigration additive (cf. versions/version_registry.FINGERPRINT_ALGO).",
+      "properties": {
+        "algo": {
+          "default": "sha256",
+          "enum": [
+            "sha256",
+            "sha256-ordered-exact-v1",
+            "blake3",
+            "none"
+          ],
+          "title": "Algo",
+          "type": "string"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Value"
+        }
+      },
+      "title": "HashRef",
+      "type": "object"
+    },
+    "LossImpl": {
+      "enum": [
+        "cross_entropy",
+        "liger_fused_ce",
+        "chunked_ce",
+        "dpo",
+        "orpo",
+        "kto",
+        "ipo",
+        "reward_bt"
+      ],
+      "title": "LossImpl",
+      "type": "string"
+    },
+    "ModelAttentionApi": {
+      "description": "The model-loader API selected before execution.\n\nThis is deliberately separate from :class:`AttentionKernel`: ``sdpa`` is an API that can\ndispatch to several materially different PyTorch kernels.",
+      "enum": [
+        "eager",
+        "sdpa",
+        "flash_attention_2",
+        "flash_attention_3",
+        "xformers"
+      ],
+      "title": "ModelAttentionApi",
+      "type": "string"
+    },
+    "ModelInitializationSpec": {
+      "additionalProperties": false,
+      "description": "How a PRETRAINING run instantiates its model. From-scratch has NO source weights: it builds a\nmodel from an architecture config with reproducible random init (the worker's ``from_config`` path,\nnever ``from_pretrained``), pinned by ``architecture_ref`` + ``vocab_size`` + ``init_seed``.\nContinued pretraining loads a hash-pinned ``source_checkpoint_ref`` and states explicitly what is\nreset (optimizer / lr scheduler / data cursor) vs carried. Dense/MoE-safe: this seals init INTENT\nand assumes no dense-specific model shape.",
+      "properties": {
+        "architecture_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Ref"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "custom_code": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CustomModelCodeSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "init_seed": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Init Seed"
+        },
+        "initializer_range": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Initializer Range"
+        },
+        "max_position_embeddings": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Position Embeddings"
+        },
+        "mode": {
+          "enum": [
+            "random",
+            "continued"
+          ],
+          "title": "Mode",
+          "type": "string"
+        },
+        "reset_data_cursor": {
+          "default": true,
+          "title": "Reset Data Cursor",
+          "type": "boolean"
+        },
+        "reset_lr_scheduler": {
+          "default": true,
+          "title": "Reset Lr Scheduler",
+          "type": "boolean"
+        },
+        "reset_optimizer": {
+          "default": true,
+          "title": "Reset Optimizer",
+          "type": "boolean"
+        },
+        "source_checkpoint_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Ref"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "vocab_size": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Vocab Size"
+        }
+      },
+      "required": [
+        "mode"
+      ],
+      "title": "ModelInitializationSpec",
+      "type": "object"
+    },
+    "Optimizer": {
+      "enum": [
+        "adamw_torch",
+        "adamw_torch_fused",
+        "adamw_8bit",
+        "adamw_bnb_8bit",
+        "paged_adamw_8bit",
+        "paged_adamw_32bit",
+        "adafactor",
+        "lion",
+        "sgd"
+      ],
+      "title": "Optimizer",
+      "type": "string"
+    },
+    "OptimizerSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "adam_beta1": {
+          "default": 0.9,
+          "exclusiveMaximum": 1,
+          "minimum": 0,
+          "title": "Adam Beta1",
+          "type": "number"
+        },
+        "adam_beta2": {
+          "default": 0.999,
+          "exclusiveMaximum": 1,
+          "minimum": 0,
+          "title": "Adam Beta2",
+          "type": "number"
+        },
+        "adam_epsilon": {
+          "default": 1e-08,
+          "exclusiveMinimum": 0,
+          "title": "Adam Epsilon",
+          "type": "number"
+        },
+        "impl": {
+          "$ref": "#/$defs/Optimizer"
+        },
+        "learning_rate": {
+          "exclusiveMinimum": 0,
+          "title": "Learning Rate",
+          "type": "number"
+        },
+        "lr_scheduler": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Lr Scheduler"
+        },
+        "max_grad_norm": {
+          "default": 1.0,
+          "minimum": 0,
+          "title": "Max Grad Norm",
+          "type": "number"
+        },
+        "warmup_ratio": {
+          "anyOf": [
+            {
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Warmup Ratio"
+        },
+        "weight_decay": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Weight Decay"
+        }
+      },
+      "required": [
+        "impl",
+        "learning_rate"
+      ],
+      "title": "OptimizerSpec",
+      "type": "object"
+    },
+    "PackageLock": {
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "record_integrity": {
+                "const": "verified"
+              }
+            },
+            "required": [
+              "record_integrity"
+            ]
+          },
+          "then": {
+            "properties": {
+              "hash": {
+                "properties": {
+                  "algo": {
+                    "const": "sha256"
+                  },
+                  "value": {
+                    "pattern": "^[0-9a-f]{64}$",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "value"
+                ],
+                "type": "object"
+              },
+              "record_entries": {
+                "minimum": 1,
+                "type": "integer"
+              },
+              "record_failed_entries": {
+                "maxItems": 0
+              },
+              "record_verified_entries": {
+                "minimum": 1,
+                "type": "integer"
+              },
+              "version": {
+                "not": {
+                  "type": "null"
+                }
+              }
+            },
+            "required": [
+              "version",
+              "hash",
+              "record_entries",
+              "record_verified_entries",
+              "record_failed_entries"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "record_count_semantics": {
+                "const": "all_record_rows_v2"
+              }
+            },
+            "required": [
+              "record_count_semantics"
+            ]
+          },
+          "then": {
+            "properties": {
+              "installed_file_count": {
+                "minimum": 1,
+                "type": "integer"
+              },
+              "installed_files_hash": {
+                "properties": {
+                  "algo": {
+                    "const": "sha256"
+                  },
+                  "value": {
+                    "pattern": "^[0-9a-f]{64}$",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "value"
+                ],
+                "type": "object"
+              },
+              "record_integrity": {
+                "const": "verified"
+              }
+            },
+            "required": [
+              "record_integrity",
+              "installed_files_hash",
+              "installed_file_count"
+            ]
+          }
+        }
+      ],
+      "description": "A resolved dependency and its install provenance.\n\n``hash`` seals the installed distribution's RECORD metadata when that evidence is available; it\nis not mislabelled as the original wheel hash. ``direct_url`` and ``artifact`` preserve the\nstronger source identity pip exposes for direct/VCS/local installs. ``dependencies`` is the\ninstalled metadata dependency graph, not a second resolver.",
+      "properties": {
+        "artifact": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Artifact"
+        },
+        "artifact_hash": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HashRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "dependencies": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Dependencies",
+          "type": "array"
+        },
+        "direct": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Direct"
+        },
+        "direct_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Direct Url"
+        },
+        "editable": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Editable"
+        },
+        "hash": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HashRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "installed_file_count": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Number of files sealed by installed_files_hash; equals record_entries when record_integrity is verified.",
+          "title": "Installed File Count"
+        },
+        "installed_files_hash": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HashRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "installer": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Installer"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "normalized_name": {
+          "default": "",
+          "title": "Normalized Name",
+          "type": "string"
+        },
+        "record_count_semantics": {
+          "anyOf": [
+            {
+              "const": "all_record_rows_v2",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Explicit all-RECORD-row count meaning. Missing means preserved legacy hash-bearing-row counts and is not admissible for new health, planning, or execution.",
+          "title": "Record Count Semantics"
+        },
+        "record_entries": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Number of regular installed files named by the distribution RECORD; positive when record_integrity is verified.",
+          "title": "Record Entries"
+        },
+        "record_failed_entries": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Record Failed Entries",
+          "type": "array"
+        },
+        "record_integrity": {
+          "default": "unknown",
+          "enum": [
+            "verified",
+            "failed",
+            "missing",
+            "unknown"
+          ],
+          "title": "Record Integrity",
+          "type": "string"
+        },
+        "record_verified_entries": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Verified row count under record_count_semantics; manager <=1.2 counted only hash-bearing rows, while all_record_rows_v2 equals record_entries.",
+          "title": "Record Verified Entries"
+        },
+        "requested": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Requested"
+        },
+        "source": {
+          "default": "unknown",
+          "enum": [
+            "pypi",
+            "wheel",
+            "sdist",
+            "conda",
+            "vcs",
+            "local",
+            "unknown"
+          ],
+          "title": "Source",
+          "type": "string"
+        },
+        "source_evidence_reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Evidence Reason"
+        },
+        "source_index_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Index Url"
+        },
+        "vcs_commit": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Vcs Commit"
+        },
+        "vcs_repository": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Vcs Repository"
+        },
+        "version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Version"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "PackageLock",
+      "type": "object"
+    },
+    "PrecisionExecutionPolicy": {
+      "additionalProperties": false,
+      "description": "The numerical representation of each material training state.\n\n``weight_storage_dtype`` describes an unquantized frozen base; quantized bases use\n``quantized_storage_format`` instead. ``master_weight_dtype`` describes the trainable adapter\nparameters. An 8-bit optimizer may use quantized primary state plus FP32 auxiliary tensors.",
+      "properties": {
+        "dequantization_dtype": {
+          "$ref": "#/$defs/PrecisionMode"
+        },
+        "forward_compute_dtype": {
+          "$ref": "#/$defs/PrecisionMode"
+        },
+        "gradient_dtype": {
+          "$ref": "#/$defs/PrecisionMode"
+        },
+        "master_weight_dtype": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PrecisionMode"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "optimizer_auxiliary_dtype": {
+          "$ref": "#/$defs/PrecisionMode",
+          "default": "fp32"
+        },
+        "optimizer_state_dtype": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PrecisionMode"
+            },
+            {
+              "$ref": "#/$defs/QuantizationMode"
+            }
+          ],
+          "title": "Optimizer State Dtype"
+        },
+        "quantized_storage_format": {
+          "$ref": "#/$defs/QuantizationMode",
+          "default": "none"
+        },
+        "weight_storage_dtype": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PrecisionMode"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "dequantization_dtype",
+        "forward_compute_dtype",
+        "gradient_dtype",
+        "optimizer_state_dtype"
+      ],
+      "title": "PrecisionExecutionPolicy",
+      "type": "object"
+    },
+    "PrecisionMode": {
+      "enum": [
+        "fp32",
+        "tf32",
+        "fp16",
+        "bf16",
+        "fp8",
+        "mixed_bf16",
+        "mixed_fp16"
+      ],
+      "title": "PrecisionMode",
+      "type": "string"
+    },
+    "PretrainingDataPolicy": {
+      "additionalProperties": false,
+      "description": "Additive, dense/MoE-safe pretraining data policy (#487), PARALLEL to the SFT-only\n``TrainingDataPolicy`` - never reuse the SFT contract for a sharded / streamed / mixture-weighted\ncorpus. It declares a content-hashed shard set, streaming, per-source mixture weights, document\nboundaries, pretraining packing, a seeded deterministic global order, and a stop condition (token\nbudget and/or epochs) so a run stops at the budget and never silently truncates. The runtime\nper-rank data cursor + streaming resume is a separate (worker) slice.",
+      "properties": {
+        "contract_version": {
+          "const": "1.0.0",
+          "default": "1.0.0",
+          "title": "Contract Version",
+          "type": "string"
+        },
+        "data_seed": {
+          "minimum": 0,
+          "title": "Data Seed",
+          "type": "integer"
+        },
+        "document_boundaries": {
+          "default": true,
+          "title": "Document Boundaries",
+          "type": "boolean"
+        },
+        "epochs": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Epochs"
+        },
+        "global_batch_size": {
+          "minimum": 1,
+          "title": "Global Batch Size",
+          "type": "integer"
+        },
+        "mixture_weights": {
+          "additionalProperties": {
+            "type": "number"
+          },
+          "title": "Mixture Weights",
+          "type": "object"
+        },
+        "packing": {
+          "default": "concat_and_split",
+          "enum": [
+            "none",
+            "concat_and_split",
+            "best_fit"
+          ],
+          "title": "Packing",
+          "type": "string"
+        },
+        "shards": {
+          "items": {
+            "$ref": "#/$defs/PretrainingShard"
+          },
+          "title": "Shards",
+          "type": "array"
+        },
+        "streaming": {
+          "default": true,
+          "title": "Streaming",
+          "type": "boolean"
+        },
+        "token_budget": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Token Budget"
+        }
+      },
+      "required": [
+        "shards",
+        "data_seed",
+        "global_batch_size"
+      ],
+      "title": "PretrainingDataPolicy",
+      "type": "object"
+    },
+    "PretrainingShard": {
+      "additionalProperties": false,
+      "description": "One content-hashed corpus shard in a :class:`PretrainingDataPolicy`: a stable id + location, its\nrow and token counts, its sha256, and the mixture source it belongs to. The token count feeds the\ntoken budget; the sha256 pins the exact bytes so a resumed stream reads the same shard.",
+      "properties": {
+        "content_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Content Sha256",
+          "type": "string"
+        },
+        "location": {
+          "minLength": 1,
+          "title": "Location",
+          "type": "string"
+        },
+        "row_count": {
+          "minimum": 0,
+          "title": "Row Count",
+          "type": "integer"
+        },
+        "shard_id": {
+          "minLength": 1,
+          "title": "Shard Id",
+          "type": "string"
+        },
+        "source": {
+          "default": "",
+          "title": "Source",
+          "type": "string"
+        },
+        "token_count": {
+          "minimum": 0,
+          "title": "Token Count",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "shard_id",
+        "location",
+        "row_count",
+        "token_count",
+        "content_sha256"
+      ],
+      "title": "PretrainingShard",
+      "type": "object"
+    },
+    "QuantizationMode": {
+      "enum": [
+        "none",
+        "int8",
+        "int4",
+        "nf4",
+        "fp4",
+        "gptq",
+        "awq",
+        "hqq"
+      ],
+      "title": "QuantizationMode",
+      "type": "string"
+    },
+    "Ref": {
+      "additionalProperties": false,
+      "description": "A stable reference to another contract instance by id, optionally pinned to a content hash so\nthe reference cannot silently re-point.",
+      "properties": {
+        "hash": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HashRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "id": {
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "title": "Ref",
+      "type": "object"
+    },
+    "SequenceSpec": {
+      "additionalProperties": false,
+      "description": "Sequence handling. Buckets let variable-length rows batch efficiently; the max bucket ==\nthe trainer's sequence_len (config_templates.sequence_len, default 4096).",
+      "properties": {
+        "buckets": {
+          "items": {
+            "type": "integer"
+          },
+          "title": "Buckets",
+          "type": "array"
+        },
+        "max_sequence_len": {
+          "default": 4096,
+          "minimum": 1,
+          "title": "Max Sequence Len",
+          "type": "integer"
+        },
+        "packing": {
+          "default": false,
+          "title": "Packing",
+          "type": "boolean"
+        },
+        "truncation_allowed": {
+          "default": true,
+          "title": "Truncation Allowed",
+          "type": "boolean"
+        }
+      },
+      "title": "SequenceSpec",
+      "type": "object"
+    },
+    "TokenizerSourceSpec": {
+      "additionalProperties": false,
+      "description": "How the tokenizer is obtained, frozen by hash BEFORE any token is consumed (a tokenizer change\ninvalidates all downstream token accounting). ``train`` builds a NEW tokenizer from a corpus sample\n(a new subsystem the worker slice implements); ``import`` / ``freeze`` pin an existing tokenizer by\nits content digest exactly as the SFT path does today.",
+      "properties": {
+        "algorithm": {
+          "anyOf": [
+            {
+              "enum": [
+                "bpe",
+                "unigram",
+                "wordpiece"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Algorithm"
+        },
+        "min_frequency": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Min Frequency"
+        },
+        "mode": {
+          "enum": [
+            "train",
+            "import",
+            "freeze"
+          ],
+          "title": "Mode",
+          "type": "string"
+        },
+        "special_tokens": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Special Tokens"
+        },
+        "tokenizer_content_sha256": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tokenizer Content Sha256"
+        },
+        "tokenizer_location": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tokenizer Location"
+        },
+        "vocab_size": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Vocab Size"
+        }
+      },
+      "required": [
+        "mode"
+      ],
+      "title": "TokenizerSourceSpec",
+      "type": "object"
+    },
+    "TrainerInterfacePolicy": {
+      "additionalProperties": false,
+      "description": "Version- and field-exact adapter to the installed TRL/Transformers surface.",
+      "properties": {
+        "disable_tqdm": {
+          "default": true,
+          "title": "Disable Tqdm",
+          "type": "boolean"
+        },
+        "logging_nan_inf_filter": {
+          "anyOf": [
+            {
+              "const": false,
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Logging Nan Inf Filter"
+        },
+        "logging_steps": {
+          "const": 1,
+          "default": 1,
+          "title": "Logging Steps",
+          "type": "integer"
+        },
+        "logging_strategy": {
+          "anyOf": [
+            {
+              "const": "steps",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Logging Strategy"
+        },
+        "package_versions": {
+          "items": {
+            "$ref": "#/$defs/PackageLock"
+          },
+          "minItems": 1,
+          "title": "Package Versions",
+          "type": "array"
+        },
+        "report_to": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Report To",
+          "type": "array"
+        },
+        "required_sft_config_fields": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Required Sft Config Fields",
+          "type": "array"
+        },
+        "sequence_length_field": {
+          "enum": [
+            "max_seq_length",
+            "max_length"
+          ],
+          "title": "Sequence Length Field",
+          "type": "string"
+        },
+        "tokenizer_parameter": {
+          "enum": [
+            "tokenizer",
+            "processing_class"
+          ],
+          "title": "Tokenizer Parameter",
+          "type": "string"
+        }
+      },
+      "required": [
+        "package_versions",
+        "required_sft_config_fields",
+        "sequence_length_field",
+        "tokenizer_parameter"
+      ],
+      "title": "TrainerInterfacePolicy",
+      "type": "object"
+    },
+    "TrainingSchedule": {
+      "additionalProperties": false,
+      "properties": {
+        "max_steps": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Steps"
+        },
+        "num_train_epochs": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Num Train Epochs"
+        }
+      },
+      "title": "TrainingSchedule",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "The hash-sealed configuration for a from-scratch / continued PRETRAINING run - the sibling of\n:class:`ResolvedExecutionConfiguration` for the ``pretraining`` execution variant.\n\nThe dense-QLoRA-SFT seal is byte-locked (its own ``configuration_hash`` AND a committed semantic\ngolden), so pretraining semantics live on THIS separate contract, never as new fields on the SFT\nconfig. Unlike SFT/DPO this is a FULL-PARAMETER causal-LM run: there is no adapter, no 4-bit base,\nand no single dataset file. The three input kinds are captured by method sub-specs rather than the\nSFT-shaped ``ExecutionInputs`` (which fail-closed requires one local dataset file + a model-weights\nbinding, neither of which a from-scratch run has): the model by a :class:`ModelInitializationSpec`\n(random from a config, or a continued checkpoint), the tokenizer by a :class:`TokenizerSourceSpec`,\nand the corpus by the sharded :class:`PretrainingDataPolicy`.\n\nCarried on ``RunPlan.resolved_pretraining_execution`` (a plan carries exactly one of the SFT /\npreference / pretraining configs). What remains gated is EXECUTION: the pretraining worker loop\n(``from_config`` init, corpus streaming, packing, per-rank cursor), a workload-verified run, and the\nmilestone wheel that promotes ``pretraining`` to ``workload_verified``. ``trainer_interface`` is an\nexecution-shaped placeholder until that worker seals the exact trainer surface.",
+  "properties": {
+    "attention": {
+      "$ref": "#/$defs/AttentionExecutionPolicy"
+    },
+    "backend_ref": {
+      "$ref": "#/$defs/Ref"
+    },
+    "batching": {
+      "$ref": "#/$defs/BatchingSpec"
+    },
+    "capability_report_ref": {
+      "$ref": "#/$defs/Ref"
+    },
+    "checkpoint_policy": {
+      "$ref": "#/$defs/CheckpointPolicy"
+    },
+    "configuration_hash": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Configuration Hash",
+      "type": "string"
+    },
+    "configuration_id": {
+      "pattern": "^[A-Za-z0-9._-]+$",
+      "title": "Configuration Id",
+      "type": "string"
+    },
+    "contract_version": {
+      "const": "1.0.0",
+      "default": "1.0.0",
+      "title": "Contract Version",
+      "type": "string"
+    },
+    "data": {
+      "$ref": "#/$defs/PretrainingDataPolicy"
+    },
+    "data_seed": {
+      "default": 42,
+      "minimum": 0,
+      "title": "Data Seed",
+      "type": "integer"
+    },
+    "device_map": {
+      "items": {
+        "$ref": "#/$defs/DeviceMapEntry"
+      },
+      "minItems": 1,
+      "title": "Device Map",
+      "type": "array"
+    },
+    "environment_binding": {
+      "enum": [
+        "profile_snapshot",
+        "managed_lock"
+      ],
+      "title": "Environment Binding",
+      "type": "string"
+    },
+    "environment_ref": {
+      "$ref": "#/$defs/Ref"
+    },
+    "export_format": {
+      "$ref": "#/$defs/ExportFormat"
+    },
+    "gradient_checkpointing": {
+      "default": true,
+      "title": "Gradient Checkpointing",
+      "type": "boolean"
+    },
+    "init": {
+      "$ref": "#/$defs/ModelInitializationSpec"
+    },
+    "loss_impl": {
+      "$ref": "#/$defs/LossImpl"
+    },
+    "objective_ref": {
+      "$ref": "#/$defs/Ref"
+    },
+    "optimizer": {
+      "$ref": "#/$defs/OptimizerSpec"
+    },
+    "output_dir": {
+      "minLength": 1,
+      "title": "Output Dir",
+      "type": "string"
+    },
+    "output_layout": {
+      "const": "run_scoped_v1",
+      "default": "run_scoped_v1",
+      "title": "Output Layout",
+      "type": "string"
+    },
+    "precision": {
+      "$ref": "#/$defs/PrecisionExecutionPolicy"
+    },
+    "runtime_mode": {
+      "enum": [
+        "training",
+        "cpu_toy"
+      ],
+      "title": "Runtime Mode",
+      "type": "string"
+    },
+    "schedule": {
+      "$ref": "#/$defs/TrainingSchedule"
+    },
+    "seed": {
+      "default": 42,
+      "minimum": 0,
+      "title": "Seed",
+      "type": "integer"
+    },
+    "sequence": {
+      "$ref": "#/$defs/SequenceSpec"
+    },
+    "tokenizer_source": {
+      "$ref": "#/$defs/TokenizerSourceSpec"
+    },
+    "trainer_interface": {
+      "$ref": "#/$defs/TrainerInterfacePolicy"
+    },
+    "trust_remote_code": {
+      "const": false,
+      "default": false,
+      "title": "Trust Remote Code",
+      "type": "boolean"
+    },
+    "use_safetensors": {
+      "const": true,
+      "default": true,
+      "title": "Use Safetensors",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "configuration_id",
+    "configuration_hash",
+    "backend_ref",
+    "environment_ref",
+    "environment_binding",
+    "capability_report_ref",
+    "objective_ref",
+    "runtime_mode",
+    "init",
+    "tokenizer_source",
+    "precision",
+    "attention",
+    "device_map",
+    "optimizer",
+    "loss_impl",
+    "sequence",
+    "batching",
+    "checkpoint_policy",
+    "schedule",
+    "data",
+    "trainer_interface",
+    "export_format",
+    "output_dir"
+  ],
+  "title": "ResolvedPretrainingExecutionConfiguration",
+  "type": "object"
+}

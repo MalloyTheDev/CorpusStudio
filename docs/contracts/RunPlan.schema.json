@@ -342,6 +342,48 @@
       "title": "CompileMode",
       "type": "string"
     },
+    "CustomModelCodeSpec": {
+      "additionalProperties": false,
+      "description": "A hash-pinned, ADMITTED local custom-block bundle for a from-scratch run - the mode-3 'your own\nmodel code' path (your own IMPLEMENTATION, the only not-borrowed mode). It seals WHICH exact bytes\n(``code_bundle_ref``) an ADMITTED :class:`ModelCodeVettingReport` (``vetting_ref``) screened, plus the\nentry class + interface. This path NEVER uses HF ``trust_remote_code`` (``Literal[False]``); the\nmodule is loaded locally, by path, from the pinned bundle.\n\nSealing this admits the design AT PLANNING; a static screen is not a safety proof, so EXECUTION stays\ngated behind the (later) worker sandbox exactly as pretraining itself is refused at the worker today.\nBoth refs must be hash-pinned so admission binds to specific bytes and cannot silently re-point.",
+      "properties": {
+        "code_bundle_ref": {
+          "$ref": "#/$defs/Ref"
+        },
+        "entry_symbol": {
+          "minLength": 1,
+          "title": "Entry Symbol",
+          "type": "string"
+        },
+        "interface_version": {
+          "const": "custom_decoder_v1",
+          "title": "Interface Version",
+          "type": "string"
+        },
+        "trust_remote_code": {
+          "const": false,
+          "default": false,
+          "title": "Trust Remote Code",
+          "type": "boolean"
+        },
+        "vetting_ref": {
+          "$ref": "#/$defs/Ref"
+        },
+        "vetting_verdict": {
+          "const": "admitted",
+          "title": "Vetting Verdict",
+          "type": "string"
+        }
+      },
+      "required": [
+        "code_bundle_ref",
+        "entry_symbol",
+        "interface_version",
+        "vetting_ref",
+        "vetting_verdict"
+      ],
+      "title": "CustomModelCodeSpec",
+      "type": "object"
+    },
     "DeviceKind": {
       "enum": [
         "cuda",
@@ -613,6 +655,125 @@
       ],
       "title": "ModelAttentionApi",
       "type": "string"
+    },
+    "ModelInitializationSpec": {
+      "additionalProperties": false,
+      "description": "How a PRETRAINING run instantiates its model. From-scratch has NO source weights: it builds a\nmodel from an architecture config with reproducible random init (the worker's ``from_config`` path,\nnever ``from_pretrained``), pinned by ``architecture_ref`` + ``vocab_size`` + ``init_seed``.\nContinued pretraining loads a hash-pinned ``source_checkpoint_ref`` and states explicitly what is\nreset (optimizer / lr scheduler / data cursor) vs carried. Dense/MoE-safe: this seals init INTENT\nand assumes no dense-specific model shape.",
+      "properties": {
+        "architecture_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Ref"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "custom_code": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CustomModelCodeSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "init_seed": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Init Seed"
+        },
+        "initializer_range": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Initializer Range"
+        },
+        "max_position_embeddings": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Position Embeddings"
+        },
+        "mode": {
+          "enum": [
+            "random",
+            "continued"
+          ],
+          "title": "Mode",
+          "type": "string"
+        },
+        "reset_data_cursor": {
+          "default": true,
+          "title": "Reset Data Cursor",
+          "type": "boolean"
+        },
+        "reset_lr_scheduler": {
+          "default": true,
+          "title": "Reset Lr Scheduler",
+          "type": "boolean"
+        },
+        "reset_optimizer": {
+          "default": true,
+          "title": "Reset Optimizer",
+          "type": "boolean"
+        },
+        "source_checkpoint_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Ref"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "vocab_size": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Vocab Size"
+        }
+      },
+      "required": [
+        "mode"
+      ],
+      "title": "ModelInitializationSpec",
+      "type": "object"
     },
     "OffloadMechanism": {
       "enum": [
@@ -1720,6 +1881,140 @@
       "title": "PreferenceOptimizationSpec",
       "type": "object"
     },
+    "PretrainingDataPolicy": {
+      "additionalProperties": false,
+      "description": "Additive, dense/MoE-safe pretraining data policy (#487), PARALLEL to the SFT-only\n``TrainingDataPolicy`` - never reuse the SFT contract for a sharded / streamed / mixture-weighted\ncorpus. It declares a content-hashed shard set, streaming, per-source mixture weights, document\nboundaries, pretraining packing, a seeded deterministic global order, and a stop condition (token\nbudget and/or epochs) so a run stops at the budget and never silently truncates. The runtime\nper-rank data cursor + streaming resume is a separate (worker) slice.",
+      "properties": {
+        "contract_version": {
+          "const": "1.0.0",
+          "default": "1.0.0",
+          "title": "Contract Version",
+          "type": "string"
+        },
+        "data_seed": {
+          "minimum": 0,
+          "title": "Data Seed",
+          "type": "integer"
+        },
+        "document_boundaries": {
+          "default": true,
+          "title": "Document Boundaries",
+          "type": "boolean"
+        },
+        "epochs": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Epochs"
+        },
+        "global_batch_size": {
+          "minimum": 1,
+          "title": "Global Batch Size",
+          "type": "integer"
+        },
+        "mixture_weights": {
+          "additionalProperties": {
+            "type": "number"
+          },
+          "title": "Mixture Weights",
+          "type": "object"
+        },
+        "packing": {
+          "default": "concat_and_split",
+          "enum": [
+            "none",
+            "concat_and_split",
+            "best_fit"
+          ],
+          "title": "Packing",
+          "type": "string"
+        },
+        "shards": {
+          "items": {
+            "$ref": "#/$defs/PretrainingShard"
+          },
+          "title": "Shards",
+          "type": "array"
+        },
+        "streaming": {
+          "default": true,
+          "title": "Streaming",
+          "type": "boolean"
+        },
+        "token_budget": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Token Budget"
+        }
+      },
+      "required": [
+        "shards",
+        "data_seed",
+        "global_batch_size"
+      ],
+      "title": "PretrainingDataPolicy",
+      "type": "object"
+    },
+    "PretrainingShard": {
+      "additionalProperties": false,
+      "description": "One content-hashed corpus shard in a :class:`PretrainingDataPolicy`: a stable id + location, its\nrow and token counts, its sha256, and the mixture source it belongs to. The token count feeds the\ntoken budget; the sha256 pins the exact bytes so a resumed stream reads the same shard.",
+      "properties": {
+        "content_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Content Sha256",
+          "type": "string"
+        },
+        "location": {
+          "minLength": 1,
+          "title": "Location",
+          "type": "string"
+        },
+        "row_count": {
+          "minimum": 0,
+          "title": "Row Count",
+          "type": "integer"
+        },
+        "shard_id": {
+          "minLength": 1,
+          "title": "Shard Id",
+          "type": "string"
+        },
+        "source": {
+          "default": "",
+          "title": "Source",
+          "type": "string"
+        },
+        "token_count": {
+          "minimum": 0,
+          "title": "Token Count",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "shard_id",
+        "location",
+        "row_count",
+        "token_count",
+        "content_sha256"
+      ],
+      "title": "PretrainingShard",
+      "type": "object"
+    },
     "QuantizationMode": {
       "enum": [
         "none",
@@ -2181,6 +2476,170 @@
       "title": "ResolvedPreferenceExecutionConfiguration",
       "type": "object"
     },
+    "ResolvedPretrainingExecutionConfiguration": {
+      "additionalProperties": false,
+      "description": "The hash-sealed configuration for a from-scratch / continued PRETRAINING run - the sibling of\n:class:`ResolvedExecutionConfiguration` for the ``pretraining`` execution variant.\n\nThe dense-QLoRA-SFT seal is byte-locked (its own ``configuration_hash`` AND a committed semantic\ngolden), so pretraining semantics live on THIS separate contract, never as new fields on the SFT\nconfig. Unlike SFT/DPO this is a FULL-PARAMETER causal-LM run: there is no adapter, no 4-bit base,\nand no single dataset file. The three input kinds are captured by method sub-specs rather than the\nSFT-shaped ``ExecutionInputs`` (which fail-closed requires one local dataset file + a model-weights\nbinding, neither of which a from-scratch run has): the model by a :class:`ModelInitializationSpec`\n(random from a config, or a continued checkpoint), the tokenizer by a :class:`TokenizerSourceSpec`,\nand the corpus by the sharded :class:`PretrainingDataPolicy`.\n\nCarried on ``RunPlan.resolved_pretraining_execution`` (a plan carries exactly one of the SFT /\npreference / pretraining configs). What remains gated is EXECUTION: the pretraining worker loop\n(``from_config`` init, corpus streaming, packing, per-rank cursor), a workload-verified run, and the\nmilestone wheel that promotes ``pretraining`` to ``workload_verified``. ``trainer_interface`` is an\nexecution-shaped placeholder until that worker seals the exact trainer surface.",
+      "properties": {
+        "attention": {
+          "$ref": "#/$defs/AttentionExecutionPolicy"
+        },
+        "backend_ref": {
+          "$ref": "#/$defs/Ref"
+        },
+        "batching": {
+          "$ref": "#/$defs/BatchingSpec"
+        },
+        "capability_report_ref": {
+          "$ref": "#/$defs/Ref"
+        },
+        "checkpoint_policy": {
+          "$ref": "#/$defs/CheckpointPolicy"
+        },
+        "configuration_hash": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Configuration Hash",
+          "type": "string"
+        },
+        "configuration_id": {
+          "pattern": "^[A-Za-z0-9._-]+$",
+          "title": "Configuration Id",
+          "type": "string"
+        },
+        "contract_version": {
+          "const": "1.0.0",
+          "default": "1.0.0",
+          "title": "Contract Version",
+          "type": "string"
+        },
+        "data": {
+          "$ref": "#/$defs/PretrainingDataPolicy"
+        },
+        "data_seed": {
+          "default": 42,
+          "minimum": 0,
+          "title": "Data Seed",
+          "type": "integer"
+        },
+        "device_map": {
+          "items": {
+            "$ref": "#/$defs/DeviceMapEntry"
+          },
+          "minItems": 1,
+          "title": "Device Map",
+          "type": "array"
+        },
+        "environment_binding": {
+          "enum": [
+            "profile_snapshot",
+            "managed_lock"
+          ],
+          "title": "Environment Binding",
+          "type": "string"
+        },
+        "environment_ref": {
+          "$ref": "#/$defs/Ref"
+        },
+        "export_format": {
+          "$ref": "#/$defs/ExportFormat"
+        },
+        "gradient_checkpointing": {
+          "default": true,
+          "title": "Gradient Checkpointing",
+          "type": "boolean"
+        },
+        "init": {
+          "$ref": "#/$defs/ModelInitializationSpec"
+        },
+        "loss_impl": {
+          "$ref": "#/$defs/LossImpl"
+        },
+        "objective_ref": {
+          "$ref": "#/$defs/Ref"
+        },
+        "optimizer": {
+          "$ref": "#/$defs/OptimizerSpec"
+        },
+        "output_dir": {
+          "minLength": 1,
+          "title": "Output Dir",
+          "type": "string"
+        },
+        "output_layout": {
+          "const": "run_scoped_v1",
+          "default": "run_scoped_v1",
+          "title": "Output Layout",
+          "type": "string"
+        },
+        "precision": {
+          "$ref": "#/$defs/PrecisionExecutionPolicy"
+        },
+        "runtime_mode": {
+          "enum": [
+            "training",
+            "cpu_toy"
+          ],
+          "title": "Runtime Mode",
+          "type": "string"
+        },
+        "schedule": {
+          "$ref": "#/$defs/TrainingSchedule"
+        },
+        "seed": {
+          "default": 42,
+          "minimum": 0,
+          "title": "Seed",
+          "type": "integer"
+        },
+        "sequence": {
+          "$ref": "#/$defs/SequenceSpec"
+        },
+        "tokenizer_source": {
+          "$ref": "#/$defs/TokenizerSourceSpec"
+        },
+        "trainer_interface": {
+          "$ref": "#/$defs/TrainerInterfacePolicy"
+        },
+        "trust_remote_code": {
+          "const": false,
+          "default": false,
+          "title": "Trust Remote Code",
+          "type": "boolean"
+        },
+        "use_safetensors": {
+          "const": true,
+          "default": true,
+          "title": "Use Safetensors",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "configuration_id",
+        "configuration_hash",
+        "backend_ref",
+        "environment_ref",
+        "environment_binding",
+        "capability_report_ref",
+        "objective_ref",
+        "runtime_mode",
+        "init",
+        "tokenizer_source",
+        "precision",
+        "attention",
+        "device_map",
+        "optimizer",
+        "loss_impl",
+        "sequence",
+        "batching",
+        "checkpoint_policy",
+        "schedule",
+        "data",
+        "trainer_interface",
+        "export_format",
+        "output_dir"
+      ],
+      "title": "ResolvedPretrainingExecutionConfiguration",
+      "type": "object"
+    },
     "RouteMissAction": {
       "description": "What the physical scheduler does when requested state is not ready. Semantic fallback is\nnever implicit: it requires a separately pinned learned-policy reference.",
       "enum": [
@@ -2439,6 +2898,110 @@
       ],
       "title": "TaskType",
       "type": "string"
+    },
+    "TokenizerSourceSpec": {
+      "additionalProperties": false,
+      "description": "How the tokenizer is obtained, frozen by hash BEFORE any token is consumed (a tokenizer change\ninvalidates all downstream token accounting). ``train`` builds a NEW tokenizer from a corpus sample\n(a new subsystem the worker slice implements); ``import`` / ``freeze`` pin an existing tokenizer by\nits content digest exactly as the SFT path does today.",
+      "properties": {
+        "algorithm": {
+          "anyOf": [
+            {
+              "enum": [
+                "bpe",
+                "unigram",
+                "wordpiece"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Algorithm"
+        },
+        "min_frequency": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Min Frequency"
+        },
+        "mode": {
+          "enum": [
+            "train",
+            "import",
+            "freeze"
+          ],
+          "title": "Mode",
+          "type": "string"
+        },
+        "special_tokens": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Special Tokens"
+        },
+        "tokenizer_content_sha256": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tokenizer Content Sha256"
+        },
+        "tokenizer_location": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tokenizer Location"
+        },
+        "vocab_size": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Vocab Size"
+        }
+      },
+      "required": [
+        "mode"
+      ],
+      "title": "TokenizerSourceSpec",
+      "type": "object"
     },
     "TrainerInterfacePolicy": {
       "additionalProperties": false,
@@ -2789,6 +3352,17 @@
       "anyOf": [
         {
           "$ref": "#/$defs/ResolvedPreferenceExecutionConfiguration"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "resolved_pretraining_execution": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ResolvedPretrainingExecutionConfiguration"
         },
         {
           "type": "null"

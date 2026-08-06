@@ -1,0 +1,102 @@
+{
+  "$defs": {
+    "VettingFinding": {
+      "additionalProperties": false,
+      "description": "A single finding from statically screening a custom-block bundle (nested in ModelCodeVettingReport,\nnot a root contract).",
+      "properties": {
+        "code": {
+          "minLength": 1,
+          "title": "Code",
+          "type": "string"
+        },
+        "lineno": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Lineno"
+        },
+        "message": {
+          "minLength": 1,
+          "title": "Message",
+          "type": "string"
+        },
+        "severity": {
+          "enum": [
+            "error",
+            "warning"
+          ],
+          "title": "Severity",
+          "type": "string"
+        }
+      },
+      "required": [
+        "severity",
+        "code",
+        "message"
+      ],
+      "title": "VettingFinding",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "The recorded result of STATICALLY screening a local custom-block bundle - the auditable admission\ntoken for the mode-3 'your own model code' path (your own IMPLEMENTATION, not a borrowed family nor a\ncomposed-from-standard-blocks design).\n\nContent-addressed evidence: it pins the exact bundle bytes it screened (``bundle_sha256``), so a plan\ncan bind admission to those bytes and nothing else. A static pre-screen is NECESSARY, NOT SUFFICIENT:\nit executes nothing and does not prove the code safe - runtime containment is the (gated) worker\nsandbox, and admission stays human-gated. This path never uses HF ``trust_remote_code`` (which stays\n``Literal[False]``); the module is loaded locally, by path, from the pinned bundle. ``verdict`` is\n``admitted`` iff there are no error-severity findings.",
+  "properties": {
+    "analyzer_version": {
+      "minLength": 1,
+      "title": "Analyzer Version",
+      "type": "string"
+    },
+    "bundle_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Bundle Sha256",
+      "type": "string"
+    },
+    "contract_version": {
+      "const": "1.0.0",
+      "default": "1.0.0",
+      "title": "Contract Version",
+      "type": "string"
+    },
+    "entry_symbol": {
+      "minLength": 1,
+      "title": "Entry Symbol",
+      "type": "string"
+    },
+    "findings": {
+      "items": {
+        "$ref": "#/$defs/VettingFinding"
+      },
+      "title": "Findings",
+      "type": "array"
+    },
+    "interface_version": {
+      "const": "custom_decoder_v1",
+      "title": "Interface Version",
+      "type": "string"
+    },
+    "verdict": {
+      "enum": [
+        "admitted",
+        "rejected"
+      ],
+      "title": "Verdict",
+      "type": "string"
+    }
+  },
+  "required": [
+    "analyzer_version",
+    "bundle_sha256",
+    "entry_symbol",
+    "interface_version",
+    "verdict"
+  ],
+  "title": "ModelCodeVettingReport",
+  "type": "object"
+}

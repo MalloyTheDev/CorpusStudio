@@ -25,8 +25,10 @@ run control plane covering the dataset-to-model workflow: create datasets, valid
 clean and measure them, grade their outstanding debt, run pass/warn/block gates,
 generate or rewrite candidates only with policy-approved providers under human
 review, test and compare models, export them, version/diff/restore the dataset,
-generate training configs, execute first-party QLoRA only from a hash-sealed RunPlan through the
-supervised worker path, or launch your own installed trainer with live logs and checkpoints, plan against measured hardware,
+create a model from scratch (`create-model`), generate training configs, execute first-party training -
+QLoRA-SFT **and** from-scratch full-parameter pretraining (both `workload_verified`) - from a hash-sealed
+RunPlan through the supervised worker path, or launch your own installed trainer with live logs and
+checkpoints, plan against measured hardware,
 isolate the reference training backend in a lock-pinned managed environment, track every run and the
 model artifacts it produces, and measure the before/after improvement.
 
@@ -39,6 +41,10 @@ Corpus Studio covers the full local loop from authoring, through governed
 cleaning and gating, evaluation and model comparison, to launching and tracking
 a training run — its own opt-in first-party backend through the sealed Platform lifecycle, or your
 installed external trainer:
+
+> **On "desktop" / "... tab" phrasings below:** these name surfaces of the WPF/Avalonia desktop
+> **prototype**, which was **removed (#545)**. The engine **CLI is the current surface** and the
+> Tauri/React `apps/web` client is in progress; the per-bullet reframe is tracked in #560.
 
 **Author & validate**
 - create projects from built-in schema templates with pre-filled examples
@@ -80,9 +86,9 @@ installed external trainer:
 - compare two versions (added / removed / common rows) and **restore** a
   version's exact rows. `examples.jsonl` now has a **single writer in the engine** —
   the `examples-append` command (#546); the WPF/Avalonia desktop that previously
-  owned it is being retired (#545). In-place restore (capture an undo point, atomically
-  swap in the restored rows, refuse without a safe undo) is being re-homed to the engine
-  CLI next (#546). See [`docs/VERSIONING.md`](docs/VERSIONING.md)
+  owned it was **removed** (#545). In-place restore (capture an undo point, atomically
+  swap in the restored rows, refuse without a safe undo) now lives in the engine
+  CLI (#546). See [`docs/VERSIONING.md`](docs/VERSIONING.md)
 
 **Govern & gate**
 - role-based provider policy enforced **in the engine** (not just the UI):
@@ -130,13 +136,21 @@ installed external trainer:
   token budget (tokens-per-epoch after truncation, over-length counts), a rough VRAM
   planning estimate, and a LoRA rank/alpha suggestion. External targets include the exact launch
   command; the first-party target deliberately requires a sealed Platform plan instead
-- an **opt-in first-party QLoRA backend** (the `[train]` extra): `platform-plan` binds immutable
-  model/tokenizer/dataset/objective/environment/capability evidence, and `platform-run` supervises
-  the exact worker configuration. Every execution receives a fresh UUIDv7 run ID and writes under
-  `<output-root>/runs/<run-id>/`; its adapter ID includes the run, role, and weight-content hash.
+- an **opt-in first-party training backend** (the `[train]` extra) that executes **QLoRA-SFT and
+  from-scratch full-parameter pretraining** - both `workload_verified` (DPO/preference is sealed at
+  planning but not yet executable). `create-model` composes a from-scratch architecture config;
+  `platform-plan` binds immutable model/tokenizer/dataset/objective/environment/capability evidence, and
+  `platform-run` supervises the exact worker configuration (routing pretraining to the first-party
+  `PretrainingRunner`). Every execution receives a fresh UUIDv7 run ID and writes under
+  `<output-root>/runs/<run-id>/`; an adapter ID includes the run, role, and weight-content hash.
   `train-check`, `train-merge`, and `model-fetch` remain supporting tools. The low-level `train-run`
   entry point is development-only: it refuses unless explicitly acknowledged and labels its result
   `UNSEALED_DIRECT_EXECUTION`, `NON_REPRODUCIBLE`, and `NO_PLATFORM_LINEAGE`
+- **offline DPO / preference planning** (`platform-plan --task-type preference --objective dpo_qlora
+  --dpo-beta … --dpo-label-smoothing … --max-prompt-length …`): a QLoRA-DPO plan is admitted at planning
+  and lowered into a sealed `ResolvedPreferenceExecutionConfiguration` (a byte-locked sibling of the SFT
+  seal), then refused at execution with a typed reason until the DPO worker wheel + a sealed run promote
+  it. The worker primitive reaches seq 4096 on a 12 GB card and is GPU-validated as correct (exploratory)
 - versioned `TraceRecord` artifacts preserve source rows, role context, reasoning/tool/final-answer
   boundaries, producer-policy evidence, validation, and separate human review. Generated candidates
   are pending by default; `trace-review` writes immutable successors and first-party trainer admission refuses
@@ -178,7 +192,7 @@ installed external trainer:
   fit/residency claim is made (see
   [`docs/MODEL_TOKENIZER_CONTRACTS.md`](docs/MODEL_TOKENIZER_CONTRACTS.md) and
   [`docs/MOE_ARCHITECTURE.md`](docs/MOE_ARCHITECTURE.md))
-- a 29-entry, hash-sealed `TrainingObjective` registry describes datasets, labels, masks, losses,
+- a 30-entry, hash-sealed `TrainingObjective` registry describes datasets, labels, masks, losses,
   model/update/backend requirements, artifacts, resume/evaluation, and MoE-safe router/expert intent
   independently from backend implementation; its checker keeps declarations separate from measured
   capability evidence (see [`docs/TRAINING_SYSTEMS_ARCHITECTURE.md`](docs/TRAINING_SYSTEMS_ARCHITECTURE.md))
@@ -231,15 +245,15 @@ CorpusStudio
 ```
 
 **Target architecture:** a **Rust authoritative core** + isolated Python ML workers, driven by the
-**Tauri 2 / React** frontend over the Python engine. The WPF/Avalonia desktop is a **decommissioning
-prototype** (#545), kept only until the engine CLI re-homes dataset authoring (#546); the Rust core is
-a staged target (#522) and is not yet in the tree.
+**Tauri 2 / React** frontend over the Python engine. It replaced the **removed** WPF/Avalonia desktop
+prototype (#545); dataset authoring was re-homed to the engine CLI (#546). The Rust core is a staged
+target (#522) and is not yet in the tree.
 
-## Desktop preview
+## Workspace UX (design reference)
 
-A walk through the workspace, front to back. An IDE-style activity bar toggles
-between the **Start Center**, the file **Explorer**, and the **Studio**, with
-**Problems** and **Output** panels docked at the bottom. See
+The workspace UX that the removed WPF/Avalonia prototype demonstrated and that the target Tauri/React
+client ports: an IDE-style activity bar toggling between the **Start Center**, the file **Explorer**, and
+the **Studio**, with **Problems** and **Output** panels docked at the bottom. See
 [`docs/WORKSPACE_SYSTEM.md`](docs/WORKSPACE_SYSTEM.md).
 
 ### Design system (Nocturne)
@@ -268,7 +282,7 @@ Build a local desktop app that supports:
 
 The recommended stack is:
 
-- Tauri 2 + React frontend (`apps/web`) — the target UI (a C# WPF/Avalonia desktop prototype is being retired, #545)
+- Tauri 2 + React frontend (`apps/web`) — the target UI (the earlier C# WPF/Avalonia desktop prototype was removed, #545)
 - Python dataset engine
 - file-backed project state, with an optional SQLite index for fast project listing
 - JSONL as the first export target
@@ -285,7 +299,7 @@ For what is implemented today, see [`docs/CURRENT_STATE.md`](docs/CURRENT_STATE.
 and [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 For hands-on setup, see [`docs/DEVELOPER_GUIDE.md`](docs/DEVELOPER_GUIDE.md).
-For every engine command (the desktop shells out to the same ones), see the
+For every engine command (the CLI is the single execution authority; the UI is a client over it), see the
 [`docs/CLI_REFERENCE.md`](docs/CLI_REFERENCE.md).
 For copyable row formats, see [`docs/SCHEMA_SYSTEM.md`](docs/SCHEMA_SYSTEM.md) and
 the per-schema reference in [`docs/schemas/`](docs/schemas/README.md).

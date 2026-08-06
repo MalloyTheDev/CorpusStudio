@@ -31,6 +31,7 @@ from .contracts import (
     FailureRecord,
     FitClassification,
     FrameworkBackend,
+    ModelCodeVettingReport,
     ModelDescriptor,
     ObjectiveCompatibilityReport,
     OrchestratorAdapter,
@@ -41,10 +42,12 @@ from .contracts import (
     PythonRuntime,
     ResolvedExecutionConfiguration,
     ResolvedPreferenceExecutionConfiguration,
+    ResolvedPretrainingExecutionConfiguration,
     RunEvent,
     RunManifest,
     RunPlan,
     RunTelemetrySummary,
+    SandboxPolicy,
     StorageProfile,
     TelemetrySample,
     TokenizerDescriptor,
@@ -78,6 +81,7 @@ ROOT_CONTRACTS: dict[str, type[ContractModel]] = {
     "CapabilityReport": CapabilityReport,
     "ResolvedExecutionConfiguration": ResolvedExecutionConfiguration,
     "ResolvedPreferenceExecutionConfiguration": ResolvedPreferenceExecutionConfiguration,
+    "ResolvedPretrainingExecutionConfiguration": ResolvedPretrainingExecutionConfiguration,
     "RunPlan": RunPlan,
     "RunManifest": RunManifest,
     "RunEvent": RunEvent,
@@ -96,6 +100,8 @@ ROOT_CONTRACTS: dict[str, type[ContractModel]] = {
     "BackendExecutionVariant": BackendExecutionVariant,
     "PretrainingDataPolicy": PretrainingDataPolicy,
     "PreferenceDataPolicy": PreferenceDataPolicy,
+    "ModelCodeVettingReport": ModelCodeVettingReport,
+    "SandboxPolicy": SandboxPolicy,
 }
 
 

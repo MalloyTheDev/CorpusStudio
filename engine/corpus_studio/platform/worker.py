@@ -17,7 +17,7 @@ from __future__ import annotations
 import itertools
 import os
 import sys
-from typing import Any
+from typing import Any, TextIO
 
 from corpus_studio.platform.backends import backend_manifest_digest, get_worker_backend
 from corpus_studio.platform.common import HashRef, JsonObject, Ref
@@ -64,16 +64,14 @@ def _send(
     stream.flush()
 
 
-def _build_runner(runner_name: str) -> Any:
-    """The Runner for ``runner_name`` — mirrors the ``platform-run`` selection (echo needs nothing;
-    cpu_toy/training lazy-import the trainer)."""
-    from corpus_studio.platform.supervisor import EchoRunner  # noqa: PLC0415
+def _build_runner(runner_name: str, corpus_root: str = ".") -> Any:
+    """The Runner for ``runner_name`` in the subprocess worker - delegates to the shared
+    ``runners.build_lane_runner`` factory so the worker and the in-process ``platform_run`` path route
+    lanes identically (the two used to drift). ``corpus_root`` anchors a pretraining plan's relative
+    shard locations."""
+    from corpus_studio.platform.runners import build_lane_runner  # noqa: PLC0415
 
-    if runner_name == "echo":
-        return EchoRunner()
-    from corpus_studio.platform.runners import TrainingRunner  # noqa: PLC0415
-
-    return TrainingRunner(cpu_toy=(runner_name == "cpu_toy"))
+    return build_lane_runner(runner_name, corpus_root=corpus_root)
 
 
 def _apply_allocator_policy(plan: Any) -> str:
@@ -130,6 +128,7 @@ def run_worker(
     runner_name: str,
     backend_id: str,
     environment_ref: Ref,
+    corpus_root: str = ".",
     out: Any = None,
 ) -> int:
     """Execute one dispatched run and stream it back. ``dispatch_line`` is the raw ``run_dispatch``
@@ -228,7 +227,7 @@ def run_worker(
         out=stream,
     )
 
-    runner = _build_runner(runner_name)
+    runner = _build_runner(runner_name, corpus_root=corpus_root)
     # Stream each RunEvent to the parent as it is produced (the sink runs synchronously inside
     # execute_run, so ordering + backpressure are preserved over the pipe). Each metric event is a
     # COMPLETED STEP — real progress — which is what resets the parent's silence timer; a hung training
@@ -262,17 +261,33 @@ def run_worker(
     return 0
 
 
-def main() -> None:
-    """CLI entrypoint: read the single ``run_dispatch`` line from stdin and run it. Invoked as
-    ``python -m corpus_studio.platform.worker --runner <name>`` by the subprocess supervisor."""
+_RUNNER_CHOICES = ("echo", "cpu_toy", "training", "pretraining", "pretraining_cpu_toy")
+
+
+def _build_arg_parser() -> Any:
+    """The worker CLI parser. Extracted from ``main`` so the accepted ``--runner`` lanes are unit
+    testable: a lane the parser rejects is a dead runner no matter what ``_build_runner`` maps, which is
+    exactly how the pretraining subprocess lane shipped broken (argparse ``invalid choice`` before
+    ``run_worker`` ever ran)."""
     import argparse  # noqa: PLC0415
 
     parser = argparse.ArgumentParser(prog="corpus-studio-worker")
-    parser.add_argument("--runner", default="echo", choices=["echo", "cpu_toy", "training"])
+    parser.add_argument("--runner", default="echo", choices=list(_RUNNER_CHOICES))
     parser.add_argument("--backend-id", required=True)
     parser.add_argument("--environment-id", required=True)
     parser.add_argument("--environment-hash")
-    args = parser.parse_args()
+    # Anchors a pretraining plan's relative shard locations against a corpus directory (the process CWD
+    # by default). Absolute shard paths ignore it; the other lanes ignore it entirely.
+    parser.add_argument("--corpus-root", default=".")
+    return parser
+
+
+def main(out: TextIO | None = None) -> None:
+    """CLI entrypoint: read the single ``run_dispatch`` line from stdin and run it. Invoked as
+    ``python -m corpus_studio.platform.worker --runner <name>`` by the subprocess supervisor. ``out`` is
+    the protocol stream: the ``__main__`` entrypoint binds a PRIVATE-fd stream (so trainer output on fd 1
+    cannot corrupt the framed protocol); callers/tests that pass ``None`` use ``sys.stdout``."""
+    args = _build_arg_parser().parse_args()
 
     environment_ref = Ref(
         id=args.environment_id,
@@ -286,6 +301,7 @@ def main() -> None:
                 taxonomy=FailureTaxonomy.ENVIRONMENT_FAILURE,
                 message=f"unknown worker backend {args.backend_id!r}",
             ),
+            out=out,
         )
         raise SystemExit(2)
     _send(
@@ -295,6 +311,7 @@ def main() -> None:
             backend=backend,
             environment_ref=environment_ref,
         ),
+        out=out,
     )
 
     dispatch_line = sys.stdin.readline()
@@ -306,6 +323,7 @@ def main() -> None:
                 taxonomy=FailureTaxonomy.ENVIRONMENT_FAILURE,
                 message="no run_dispatch received on stdin",
             ),
+            out=out,
         )
         raise SystemExit(2)
     raise SystemExit(
@@ -314,9 +332,28 @@ def main() -> None:
             runner_name=args.runner,
             backend_id=args.backend_id,
             environment_ref=environment_ref,
+            corpus_root=args.corpus_root,
+            out=out,
         )
     )
 
 
+def _bind_protocol_stream() -> TextIO:
+    """Move the framed worker protocol OFF fd 1 onto a private duplicate and point fd 1 at stderr, so NO
+    trainer output can inject a byte into the protocol the parent parses - not a Python ``sys.stdout``
+    write (a Python-level ``redirect_stdout`` already catches those) and CRUCIALLY not a native/C write
+    straight to fd 1 (tokenizer training, some transformers / bitsandbytes paths), which no Python-level
+    redirect can catch. The parent still reads the protocol on the worker's stdout pipe, now fed by the
+    private duplicate; every other fd-1 write lands on stderr, which the parent already captures."""
+    import os  # noqa: PLC0415
+
+    sys.stdout.flush()
+    protocol_fd = os.dup(1)
+    os.dup2(2, 1)  # every write to fd 1 for the rest of the process now lands on stderr
+    # Line-buffered so each newline-framed protocol message is delivered promptly (belt-and-suspenders
+    # with _send's explicit flush), never batched behind an implementation-default block buffer.
+    return os.fdopen(protocol_fd, "w", encoding="utf-8", buffering=1, closefd=True)
+
+
 if __name__ == "__main__":
-    main()
+    main(out=_bind_protocol_stream())

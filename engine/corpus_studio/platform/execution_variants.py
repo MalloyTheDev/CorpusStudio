@@ -115,7 +115,13 @@ def reference_execution_variants() -> tuple[BackendExecutionVariant, ...]:
         BackendExecutionVariant(
             backend_id="corpus_studio",
             variant_kind=ExecutionVariantKind.pretraining,
-            support=ExecutionVariantSupport.declared,
+            # workload_verified: a from-scratch full-parameter 124M GPT-2 trained on the RTX 5070 (seq
+            # 1024, 20 steps, peak 3.28 GiB) in the HARDWARE_VERIFIED managed env, through the first-party
+            # PretrainingRunner + the supervisor's independent reload-verify - supervisor-admitted
+            # PretrainingSuccessEvidence (optimizer + one loss/step + 148/148 tensors changed with observed
+            # gradients + model.safetensors verified). Milestone worker wheel sha256 8818d3ad... (source
+            # fa6ce97). See docs/HOST_STATE.md.
+            support=ExecutionVariantSupport.workload_verified,
         ),
         BackendExecutionVariant(
             backend_id="corpus_studio",

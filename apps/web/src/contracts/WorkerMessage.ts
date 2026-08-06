@@ -578,7 +578,57 @@ export type SaveStrategy1 = "no" | "steps";
 export type Seed1 = number;
 export type TrustRemoteCode1 = false;
 export type UseSafetensors1 = true;
+export type ConfigurationHash2 = string;
+export type ConfigurationId2 = string;
+export type ContractVersion7 = "1.0.0";
+export type ContractVersion8 = "1.0.0";
+export type DataSeed3 = number;
+export type DocumentBoundaries = boolean;
+export type Epochs = number | null;
+export type GlobalBatchSize = number;
+export type Packing2 = "none" | "concat_and_split" | "best_fit";
+export type ContentSha2561 = string;
+export type Location1 = string;
+export type RowCount = number;
+export type ShardId = string;
+export type Source2 = string;
+export type TokenCount = number;
+export type Shards = PretrainingShard[];
+export type Streaming = boolean;
+export type TokenBudget = number | null;
+export type DataSeed4 = number;
+/**
+ * @minItems 1
+ */
+export type DeviceMap2 = [DeviceMapEntry, ...DeviceMapEntry[]];
+export type EnvironmentBinding2 = "profile_snapshot" | "managed_lock";
+export type GradientCheckpointing3 = boolean;
+export type EntrySymbol = string;
+export type InterfaceVersion = "custom_decoder_v1";
+export type TrustRemoteCode2 = false;
+export type VettingVerdict = "admitted";
+export type InitSeed = number | null;
+export type InitializerRange = number | null;
+export type MaxPositionEmbeddings = number | null;
+export type Mode1 = "random" | "continued";
+export type ResetDataCursor = boolean;
+export type ResetLrScheduler = boolean;
+export type ResetOptimizer = boolean;
+export type VocabSize = number | null;
+export type OutputDir3 = string;
+export type OutputLayout2 = "run_scoped_v1";
+export type RuntimeMode3 = "training" | "cpu_toy";
 export type Seed2 = number;
+export type Algorithm = ("bpe" | "unigram" | "wordpiece") | null;
+export type MinFrequency = number | null;
+export type Mode2 = "train" | "import" | "freeze";
+export type SpecialTokens = string[] | null;
+export type TokenizerContentSha256 = string | null;
+export type TokenizerLocation = string | null;
+export type VocabSize1 = number | null;
+export type TrustRemoteCode3 = false;
+export type UseSafetensors2 = true;
+export type Seed3 = number;
 export type CheckpointDir = string;
 export type CheckpointId = string;
 export type CheckpointManifestHash = string;
@@ -588,7 +638,7 @@ export type ExecutionConfigurationHash = string | null;
 export type Pid = number | null;
 export type ProcessStartedAt = string | null;
 export type RunId1 = string;
-export type ContractVersion7 = "1.0.0";
+export type ContractVersion9 = "1.0.0";
 export type Detail1 = string | null;
 export type DetectedAt = string | null;
 export type ExceptionType = string | null;
@@ -611,7 +661,7 @@ export type FitClass =
   | "ACCIDENTAL_WDDM_SPILL"
   | "THRASHING"
   | "FAIL";
-export type ContractVersion8 = "1.0.0";
+export type ContractVersion10 = "1.0.0";
 export type DeviceCapacityBytes = number | null;
 export type EstimatedPeakBytes = number | null;
 export type HeadroomBytes = number | null;
@@ -633,7 +683,7 @@ export type RunId2 = string | null;
 export type Signal = string | null;
 export type Action = "cancel" | "pause" | "resume" | "checkpoint_now";
 export type RunId3 = string;
-export type ContractVersion9 = "1.0.0";
+export type ContractVersion11 = "1.0.0";
 export type EmittedAt = string;
 export type Epoch = number | null;
 export type EventType =
@@ -763,13 +813,13 @@ export type PidAlive = boolean;
 export type RunId5 = string;
 export type ArtifactId = string;
 export type BaseModel1 = string | null;
-export type ContractVersion10 = "1.0.0";
+export type ContractVersion12 = "1.0.0";
 export type CreatedAt1 = string | null;
 export type CheapFingerprint = string | null;
 export type ContentHash = string | null;
 export type CurrentIntegrity = "ok" | "missing" | "modified" | "unknown";
 export type MetadataHash = string | null;
-export type Kind2 = "adapter" | "checkpoint" | "merged_model" | "gguf" | "onnx" | "quantized" | "other";
+export type Kind2 = "adapter" | "model" | "checkpoint" | "merged_model" | "gguf" | "onnx" | "quantized" | "other";
 export type Notes3 = string;
 export type Path2 = string;
 export type ReloadVerified = boolean;
@@ -779,7 +829,7 @@ export type Artifacts = ArtifactManifest[];
 export type AdapterApplied = boolean | null;
 export type Backend = string | null;
 export type ChatTemplateApplied = boolean | null;
-export type ContractVersion11 = "1.0.0";
+export type ContractVersion13 = "1.0.0";
 export type DatasetFingerprint = string | null;
 export type Name3 = string;
 export type VersionRef = string | null;
@@ -812,33 +862,15 @@ export type RunId6 = string;
 export type ArtifactIds = string[];
 export type BaseModel2 = string;
 export type Checkpoints = string[];
-export type ContractVersion12 = "1.0.0";
+export type ContractVersion14 = "1.0.0";
 export type CreatedAt2 = string;
 export type AfterEvalModel = string | null;
 export type AfterEvalRef = string | null;
 export type BeforeEvalRef = string | null;
 export type FinishedAt = string | null;
 export type Notes4 = string;
-export type OutputDir3 = string;
+export type OutputDir4 = string;
 export type ParameterAccountingRefs = Ref[];
-export type Argv = string[];
-export type ExitCode1 = number | null;
-export type Pid1 = number | null;
-export type ProcessStartedAt1 = string | null;
-export type ConfigSha256 = string | null;
-export type DatasetFingerprint1 = string | null;
-export type DatasetRowCount = number;
-export type EngineVersion1 = string;
-export type Platform = string;
-export type PythonVersion1 = string;
-export type ParentCheckpointHash = string;
-export type ParentCheckpointId = string;
-export type ParentRunId = string;
-export type ResumedFromGlobalStep = number;
-export type RunId7 = string;
-export type StartedAt = string | null;
-export type State = "prepared" | "running" | "succeeded" | "failed" | "cancelled" | "interrupted";
-export type Target = string;
 export type AdapterBytesVerified = true;
 export type AdapterConfigSha256 = string;
 export type AdapterSafetensorsSha256 = string;
@@ -869,12 +901,22 @@ export type ObservedTensorCount = number;
  */
 export type ObservedTensorNames = [string, ...string[]];
 export type OptimizerCreated = true;
+export type PreferencePairsConsumed = number;
+export type ReferenceModelFrozen = true;
 /**
  * @minItems 1
  */
 export type StepLosses = [OptimizerStepLossEvidence, ...OptimizerStepLossEvidence[]];
 export type Loss1 = number;
 export type OptimizerStep2 = number;
+/**
+ * @minItems 1
+ */
+export type StepRewardMargins = [PreferenceRewardMarginEvidence, ...PreferenceRewardMarginEvidence[]];
+export type ChosenReward = number;
+export type Margin = number;
+export type OptimizerStep3 = number;
+export type RejectedReward = number;
 export type AfterSha2561 = string;
 export type BeforeSha2561 = string;
 export type ChangedTensorCount1 = number;
@@ -889,6 +931,60 @@ export type TrainableTensorCount = number;
  */
 export type TrainableTensorNames = [string, ...string[]];
 export type OutputPathVerified = true;
+export type ArtifactIntegrityVerified1 = true;
+export type CompletedOptimizerSteps1 = number;
+export type AfterSha2562 = string;
+export type BeforeSha2562 = string;
+export type ChangedTensorCount2 = number;
+/**
+ * @minItems 1
+ */
+export type ChangedTensorNames2 = [string, ...string[]];
+export type HashAlgorithm2 = "sha256-safetensors-tensor-state-v1";
+export type ModelConfigSemanticSha256 = string;
+export type TensorCount1 = number;
+/**
+ * @minItems 1
+ */
+export type TensorNames1 = [string, ...string[]];
+export type OptimizerCreated1 = true;
+/**
+ * @minItems 1
+ */
+export type StepLosses1 = [OptimizerStepLossEvidence, ...OptimizerStepLossEvidence[]];
+export type ModelBytesVerified = true;
+export type ModelConfigSha256 = string;
+export type ModelSafetensorsSha256 = string;
+export type OutputPathVerified1 = true;
+export type Argv = string[];
+export type ExitCode1 = number | null;
+export type Pid1 = number | null;
+export type ProcessStartedAt1 = string | null;
+export type ConfigSha256 = string | null;
+export type DatasetFingerprint1 = string | null;
+export type DatasetRowCount = number;
+export type EngineVersion1 = string;
+export type Platform = string;
+export type PythonVersion1 = string;
+export type ParentCheckpointHash = string;
+export type ParentCheckpointId = string;
+export type ParentRunId = string;
+export type ResumedFromGlobalStep = number;
+export type RunId7 = string;
+export type StartedAt = string | null;
+export type State = "prepared" | "running" | "succeeded" | "failed" | "cancelled" | "interrupted";
+export type Target = string;
+export type AdapterBytesVerified1 = true;
+export type AdapterConfigSha2561 = string;
+export type AdapterSafetensorsSha2561 = string;
+export type ArtifactIntegrityVerified2 = true;
+export type CompletedOptimizerSteps2 = number;
+export type OptimizerCreated2 = true;
+/**
+ * @minItems 1
+ */
+export type StepLosses2 = [OptimizerStepLossEvidence, ...OptimizerStepLossEvidence[]];
+export type OutputPathVerified2 = true;
 export type UpdatedAt1 = string;
 export type CorrelationId = string | null;
 export type Direction = "core_to_worker" | "worker_to_core";
@@ -1261,7 +1357,8 @@ export interface RunPlan {
   quantization: QuantizationMode;
   resolved_execution?: ResolvedExecutionConfiguration | null;
   resolved_preference_execution?: ResolvedPreferenceExecutionConfiguration | null;
-  seed?: Seed2;
+  resolved_pretraining_execution?: ResolvedPretrainingExecutionConfiguration | null;
+  seed?: Seed3;
   sequence: SequenceSpec;
   task_type: TaskType;
   training_config_snapshot?: TrainingConfigSnapshot;
@@ -1667,6 +1764,148 @@ export interface ReferenceModelBinding {
   mode?: Mode;
   precompute_ref_log_probs?: PrecomputeRefLogProbs;
 }
+/**
+ * The hash-sealed configuration for a from-scratch / continued PRETRAINING run - the sibling of
+ * :class:`ResolvedExecutionConfiguration` for the ``pretraining`` execution variant.
+ *
+ * The dense-QLoRA-SFT seal is byte-locked (its own ``configuration_hash`` AND a committed semantic
+ * golden), so pretraining semantics live on THIS separate contract, never as new fields on the SFT
+ * config. Unlike SFT/DPO this is a FULL-PARAMETER causal-LM run: there is no adapter, no 4-bit base,
+ * and no single dataset file. The three input kinds are captured by method sub-specs rather than the
+ * SFT-shaped ``ExecutionInputs`` (which fail-closed requires one local dataset file + a model-weights
+ * binding, neither of which a from-scratch run has): the model by a :class:`ModelInitializationSpec`
+ * (random from a config, or a continued checkpoint), the tokenizer by a :class:`TokenizerSourceSpec`,
+ * and the corpus by the sharded :class:`PretrainingDataPolicy`.
+ *
+ * Carried on ``RunPlan.resolved_pretraining_execution`` (a plan carries exactly one of the SFT /
+ * preference / pretraining configs). What remains gated is EXECUTION: the pretraining worker loop
+ * (``from_config`` init, corpus streaming, packing, per-rank cursor), a workload-verified run, and the
+ * milestone wheel that promotes ``pretraining`` to ``workload_verified``. ``trainer_interface`` is an
+ * execution-shaped placeholder until that worker seals the exact trainer surface.
+ */
+export interface ResolvedPretrainingExecutionConfiguration {
+  attention: AttentionExecutionPolicy;
+  backend_ref: Ref;
+  batching: BatchingSpec;
+  capability_report_ref: Ref;
+  checkpoint_policy: CheckpointPolicy;
+  configuration_hash: ConfigurationHash2;
+  configuration_id: ConfigurationId2;
+  contract_version?: ContractVersion7;
+  data: PretrainingDataPolicy;
+  data_seed?: DataSeed4;
+  device_map: DeviceMap2;
+  environment_binding: EnvironmentBinding2;
+  environment_ref: Ref;
+  export_format: ExportFormat;
+  gradient_checkpointing?: GradientCheckpointing3;
+  init: ModelInitializationSpec;
+  loss_impl: LossImpl;
+  objective_ref: Ref;
+  optimizer: OptimizerSpec;
+  output_dir: OutputDir3;
+  output_layout?: OutputLayout2;
+  precision: PrecisionExecutionPolicy;
+  runtime_mode: RuntimeMode3;
+  schedule: TrainingSchedule;
+  seed?: Seed2;
+  sequence: SequenceSpec;
+  tokenizer_source: TokenizerSourceSpec;
+  trainer_interface: TrainerInterfacePolicy;
+  trust_remote_code?: TrustRemoteCode3;
+  use_safetensors?: UseSafetensors2;
+}
+/**
+ * Additive, dense/MoE-safe pretraining data policy (#487), PARALLEL to the SFT-only
+ * ``TrainingDataPolicy`` - never reuse the SFT contract for a sharded / streamed / mixture-weighted
+ * corpus. It declares a content-hashed shard set, streaming, per-source mixture weights, document
+ * boundaries, pretraining packing, a seeded deterministic global order, and a stop condition (token
+ * budget and/or epochs) so a run stops at the budget and never silently truncates. The runtime
+ * per-rank data cursor + streaming resume is a separate (worker) slice.
+ */
+export interface PretrainingDataPolicy {
+  contract_version?: ContractVersion8;
+  data_seed: DataSeed3;
+  document_boundaries?: DocumentBoundaries;
+  epochs?: Epochs;
+  global_batch_size: GlobalBatchSize;
+  mixture_weights?: MixtureWeights;
+  packing?: Packing2;
+  shards: Shards;
+  streaming?: Streaming;
+  token_budget?: TokenBudget;
+}
+export interface MixtureWeights {
+  [k: string]: number;
+}
+/**
+ * One content-hashed corpus shard in a :class:`PretrainingDataPolicy`: a stable id + location, its
+ * row and token counts, its sha256, and the mixture source it belongs to. The token count feeds the
+ * token budget; the sha256 pins the exact bytes so a resumed stream reads the same shard.
+ */
+export interface PretrainingShard {
+  content_sha256: ContentSha2561;
+  location: Location1;
+  row_count: RowCount;
+  shard_id: ShardId;
+  source?: Source2;
+  token_count: TokenCount;
+}
+/**
+ * How a PRETRAINING run instantiates its model. From-scratch has NO source weights: it builds a
+ * model from an architecture config with reproducible random init (the worker's ``from_config`` path,
+ * never ``from_pretrained``), pinned by ``architecture_ref`` + ``vocab_size`` + ``init_seed``.
+ * Continued pretraining loads a hash-pinned ``source_checkpoint_ref`` and states explicitly what is
+ * reset (optimizer / lr scheduler / data cursor) vs carried. Dense/MoE-safe: this seals init INTENT
+ * and assumes no dense-specific model shape.
+ */
+export interface ModelInitializationSpec {
+  architecture_ref?: Ref | null;
+  custom_code?: CustomModelCodeSpec | null;
+  init_seed?: InitSeed;
+  initializer_range?: InitializerRange;
+  max_position_embeddings?: MaxPositionEmbeddings;
+  mode: Mode1;
+  reset_data_cursor?: ResetDataCursor;
+  reset_lr_scheduler?: ResetLrScheduler;
+  reset_optimizer?: ResetOptimizer;
+  source_checkpoint_ref?: Ref | null;
+  vocab_size?: VocabSize;
+}
+/**
+ * A hash-pinned, ADMITTED local custom-block bundle for a from-scratch run - the mode-3 'your own
+ * model code' path (your own IMPLEMENTATION, the only not-borrowed mode). It seals WHICH exact bytes
+ * (``code_bundle_ref``) an ADMITTED :class:`ModelCodeVettingReport` (``vetting_ref``) screened, plus the
+ * entry class + interface. This path NEVER uses HF ``trust_remote_code`` (``Literal[False]``); the
+ * module is loaded locally, by path, from the pinned bundle.
+ *
+ * Sealing this admits the design AT PLANNING; a static screen is not a safety proof, so EXECUTION stays
+ * gated behind the (later) worker sandbox exactly as pretraining itself is refused at the worker today.
+ * Both refs must be hash-pinned so admission binds to specific bytes and cannot silently re-point.
+ */
+export interface CustomModelCodeSpec {
+  code_bundle_ref: Ref;
+  entry_symbol: EntrySymbol;
+  interface_version: InterfaceVersion;
+  trust_remote_code?: TrustRemoteCode2;
+  vetting_ref: Ref;
+  vetting_verdict: VettingVerdict;
+}
+/**
+ * How the tokenizer is obtained, frozen by hash BEFORE any token is consumed (a tokenizer change
+ * invalidates all downstream token accounting). ``train`` builds a NEW tokenizer from a corpus sample
+ * (a new subsystem the worker slice implements); ``import`` / ``freeze`` pin an existing tokenizer by
+ * its content digest exactly as the SFT path does today.
+ */
+export interface TokenizerSourceSpec {
+  algorithm?: Algorithm;
+  min_frequency?: MinFrequency;
+  mode: Mode2;
+  special_tokens?: SpecialTokens;
+  tokenizer_content_sha256?: TokenizerContentSha256;
+  tokenizer_location?: TokenizerLocation;
+  vocab_size?: VocabSize1;
+}
 export interface TrainingConfigSnapshot {
   [k: string]: unknown;
 }
@@ -1693,7 +1932,7 @@ export interface RunAcceptedBody {
  * fused-attention deadlock) vs an ACCIDENTAL_SPILL vs a CONTROLLED_OFFLOAD. NEW.
  */
 export interface FailureRecord {
-  contract_version?: ContractVersion7;
+  contract_version?: ContractVersion9;
   detail?: Detail1;
   detected_at?: DetectedAt;
   exception_type?: ExceptionType;
@@ -1717,7 +1956,7 @@ export interface FailureRecord {
 export interface FitClassification {
   attention_path?: AttentionImpl | null;
   classification: FitClass;
-  contract_version?: ContractVersion8;
+  contract_version?: ContractVersion10;
   device_capacity_bytes?: DeviceCapacityBytes;
   estimated_peak_bytes?: EstimatedPeakBytes;
   headroom_bytes?: HeadroomBytes;
@@ -1751,7 +1990,7 @@ export interface RunControlBody {
  * streaming telemetry today (run_registry is a durable per-run record, not an event stream).
  */
 export interface RunEvent {
-  contract_version?: ContractVersion9;
+  contract_version?: ContractVersion11;
   emitted_at: EmittedAt;
   epoch?: Epoch;
   event_type: EventType;
@@ -1889,7 +2128,7 @@ export interface TerminalResultBody {
 export interface ArtifactManifest {
   artifact_id: ArtifactId;
   base_model?: BaseModel1;
-  contract_version?: ContractVersion10;
+  contract_version?: ContractVersion12;
   created_at?: CreatedAt1;
   integrity?: ArtifactIntegrity | null;
   kind?: Kind2;
@@ -1918,7 +2157,7 @@ export interface ArtifactIntegrity {
  */
 export interface EvaluationResult {
   as_served?: AsServed | null;
-  contract_version?: ContractVersion11;
+  contract_version?: ContractVersion13;
   dataset?: EvalDataset | null;
   eval_id: EvalId;
   gate?: EvalGate | null;
@@ -1997,7 +2236,7 @@ export interface RunManifest {
   artifact_ids?: ArtifactIds;
   base_model?: BaseModel2;
   checkpoints?: Checkpoints;
-  contract_version?: ContractVersion12;
+  contract_version?: ContractVersion14;
   created_at: CreatedAt2;
   dataset_ref?: Ref | null;
   environment_ref?: Ref | null;
@@ -2006,9 +2245,11 @@ export interface RunManifest {
   final_fit?: FitClassification | null;
   finished_at?: FinishedAt;
   notes?: Notes4;
-  output_dir?: OutputDir3;
+  output_dir?: OutputDir4;
   parameter_accounting_refs?: ParameterAccountingRefs;
   plan_ref: Ref;
+  preference_success_evidence?: PreferenceSuccessEvidence | null;
+  pretraining_success_evidence?: PretrainingSuccessEvidence | null;
   process?: RunProcessInfo | null;
   reproducibility?: RunReproducibility | null;
   resume_lineage?: ResumeLineage | null;
@@ -2023,6 +2264,145 @@ export interface RunEvaluationLink {
   after_eval_model?: AfterEvalModel;
   after_eval_ref?: AfterEvalRef;
   before_eval_ref?: BeforeEvalRef;
+}
+/**
+ * All gates required before a resolved offline DPO run may be called successful. The preference
+ * sibling of :class:`TrainingSuccessEvidence` - it verifies the exported PEFT adapter bytes
+ * (adapter_model.safetensors), not a full model.
+ */
+export interface PreferenceSuccessEvidence {
+  adapter_bytes_verified: AdapterBytesVerified;
+  adapter_config_sha256: AdapterConfigSha256;
+  adapter_safetensors_sha256: AdapterSafetensorsSha256;
+  artifact_integrity_verified: ArtifactIntegrityVerified;
+  execution: PreferenceExecutionEvidence;
+  measured_peak?: MemoryMetrics | null;
+  output_path_verified: OutputPathVerified;
+}
+/**
+ * Trainer-side proof for an offline DPO (preference) run before its adapter is admitted a success.
+ *
+ * The adapter sibling of :class:`TrainingExecutionEvidence` for preference optimization: it REUSES the
+ * generic adapter evidence pieces (:class:`TrainableStateChangeEvidence` over the PEFT adapter,
+ * :class:`AdapterExportStateEvidence`, :class:`GradientCoverageEvidence`,
+ * :class:`OptimizerStepLossEvidence`) and adds the preference-specific honesty signals: the reference
+ * model was FROZEN (produced no gradient), real preference PAIRS were consumed, and every completed step
+ * carries the DPO reward margin the loss was built from. None of these are part of the sealed execution
+ * config, so the reuse cannot perturb the byte-locked SFT / pretraining / preference seals.
+ */
+export interface PreferenceExecutionEvidence {
+  adapter_export_state: AdapterExportStateEvidence;
+  completed_optimizer_steps: CompletedOptimizerSteps;
+  gradient_coverage: GradientCoverageEvidence;
+  optimizer_created: OptimizerCreated;
+  preference_pairs_consumed: PreferencePairsConsumed;
+  reference_model_frozen: ReferenceModelFrozen;
+  step_losses: StepLosses;
+  step_reward_margins: StepRewardMargins;
+  trainable_state: TrainableStateChangeEvidence;
+}
+/**
+ * Canonical identity for the exact PEFT state expected in adapter_model.safetensors.
+ */
+export interface AdapterExportStateEvidence {
+  adapter_config_semantic_sha256: AdapterConfigSemanticSha256;
+  after_sha256: AfterSha256;
+  before_sha256: BeforeSha256;
+  changed_tensor_count: ChangedTensorCount;
+  changed_tensor_names: ChangedTensorNames;
+  hash_algorithm?: HashAlgorithm;
+  tensor_count: TensorCount;
+  tensor_names: TensorNames;
+}
+/**
+ * Observed materialized adapter gradients without claiming unused tensors had gradients.
+ */
+export interface GradientCoverageEvidence {
+  eligible_tensor_count: EligibleTensorCount;
+  eligible_tensor_names: EligibleTensorNames;
+  observed_tensor_count: ObservedTensorCount;
+  observed_tensor_names: ObservedTensorNames;
+}
+/**
+ * One finite loss bound to exactly one completed optimizer step.
+ */
+export interface OptimizerStepLossEvidence {
+  loss: Loss1;
+  optimizer_step: OptimizerStep2;
+}
+/**
+ * One optimizer step's DPO reward signal: the implicit rewards for the chosen and rejected
+ * completions (each ``beta * (policy_logratio - reference_logratio)`` against the FROZEN reference)
+ * and their margin. A real DPO step separates the pair; recording the margin proves the preference
+ * signal was live and not a degenerate copy of an SFT loss.
+ */
+export interface PreferenceRewardMarginEvidence {
+  chosen_reward: ChosenReward;
+  margin: Margin;
+  optimizer_step: OptimizerStep3;
+  rejected_reward: RejectedReward;
+}
+/**
+ * Canonical before/after identity for the complete trainable adapter state.
+ */
+export interface TrainableStateChangeEvidence {
+  after_sha256: AfterSha2561;
+  before_sha256: BeforeSha2561;
+  changed_tensor_count: ChangedTensorCount1;
+  changed_tensor_names: ChangedTensorNames1;
+  hash_algorithm?: HashAlgorithm1;
+  trainable_tensor_count: TrainableTensorCount;
+  trainable_tensor_names: TrainableTensorNames;
+}
+/**
+ * All gates required before a resolved from-scratch / continued pretraining run may be called
+ * successful. The full-parameter sibling of :class:`TrainingSuccessEvidence` - it verifies the exported
+ * model bytes (model.safetensors), not an adapter.
+ */
+export interface PretrainingSuccessEvidence {
+  artifact_integrity_verified: ArtifactIntegrityVerified1;
+  execution: PretrainingExecutionEvidence;
+  measured_peak?: MemoryMetrics | null;
+  model_bytes_verified: ModelBytesVerified;
+  model_config_sha256: ModelConfigSha256;
+  model_safetensors_sha256: ModelSafetensorsSha256;
+  output_path_verified: OutputPathVerified1;
+}
+/**
+ * Trainer-side proof produced before a full-parameter pretraining model is admitted as a success.
+ *
+ * The full-parameter sibling of :class:`TrainingExecutionEvidence`. It REUSES the generic, adapter-free
+ * evidence pieces - :class:`TrainableStateChangeEvidence` (here the trainable set is the COMPLETE
+ * parameter inventory, not an adapter), :class:`GradientCoverageEvidence`, and
+ * :class:`OptimizerStepLossEvidence` - and swaps the adapter export for the full-model export
+ * (:class:`FullModelExportStateEvidence`). None of these are part of the sealed execution config, so the
+ * reuse cannot perturb the byte-locked SFT / pretraining seals.
+ */
+export interface PretrainingExecutionEvidence {
+  completed_optimizer_steps: CompletedOptimizerSteps1;
+  gradient_coverage: GradientCoverageEvidence;
+  model_export_state: FullModelExportStateEvidence;
+  optimizer_created: OptimizerCreated1;
+  step_losses: StepLosses1;
+  trainable_state: TrainableStateChangeEvidence;
+}
+/**
+ * Canonical identity for the exact full-parameter model state expected in model.safetensors.
+ *
+ * The full-parameter sibling of :class:`AdapterExportStateEvidence`: from-scratch / continued
+ * pretraining exports the WHOLE model (model.safetensors), not a PEFT adapter, so the pinned config is
+ * the model config (``model_config_semantic_sha256``), never an adapter config. Dense- and MoE-safe:
+ * the tensor inventory is a plain name/hash set, so a MoE model simply carries more expert tensors.
+ */
+export interface FullModelExportStateEvidence {
+  after_sha256: AfterSha2562;
+  before_sha256: BeforeSha2562;
+  changed_tensor_count: ChangedTensorCount2;
+  changed_tensor_names: ChangedTensorNames2;
+  hash_algorithm?: HashAlgorithm2;
+  model_config_semantic_sha256: ModelConfigSemanticSha256;
+  tensor_count: TensorCount1;
+  tensor_names: TensorNames1;
 }
 /**
  * Process identity so a recycled pid is never mistaken for a live run. A 'running' record whose
@@ -2060,63 +2440,22 @@ export interface ResumeLineage {
  * All gates required before a resolved run or measured fit may be called successful.
  */
 export interface TrainingSuccessEvidence {
-  adapter_bytes_verified: AdapterBytesVerified;
-  adapter_config_sha256: AdapterConfigSha256;
-  adapter_safetensors_sha256: AdapterSafetensorsSha256;
-  artifact_integrity_verified: ArtifactIntegrityVerified;
+  adapter_bytes_verified: AdapterBytesVerified1;
+  adapter_config_sha256: AdapterConfigSha2561;
+  adapter_safetensors_sha256: AdapterSafetensorsSha2561;
+  artifact_integrity_verified: ArtifactIntegrityVerified2;
   execution: TrainingExecutionEvidence;
   measured_peak?: MemoryMetrics | null;
-  output_path_verified: OutputPathVerified;
+  output_path_verified: OutputPathVerified2;
 }
 /**
  * Trainer-side proof produced before adapter export is admitted as a success.
  */
 export interface TrainingExecutionEvidence {
   adapter_export_state: AdapterExportStateEvidence;
-  completed_optimizer_steps: CompletedOptimizerSteps;
+  completed_optimizer_steps: CompletedOptimizerSteps2;
   gradient_coverage: GradientCoverageEvidence;
-  optimizer_created: OptimizerCreated;
-  step_losses: StepLosses;
+  optimizer_created: OptimizerCreated2;
+  step_losses: StepLosses2;
   trainable_state: TrainableStateChangeEvidence;
-}
-/**
- * Canonical identity for the exact PEFT state expected in adapter_model.safetensors.
- */
-export interface AdapterExportStateEvidence {
-  adapter_config_semantic_sha256: AdapterConfigSemanticSha256;
-  after_sha256: AfterSha256;
-  before_sha256: BeforeSha256;
-  changed_tensor_count: ChangedTensorCount;
-  changed_tensor_names: ChangedTensorNames;
-  hash_algorithm?: HashAlgorithm;
-  tensor_count: TensorCount;
-  tensor_names: TensorNames;
-}
-/**
- * Observed materialized adapter gradients without claiming unused tensors had gradients.
- */
-export interface GradientCoverageEvidence {
-  eligible_tensor_count: EligibleTensorCount;
-  eligible_tensor_names: EligibleTensorNames;
-  observed_tensor_count: ObservedTensorCount;
-  observed_tensor_names: ObservedTensorNames;
-}
-/**
- * One finite loss bound to exactly one completed optimizer step.
- */
-export interface OptimizerStepLossEvidence {
-  loss: Loss1;
-  optimizer_step: OptimizerStep2;
-}
-/**
- * Canonical before/after identity for the complete trainable adapter state.
- */
-export interface TrainableStateChangeEvidence {
-  after_sha256: AfterSha2561;
-  before_sha256: BeforeSha2561;
-  changed_tensor_count: ChangedTensorCount1;
-  changed_tensor_names: ChangedTensorNames1;
-  hash_algorithm?: HashAlgorithm1;
-  trainable_tensor_count: TrainableTensorCount;
-  trainable_tensor_names: TrainableTensorNames;
 }

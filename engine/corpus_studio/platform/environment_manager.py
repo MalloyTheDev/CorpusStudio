@@ -1625,8 +1625,13 @@ print(json.dumps({
 
 
 def _capability_snapshot_script(probes: Sequence[str] | None) -> str:
+    # A recipe with no required execution probe yields probes=None. Render that as the Python literal
+    # ``None`` (run all default probes) - NOT json.dumps(None) -> "null", which is not valid Python and
+    # made the generated probe script raise ``NameError: name 'null' is not defined`` for every managed
+    # env on such a recipe (e.g. the base backend-corpus-studio recipe pretraining uses).
     return _CAPABILITY_SNAPSHOT_TEMPLATE.replace(
-        "__PROBES__", json.dumps(list(probes) if probes is not None else None, ensure_ascii=True)
+        "__PROBES__",
+        json.dumps(list(probes), ensure_ascii=True) if probes is not None else "None",
     )
 
 
@@ -1742,6 +1747,75 @@ def _validate_installed_direct_url(direct: object) -> None:
             )
 
 
+def _fetch_index_artifact_bytes(
+    url: str, *, timeout: float = 120.0, max_bytes: int = 1_073_741_824
+) -> bytes:
+    """Fetch a pinned wheel from an already-validated (https + configured-index host) URL so its content
+    hash can be computed. Bounded by timeout and size, and fail-closed. A redirect is REFUSED, not
+    followed: the host allowlist is enforced on THIS exact URL, so following a 3xx off it (to an
+    arbitrary or link-local host) would both break the every-artifact-hash-bound-to-a-configured-index
+    invariant and open a blind SSRF from a privileged operation. A module-level seam so tests
+    monkeypatch it and the base gate never touches the network."""
+    import urllib.request  # noqa: PLC0415
+
+    class _RefuseRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, *args: object, **kwargs: object) -> None:
+            raise EnvironmentManagerError(
+                "pip install evidence artifact URL returned a redirect; refusing to follow it off "
+                "the configured index host (the allowlist is enforced on the original URL only)"
+            )
+
+    opener = urllib.request.build_opener(_RefuseRedirect)
+    try:
+        # nosec B310 - the caller validated scheme==https and host in the configured index set, and a
+        # redirect off that host is refused above (never followed to an arbitrary host).
+        with opener.open(url, timeout=timeout) as response:  # noqa: S310
+            data = response.read(max_bytes + 1)
+    except Exception as exc:  # noqa: BLE001 - any fetch failure is fail-closed, never a silent pass
+        raise EnvironmentManagerError(
+            f"pip install evidence could not fetch an artifact to bind its content hash: {exc}"
+        ) from exc
+    if len(data) > max_bytes:
+        raise EnvironmentManagerError(
+            "pip install evidence artifact exceeds the maximum size permitted for hash binding"
+        )
+    return data
+
+
+def _artifact_sha256_from_configured_index(
+    url: str, *, configured_indexes: list[str], name: str, version: str
+) -> str:
+    """Bind a hashless-index wheel by its OWN content sha256. ONLY an https URL whose host matches a
+    configured index, and whose filename is exactly this package's ``<name>-<version>-*.whl``, may be
+    fetched - never an arbitrary host. This preserves the every-installed-artifact-is-content-hash-bound
+    invariant for indexes that publish wheels without a sha256 (e.g. the PyTorch wheel index for some
+    pure-python deps). The pinned index URL is immutable + https-authenticated, so the fetched bytes are
+    the bytes pip installed; anything unexpected is fail-closed."""
+    parsed = urlparse(url)
+    if parsed.scheme != "https" or not parsed.netloc:
+        raise EnvironmentManagerError(
+            f"pip install evidence for {name} has no published hash and a non-https artifact URL"
+        )
+    index_hosts = {
+        urlparse(index).netloc
+        for index in configured_indexes
+        if urlparse(index).scheme == "https" and urlparse(index).netloc
+    }
+    if parsed.netloc not in index_hosts:
+        raise EnvironmentManagerError(
+            f"pip install evidence for {name} has no published hash and an artifact host that is "
+            f"not a configured index"
+        )
+    filename = Path(unquote(parsed.path)).name
+    expected_prefix = f"{re.sub(r'[-_.]+', '_', name).lower()}-{version}-"
+    if not filename.lower().endswith(".whl") or not filename.lower().startswith(expected_prefix):
+        raise EnvironmentManagerError(
+            f"pip install evidence for {name} has no published hash and an artifact filename "
+            f"{filename!r} that does not match {name}=={version}"
+        )
+    return hashlib.sha256(_fetch_index_artifact_bytes(url)).hexdigest()
+
+
 def _install_evidence_from_report(
     report_path: Path,
     *,
@@ -1831,6 +1905,18 @@ def _install_evidence_from_report(
             )
         hashes = archive_info.get("hashes") if isinstance(archive_info, dict) else None
         sha256 = str(hashes.get("sha256") or "") if isinstance(hashes, dict) else ""
+        if isinstance(archive_info, dict) and not re.fullmatch(r"[0-9a-fA-F]{64}", sha256):
+            # Some indexes (notably the PyTorch wheel index) publish wheels WITHOUT a sha256, so pip's
+            # report carries an empty archive_info. Rather than skip the hash (which would break the
+            # every-artifact-is-content-hash-bound invariant), bind the artifact by its OWN content hash:
+            # fetch the exact pinned wheel from its configured-index https URL and compute sha256,
+            # fail-closed. Only wheels (archive sources) with a URL reach here.
+            sha256 = _artifact_sha256_from_configured_index(
+                sanitized_url,
+                configured_indexes=configured_indexes,
+                name=name,
+                version=version,
+            )
         if isinstance(archive_info, dict) and not re.fullmatch(r"[0-9a-fA-F]{64}", sha256):
             raise EnvironmentManagerError(
                 f"pip install evidence for {name} lacks a valid artifact SHA-256"
@@ -4953,7 +5039,11 @@ class EnvironmentManager:
         if outcome.exit_code != 0 or outcome.timed_out or outcome.cancelled:
             return {"ok": False, "error": _read_tail(stderr_path) or "probe command failed"}
         try:
-            return _last_json_object(_read_tail(stdout_path))
+            # A JSON probe emits ONE structured object as its final stdout; read a generous tail (not the
+            # small default log-tail) so a large capability report - the base recipe's full package
+            # profile plus all default probes can exceed 32 KB on one line - is not truncated mid-object
+            # into a spurious "did not emit structured JSON". The bound still caps a runaway probe.
+            return _last_json_object(_read_tail(stdout_path, limit=8_000_000))
         except json.JSONDecodeError:
             return {"ok": False, "error": "probe did not emit structured JSON"}
 

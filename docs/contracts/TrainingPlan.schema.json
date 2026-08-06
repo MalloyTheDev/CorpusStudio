@@ -228,6 +228,30 @@
           "title": "Allow Cpu Toy",
           "type": "boolean"
         },
+        "architecture_ref_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Architecture Ref Id"
+        },
+        "architecture_ref_sha256": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Architecture Ref Sha256"
+        },
         "attention_backend": {
           "anyOf": [
             {
@@ -285,6 +309,78 @@
           "default": null,
           "title": "Checkpoint Steps"
         },
+        "custom_code_bundle_ref_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Custom Code Bundle Ref Id"
+        },
+        "custom_code_bundle_ref_sha256": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Custom Code Bundle Ref Sha256"
+        },
+        "custom_code_entry_symbol": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Custom Code Entry Symbol"
+        },
+        "custom_code_interface_version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Custom Code Interface Version"
+        },
+        "custom_code_vetting_ref_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Custom Code Vetting Ref Id"
+        },
+        "custom_code_vetting_ref_sha256": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Custom Code Vetting Ref Sha256"
+        },
         "data_seed": {
           "anyOf": [
             {
@@ -327,6 +423,54 @@
           "default": 8,
           "title": "Gradient Accumulation Steps",
           "type": "integer"
+        },
+        "init_initializer_range": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Init Initializer Range"
+        },
+        "init_mode": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Init Mode"
+        },
+        "init_seed": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Init Seed"
+        },
+        "init_vocab_size": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Init Vocab Size"
         },
         "learning_rate": {
           "default": 0.0002,
@@ -441,6 +585,28 @@
           "title": "Output Dir",
           "type": "string"
         },
+        "preference_beta": {
+          "default": 0.1,
+          "title": "Preference Beta",
+          "type": "number"
+        },
+        "preference_label_smoothing": {
+          "default": 0.0,
+          "title": "Preference Label Smoothing",
+          "type": "number"
+        },
+        "preference_max_prompt_length": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Preference Max Prompt Length"
+        },
         "seed": {
           "default": 42,
           "title": "Seed",
@@ -450,6 +616,30 @@
           "default": 4096,
           "title": "Sequence Len",
           "type": "integer"
+        },
+        "source_checkpoint_ref_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Checkpoint Ref Id"
+        },
+        "source_checkpoint_ref_sha256": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Checkpoint Ref Sha256"
         },
         "supervised_token_accumulation_target": {
           "anyOf": [
@@ -468,6 +658,18 @@
           "title": "Task Type",
           "type": "string"
         },
+        "tokenizer_algorithm": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tokenizer Algorithm"
+        },
         "tokenizer_content_sha256": {
           "anyOf": [
             {
@@ -480,6 +682,30 @@
           "default": null,
           "title": "Tokenizer Content Sha256"
         },
+        "tokenizer_location": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tokenizer Location"
+        },
+        "tokenizer_min_frequency": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tokenizer Min Frequency"
+        },
         "tokenizer_revision": {
           "anyOf": [
             {
@@ -491,6 +717,45 @@
           ],
           "default": null,
           "title": "Tokenizer Revision"
+        },
+        "tokenizer_source_mode": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tokenizer Source Mode"
+        },
+        "tokenizer_special_tokens": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tokenizer Special Tokens"
+        },
+        "tokenizer_vocab_size": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tokenizer Vocab Size"
         },
         "truncation_allowed": {
           "default": false,

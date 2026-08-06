@@ -36,6 +36,7 @@ from corpus_studio.platform.contracts import (
     FailureRecord,
     FitClassification,
     OptimizerStepLossEvidence,
+    PretrainingSuccessEvidence,
     RunEvent,
     RunManifest,
     RunPlan,
@@ -191,6 +192,10 @@ class RunContext:
         # only layer that may create TrainingSuccessEvidence or a proven native fit.
         self.measured_peak: MemoryMetrics | None = None
         self.training_execution_evidence: TrainingExecutionEvidence | None = None
+        # A pretraining runner reports the worker-proposed full-model success evidence; execute_run
+        # RE-VERIFIES it (reload the saved model.safetensors, re-hash, compare to the sealed trained
+        # state) before it may reach the manifest - the runner cannot self-admit a success.
+        self.pretraining_success_evidence: PretrainingSuccessEvidence | None = None
 
     @property
     def cancelled(self) -> bool:
@@ -480,6 +485,109 @@ def validate_training_success_evidence(
     )
 
 
+def _reload_verify_full_model(  # pragma: no cover - torch reload; proven by a routed run
+    model_dir: str,
+    *,
+    expected_after_sha256: str,
+    expected_model_sha256: str,
+    expected_config_sha256: str,
+) -> tuple[bool, str | None]:
+    """Independently reload the saved model.safetensors and assert it reproduces the sealed trained
+    export state, and that the saved model + config bytes match the worker's proposal exactly. Returns
+    ``(verified, reason)`` - never a crash of success admission, never a false claim."""
+    import hashlib  # noqa: PLC0415
+    from pathlib import Path  # noqa: PLC0415
+
+    model_st = Path(model_dir) / "model.safetensors"
+    config_json = Path(model_dir) / "config.json"
+    if not model_st.is_file():
+        return False, "saved model.safetensors not found"
+    if not config_json.is_file():
+        return False, "saved config.json not found"
+    if hashlib.sha256(model_st.read_bytes()).hexdigest() != expected_model_sha256:
+        return False, "saved model.safetensors bytes do not match the proposed digest"
+    if hashlib.sha256(config_json.read_bytes()).hexdigest() != expected_config_sha256:
+        return False, "saved config.json bytes do not match the proposed digest"
+    try:
+        import torch  # noqa: PLC0415
+        from transformers import AutoModelForCausalLM  # noqa: PLC0415
+
+        from corpus_studio.training.trainer import capture_adapter_export_state  # noqa: PLC0415
+
+        reloaded = AutoModelForCausalLM.from_pretrained(model_dir)
+        trainable = {n: p for n, p in reloaded.named_parameters() if p.requires_grad}
+        snapshot = capture_adapter_export_state(trainable, torch, stage=StageMarker.export)
+    except Exception as exc:  # noqa: BLE001 - any reload/parse failure is NOT verified, never a crash
+        return False, f"could not reload the saved model: {type(exc).__name__}: {exc}"
+    if snapshot.state_sha256 != expected_after_sha256:
+        return False, "the reloaded model does not reproduce the trained export state"
+    return True, None
+
+
+def validate_pretraining_success_evidence(
+    plan: RunPlan,
+    proposed: PretrainingSuccessEvidence | None,
+    produced: Sequence[ProducedArtifact],
+    measured_peak: MemoryMetrics | None,
+) -> PretrainingSuccessEvidence:
+    """Independently re-verify a pretraining runner's PROPOSED full-model success before terminal PASS.
+
+    The worker proposes the success evidence, but execute_run is the only layer that may admit it: it
+    confirms the completed steps match the sealed schedule, then reloads the saved model.safetensors and
+    asserts it reproduces the sealed trained export state (and that the saved bytes match the proposal).
+    Any mismatch is fail-closed. Returns the admitted evidence carrying the supervisor-measured peak."""
+    execution = plan.resolved_pretraining_execution
+    if execution is None:  # pragma: no cover - caller restricts this to a resolved pretraining plan.
+        raise RunnerFailure(
+            "pretraining success evidence requires a resolved pretraining execution",
+            taxonomy=FailureTaxonomy.UNSUPPORTED_CONFIGURATION,
+            stage=StageMarker.process_start,
+        )
+    if proposed is None:
+        raise RunnerFailure(
+            "resolved pretraining returned without full-model success evidence",
+            taxonomy=FailureTaxonomy.UPDATE_FAILURE,
+            stage=StageMarker.optimizer_step,
+        )
+    if execution.schedule.max_steps is not None:
+        if proposed.execution.completed_optimizer_steps != execution.schedule.max_steps:
+            raise RunnerFailure(
+                "completed optimizer steps do not match the sealed schedule",
+                taxonomy=FailureTaxonomy.OPTIMIZER_FAILURE,
+                stage=StageMarker.optimizer_step,
+            )
+    elif proposed.execution.completed_optimizer_steps < 1:
+        # Epoch-scheduled: the exact optimizer-step total is the worker's data-derived plan over the
+        # sealed corpus, which the supervisor cannot recompute without loading the dataset. But a
+        # zero-step "success" is never admissible - the worker's evidence enforces the true per-epoch
+        # ceiling, and the independent reload-verify below proves a real trained model was produced.
+        raise RunnerFailure(
+            "epoch-scheduled pretraining admitted zero completed optimizer steps",
+            taxonomy=FailureTaxonomy.OPTIMIZER_FAILURE,
+            stage=StageMarker.optimizer_step,
+        )
+    model_artifact = next((item for item in produced if item.kind == "model"), None)
+    if model_artifact is None:
+        raise RunnerFailure(
+            "resolved pretraining produced no model artifact to admit",
+            taxonomy=FailureTaxonomy.ARTIFACT_FAILURE,
+            stage=StageMarker.export,
+        )
+    verified, reason = _reload_verify_full_model(
+        model_artifact.path,
+        expected_after_sha256=proposed.execution.model_export_state.after_sha256,
+        expected_model_sha256=proposed.model_safetensors_sha256,
+        expected_config_sha256=proposed.model_config_sha256,
+    )
+    if not verified:
+        raise RunnerFailure(
+            f"the pretraining model artifact failed independent re-verification: {reason}",
+            taxonomy=FailureTaxonomy.ARTIFACT_FAILURE,
+            stage=StageMarker.export,
+        )
+    return proposed.model_copy(update={"measured_peak": measured_peak})
+
+
 def execute_run(
     plan: RunPlan,
     runner: Runner,
@@ -503,6 +611,11 @@ def execute_run(
     cancel = cancel or CancelToken()
     events: list[RunEvent] = []
     sink_errors: list[str] = []
+    # A "resolved" run has a real execution - an SFT adapter OR a full-parameter pretraining plan - as
+    # opposed to an echo plan. Used consistently for promotion, target, and output-dir selection below.
+    resolved_run = (
+        plan.resolved_execution is not None or plan.resolved_pretraining_execution is not None
+    )
     record_dir = run_record_directory(out_dir, rid) if out_dir is not None else None
     events_handle: Any = None
     if record_dir is not None:
@@ -557,6 +670,7 @@ def execute_run(
     produced: Sequence[ProducedArtifact] = []
     artifact_manifests: list[ArtifactManifest] = []
     training_success_evidence: TrainingSuccessEvidence | None = None
+    pretraining_success_evidence: PretrainingSuccessEvidence | None = None
 
     try:
         # Defense in depth: callers can reach this public library boundary without going through the
@@ -605,6 +719,15 @@ def execute_run(
                     taxonomy=FailureTaxonomy.UNSUPPORTED_CONFIGURATION,
                     stage=StageMarker.env_loaded,
                 )
+        elif plan.resolved_pretraining_execution is not None:
+            from corpus_studio.platform.runners import PretrainingRunner  # noqa: PLC0415
+
+            if type(runner) is not PretrainingRunner:
+                raise RunnerFailure(
+                    "resolved pretraining plans require the first-party PretrainingRunner adapter",
+                    taxonomy=FailureTaxonomy.UNSUPPORTED_CONFIGURATION,
+                    stage=StageMarker.env_loaded,
+                )
         elif not isinstance(runner, EchoRunner):
             raise RunnerFailure(
                 "echo plans require the built-in EchoRunner adapter",
@@ -642,6 +765,13 @@ def execute_run(
                 ctx.training_execution_evidence,
                 ctx.measured_peak,
             )
+        if plan.resolved_pretraining_execution is not None:
+            pretraining_success_evidence = validate_pretraining_success_evidence(
+                plan,
+                ctx.pretraining_success_evidence,
+                produced,
+                ctx.measured_peak,
+            )
         if record_dir is not None:
             try:
                 for artifact_manifest in artifact_manifests:
@@ -654,7 +784,7 @@ def execute_run(
                     stage=StageMarker.export,
                     remediation="preserve the run directory and repair durable artifact storage",
                 ) from exc
-        if plan.resolved_execution is not None and ctx.measured_peak is not None:
+        if resolved_run and ctx.measured_peak is not None:
             # Promotion follows every semantic, byte-integrity, and durable-artifact gate.
             from corpus_studio.platform.watchdog import (  # noqa: PLC0415
                 reconcile_measured_fit,
@@ -702,13 +832,17 @@ def execute_run(
         finished_at=finished,
         state=state,
         base_model=plan.base_model,
-        target=plan.backend_ref.id if plan.resolved_execution is not None else runner.name,
+        target=(
+            plan.backend_ref.id
+            if resolved_run
+            else runner.name
+        ),
         output_dir=(
             next(
-                (artifact.path for artifact in produced if artifact.kind == "adapter"),
+                (artifact.path for artifact in produced if artifact.kind in ("adapter", "model")),
                 plan.export.output_dir,
             )
-            if plan.resolved_execution is not None
+            if resolved_run
             else plan.export.output_dir
         ),
         artifact_ids=artifact_ids,
@@ -716,6 +850,9 @@ def execute_run(
         final_fit=ctx.final_fit,  # the MEASURED fit, when a runner captured one (via the watchdog)
         training_success_evidence=(
             training_success_evidence if state == "succeeded" else None
+        ),
+        pretraining_success_evidence=(
+            pretraining_success_evidence if state == "succeeded" else None
         ),
         notes=(
             "event sink failures were isolated: " + ", ".join(sink_errors)

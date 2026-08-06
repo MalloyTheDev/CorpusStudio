@@ -2143,6 +2143,159 @@ def test_install_source_evidence_sanitizes_credentials_and_preserves_unknown(tmp
     assert unknown.source_evidence_reason
 
 
+_PYTORCH_INDEX = "https://download.pytorch.org/whl/cu128"
+
+
+def _hashless_report(tmp_path, *, url, name, version):
+    report = tmp_path / "pip-report.json"
+    report.write_text(
+        json.dumps(
+            {
+                "version": "1",
+                "install": [
+                    {
+                        "download_info": {"url": url, "archive_info": {}},
+                        "is_direct": False,
+                        "requested": False,
+                        "metadata": {"name": name, "version": version},
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    return report
+
+
+def _install_step():
+    return InstallStep(
+        phase="install",
+        argv=["python", "-m", "pip", "install"],
+        configured_index_urls=[_PYTORCH_INDEX],
+    )
+
+
+def test_install_evidence_binds_hash_for_hashless_configured_index_wheel(tmp_path, monkeypatch):
+    # The PyTorch index omits sha256 for some pure-python wheels; the env-manager binds the artifact by
+    # its OWN content hash (fetch the pinned wheel) instead of skipping the honesty gate.
+    import hashlib
+
+    wheel_bytes = b"pinned-cuda-pathfinder-wheel-bytes"
+    monkeypatch.setattr(manager_module, "_fetch_index_artifact_bytes", lambda url, **k: wheel_bytes)
+    report = _hashless_report(
+        tmp_path,
+        url="https://download.pytorch.org/whl/cuda_pathfinder-1.2.2-py3-none-any.whl",
+        name="cuda-pathfinder",
+        version="1.2.2",
+    )
+    evidence = manager_module._install_evidence_from_report(
+        report, step=_install_step(), command_id="command-hashless"
+    )
+    item = next(i for i in evidence if i.normalized_name == "cuda-pathfinder")
+    assert item.artifact_hash is not None
+    assert item.artifact_hash.value == hashlib.sha256(wheel_bytes).hexdigest()
+
+
+def test_install_evidence_refuses_hashless_wheel_from_unconfigured_host(tmp_path, monkeypatch):
+    monkeypatch.setattr(manager_module, "_fetch_index_artifact_bytes", lambda url, **k: b"x")
+    report = _hashless_report(
+        tmp_path,
+        url="https://evil.invalid/cuda_pathfinder-1.2.2-py3-none-any.whl",
+        name="cuda-pathfinder",
+        version="1.2.2",
+    )
+    with pytest.raises(manager_module.EnvironmentManagerError, match="not a configured index"):
+        manager_module._install_evidence_from_report(
+            report, step=_install_step(), command_id="command-badhost"
+        )
+
+
+def test_install_evidence_refuses_hashless_wheel_filename_mismatch(tmp_path, monkeypatch):
+    monkeypatch.setattr(manager_module, "_fetch_index_artifact_bytes", lambda url, **k: b"x")
+    report = _hashless_report(
+        tmp_path,
+        url="https://download.pytorch.org/whl/other_pkg-9.9.9-py3-none-any.whl",
+        name="cuda-pathfinder",
+        version="1.2.2",
+    )
+    with pytest.raises(manager_module.EnvironmentManagerError, match="does not match"):
+        manager_module._install_evidence_from_report(
+            report, step=_install_step(), command_id="command-mismatch"
+        )
+
+
+def test_hashless_index_fetch_installs_a_no_redirect_opener(monkeypatch):
+    # SSRF / host-rebind hardening: the host allowlist is enforced on the ORIGINAL url only, so the fetch
+    # that binds a hashless wheel's content hash must REFUSE a 3xx - never follow it to an arbitrary or
+    # link-local host and bind THOSE bytes as the wheel's identity. Prove it installs a no-redirect
+    # opener whose redirect_request fails closed.
+    import urllib.request
+
+    captured = {}
+
+    class _Resp:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_a):
+            return False
+
+        def read(self, _n):
+            return b"pinned-wheel-bytes"
+
+    class _Opener:
+        def open(self, _url, timeout=None):
+            return _Resp()
+
+    def _fake_build_opener(handler):
+        captured["handler"] = handler
+        return _Opener()
+
+    monkeypatch.setattr(urllib.request, "build_opener", _fake_build_opener)
+    data = manager_module._fetch_index_artifact_bytes(
+        "https://download.pytorch.org/whl/cuda_pathfinder-1.2.2-py3-none-any.whl"
+    )
+    assert data == b"pinned-wheel-bytes"
+    handler = captured["handler"]
+    assert issubclass(handler, urllib.request.HTTPRedirectHandler)
+    with pytest.raises(manager_module.EnvironmentManagerError, match="refusing to follow it off"):
+        handler().redirect_request(None, None, 302, "Found", {}, "http://169.254.169.254/latest/meta")
+
+
+def test_capability_snapshot_script_renders_none_probes_as_valid_python():
+    # Regression: a recipe with no required execution probe (e.g. the base backend-corpus-studio recipe
+    # that managed pretraining uses) yields probes=None, which was rendered json.dumps(None) -> "null" ->
+    # `probes=null` in the generated script -> NameError: name 'null' is not defined at probe time. It
+    # must be the Python literal None (run all default probes).
+    import ast
+
+    none_script = manager_module._capability_snapshot_script(None)
+    assert "probes=None" in none_script and "probes=null" not in none_script
+    ast.parse(none_script)  # syntactically valid Python
+    list_script = manager_module._capability_snapshot_script(["complete_qlora", "flash"])
+    assert 'probes=["complete_qlora", "flash"]' in list_script
+    ast.parse(list_script)
+
+
+def test_json_probe_reads_full_stdout_not_a_truncated_tail(tmp_path):
+    # Regression: a base-recipe capability report (full package profile + all default probes) is one
+    # >32 KB JSON line; the small default log-tail truncated it mid-object -> "did not emit structured
+    # JSON". The JSON read now uses a generous tail so a valid object parses whole.
+    import json
+
+    big = {"capability_report": {"pad": "x" * 40000}, "profile": {"ok": True}}
+    line = json.dumps(big)
+    assert len(line) > manager_module._PROBE_TAIL_LIMIT  # exceeds the small default tail
+    path = tmp_path / "probe.stdout"
+    path.write_text(line, encoding="utf-8")
+    with pytest.raises(json.JSONDecodeError):  # the small default tail truncates the object
+        manager_module._last_json_object(manager_module._read_tail(path))
+    parsed = manager_module._last_json_object(
+        manager_module._read_tail(path, limit=8_000_000)
+    )
+    assert parsed["profile"] == {"ok": True}
+
+
 def test_install_source_evidence_classifies_proven_local_vcs_index_and_sdist_sources(
     tmp_path,
 ):

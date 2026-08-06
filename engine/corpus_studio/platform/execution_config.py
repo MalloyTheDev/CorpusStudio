@@ -22,6 +22,7 @@ from .contracts import (
     ExecutionInputBinding,
     ResolvedExecutionConfiguration,
     ResolvedPreferenceExecutionConfiguration,
+    ResolvedPretrainingExecutionConfiguration,
     RunPlan,
 )
 
@@ -30,6 +31,7 @@ _FORMATTER_IDENTITIES = {
     "instruction": "corpus-studio:instruction-alpaca-v1",
     "chat": "corpus-studio:tokenizer-chat-template-v1",
     "trace": "corpus-studio:structured-trace-renderer-v1",
+    "preference": "corpus-studio:preference-pair-v1",
 }
 _RUNTIME_ID = re.compile(r"^[A-Za-z0-9._-]+$")
 
@@ -39,10 +41,14 @@ class ExecutionConfigurationError(ValueError):
 
 
 def run_scoped_training_output(
-    config: ResolvedExecutionConfiguration,
+    config: ResolvedExecutionConfiguration | ResolvedPretrainingExecutionConfiguration,
     run_id: str,
+    *,
+    leaf: str = "adapter",
 ) -> Path:
-    """Resolve the final trainer directory from the sealed root/layout and fresh run identity."""
+    """Resolve the final trainer directory from the sealed root/layout and fresh run identity. ``leaf``
+    is the artifact kind under ``artifacts/``: "adapter" for the SFT/DPO PEFT export, "model" for a
+    full-parameter pretraining export."""
 
     if config.output_layout != "run_scoped_v1":  # pragma: no cover - literal contract defense
         raise ExecutionConfigurationError(
@@ -50,7 +56,21 @@ def run_scoped_training_output(
         )
     if not _RUNTIME_ID.fullmatch(run_id) or run_id in {".", ".."}:
         raise ExecutionConfigurationError("run_id is unsafe for run-scoped output resolution")
-    return Path(config.output_dir) / "runs" / run_id / "artifacts" / "adapter"
+    return Path(config.output_dir) / "runs" / run_id / "artifacts" / leaf
+
+
+PREFERENCE_NOT_EXECUTABLE_REASON = (
+    "this is a sealed preference (DPO) plan - admitted at planning but not yet executable: "
+    "'preference_dpo' is contract_validated, not workload_verified. The DPOTrainer worker branch, a "
+    "workload-verified run, and the milestone wheel are the gated next step."
+)
+
+PRETRAINING_NOT_EXECUTABLE_REASON = (
+    "a from-scratch / continued pretraining plan runs on the first-party PretrainingRunner lane, not the "
+    "SFT/DPO runner: dispatch it through platform-run so required_runner_lane selects the 'pretraining' "
+    "lane. (The same refusal fires if the 'pretraining' execution variant is not workload_verified for "
+    "this backend.)"
+)
 
 
 def required_runner_lane(plan: RunPlan) -> str:
@@ -63,6 +83,34 @@ def required_runner_lane(plan: RunPlan) -> str:
                 "resolved training plans require the first-party corpus_studio worker"
             )
         return "cpu_toy" if execution.runtime_mode == "cpu_toy" else "training"
+    if plan.resolved_preference_execution is not None:
+        # A sealed preference (DPO) plan is admitted at planning but refused at EXECUTION here - the
+        # earliest dispatch gate - with a typed reason, so the refusal is reachable through the shipping
+        # platform-run flow rather than surfacing the generic "no executable runner lane" below.
+        raise ExecutionConfigurationError(PREFERENCE_NOT_EXECUTABLE_REASON)
+    if plan.resolved_pretraining_execution is not None:
+        # Pretraining is admitted at planning; at EXECUTION it is admitted only once the pretraining
+        # variant reaches workload_verified (a measured GPU run through the first-party PretrainingRunner
+        # + the supervisor reload-verify). Gate on the ladder, then route to the PretrainingRunner lane -
+        # the SFT/DPO lane never runs a full-parameter model.
+        from corpus_studio.platform.enums import TaskType  # noqa: PLC0415
+        from corpus_studio.platform.execution_variants import (  # noqa: PLC0415
+            ExecutionVariantRefused,
+            admit_task_execution_variant,
+            reference_execution_variants,
+        )
+
+        try:
+            admit_task_execution_variant(
+                TaskType.pretraining, declared_variants=reference_execution_variants()
+            )
+        except ExecutionVariantRefused as exc:
+            raise ExecutionConfigurationError(PRETRAINING_NOT_EXECUTABLE_REASON) from exc
+        return (
+            "pretraining_cpu_toy"
+            if plan.resolved_pretraining_execution.runtime_mode == "cpu_toy"
+            else "pretraining"
+        )
     if plan.backend_ref.id == "echo":
         if plan.task_type.value != "evaluation":
             raise ExecutionConfigurationError(
@@ -115,6 +163,21 @@ def verify_preference_execution_configuration_hash(
     return config.configuration_hash == preference_execution_configuration_hash_for(config)
 
 
+def pretraining_execution_configuration_hash_for(
+    config: ResolvedPretrainingExecutionConfiguration,
+) -> str:
+    """Seal a pretraining execution configuration exactly as the SFT/DPO siblings are sealed (canonical
+    JSON over every field but ``configuration_hash``). A separate function keeps the seals decoupled: the
+    byte-locked SFT seal can never be perturbed by a pretraining change."""
+    return canonical_sha256(config.model_dump(mode="json", exclude={"configuration_hash"}))
+
+
+def verify_pretraining_execution_configuration_hash(
+    config: ResolvedPretrainingExecutionConfiguration,
+) -> bool:
+    return config.configuration_hash == pretraining_execution_configuration_hash_for(config)
+
+
 def capability_report_hash_for(report: CapabilityReport) -> str:
     return canonical_sha256(report.model_dump(mode="json"))
 
@@ -152,6 +215,23 @@ def formatter_identity(dataset_format: str) -> tuple[str, str]:
     return formatter_id, canonical_sha256({"formatter_id": formatter_id, "sources": sources})
 
 
+def preference_formatter_identity() -> tuple[str, str]:
+    """The sealed identity of the preference-pair formatter, DISTINCT from :func:`formatter_identity`'s
+    SFT ``format_example_text`` (which reads instruction/messages/trace fields, not a preference pair's
+    ``prompt``/``chosen``/``rejected``). Returns the id + a content digest of ``format_preference_pair``'s
+    source, so a DPO run formats every pair identically and a formatter change fails closed."""
+    formatter_id = _FORMATTER_IDENTITIES["preference"]
+    try:
+        from corpus_studio.training.trainer import format_preference_pair  # noqa: PLC0415
+
+        sources = [inspect.getsource(format_preference_pair)]
+    except (ImportError, OSError, TypeError) as exc:
+        raise ExecutionConfigurationError(
+            f"cannot inspect the sealed preference formatter implementation: {exc}"
+        ) from exc
+    return formatter_id, canonical_sha256({"formatter_id": formatter_id, "sources": sources})
+
+
 def huggingface_input_ref(kind: str, repository: str, revision: str) -> Ref:
     digest = hashlib.sha256(
         f"huggingface:{kind}:{repository}@{revision}".encode("utf-8")
@@ -169,20 +249,21 @@ def _within(path: Path, root: Path) -> bool:
 
 
 def verify_run_scoped_output_path(
-    config: ResolvedExecutionConfiguration,
+    config: ResolvedExecutionConfiguration | ResolvedPretrainingExecutionConfiguration,
     run_id: str,
     *,
     observed_path: str | Path | None = None,
     require_exists: bool = False,
+    leaf: str = "adapter",
 ) -> Path:
     """Require the exact lexical run output and reject link-like descendants before/after training."""
 
     sealed_root = Path(config.output_dir).absolute()
-    expected = run_scoped_training_output(config, run_id).absolute()
+    expected = run_scoped_training_output(config, run_id, leaf=leaf).absolute()
     candidate = Path(observed_path).absolute() if observed_path is not None else expected
     if candidate != expected:
         raise ExecutionConfigurationError(
-            "trainer output differs from the exact sealed run-scoped output adapter path"
+            "trainer output differs from the exact sealed run-scoped output path"
         )
     try:
         expected.relative_to(sealed_root)
@@ -218,9 +299,34 @@ def verify_run_scoped_output_path(
                 )
     if require_exists and (not expected.is_dir() or _is_link_like(expected)):
         raise ExecutionConfigurationError(
-            "trainer did not produce a regular run-scoped adapter directory"
+            "trainer did not produce a regular run-scoped output directory"
         )
     return expected
+
+
+def run_scoped_pretraining_output(
+    config: ResolvedPretrainingExecutionConfiguration,
+    run_id: str,
+) -> Path:
+    """The full-parameter pretraining sibling of :func:`run_scoped_training_output` - the run-scoped
+    ``model`` export directory (never the SFT ``adapter`` leaf)."""
+
+    return run_scoped_training_output(config, run_id, leaf="model")
+
+
+def verify_run_scoped_pretraining_output_path(
+    config: ResolvedPretrainingExecutionConfiguration,
+    run_id: str,
+    *,
+    observed_path: str | Path | None = None,
+    require_exists: bool = False,
+) -> Path:
+    """Require the exact lexical run-scoped ``model`` output for a pretraining run and reject link-like
+    descendants (the pretraining analog of :func:`verify_run_scoped_output_path`)."""
+
+    return verify_run_scoped_output_path(
+        config, run_id, observed_path=observed_path, require_exists=require_exists, leaf="model"
+    )
 
 
 def _stable_file_read(

@@ -1,7 +1,9 @@
 # Training Systems Architecture
 
-**Status: architecture proposal for review. Docs-only. No training code, dependency, model, dataset, GPU,
-or research action is part of this document.**
+**Status: the architecture spine; parts have SHIPPED.** Sections tagged "Implemented (P0a-P0d)" are on
+`main` (`SupportLevel`, `TrainingPlan`, backend registry + security gate, backend-scoped execution
+variants, and the offline-DPO control-plane vertical - see §3.1); the untagged sections remain proposals
+for review. No GPU, wheel, sealed-research, or release action is taken by this document.
 
 CorpusStudio is a **local-first, end-to-end AI development ecosystem and IDE** (see
 [`PRODUCT_AREAS.md`](PRODUCT_AREAS.md), [`PRODUCT_SPEC.md`](PRODUCT_SPEC.md)); this doc is the internal
@@ -124,11 +126,21 @@ variants each require their own implementation + workload-verification gate.
 
 | Execution variant | Contract-expressible | Worker-implemented | Workload-verified | Admitted |
 |---|---|---|---|---|
-| dense_qlora_sft | yes | yes | **yes** (real run evidence) | **yes** |
+| dense_qlora_sft | yes | yes | **yes** (real run evidence) | **yes** (planning + execution) |
 | dense_full_finetune | yes | no | no | no |
 | pretraining | yes | no | no | no |
 | moe | yes | no | no | no |
-| preference_dpo | yes | no | no | no (admitted-as-known, refused at execution) |
+| preference_dpo | yes | primitive GPU-validated (exploratory), not sealed | no | **at PLANNING** (resolver seals a config); refused at EXECUTION |
+
+**Offline DPO shipped a full control-plane vertical since this table's origin (#775/#778/#779/#782/#783).**
+A `preference` + `dpo_qlora` plan is now **admitted at PLANNING** (the admission gate admits `preference_dpo`
+at `contract_validated`) and lowered by the resolver into a sealed `ResolvedPreferenceExecutionConfiguration`
+(a byte-locked sibling of the SFT config: a `PreferenceDataPolicy` + `PreferenceOptimizationSpec` bound to
+`dpo_qlora`, with `--dpo-beta`/`--dpo-label-smoothing`/`--max-prompt-length` knobs). It is then **refused at
+EXECUTION** with a typed reason (`preference_dpo` is `contract_validated`, not `workload_verified`) at every
+runner gate. The worker primitive (sequence-chunked log-prob, seq-4096-capable) is GPU-validated as correct
+(exploratory), NOT yet on the sealed platform-run path - promoting `preference_dpo` to `workload_verified`
+needs the config->args adapter + a wheel + a sealed run (tracked in #784).
 
 ## 4. Support levels (installed is never supported)
 

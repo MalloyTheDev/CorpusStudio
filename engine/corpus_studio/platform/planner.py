@@ -29,10 +29,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
+from pathlib import Path
 from typing import Any
 
 from pydantic import ValidationError
@@ -48,20 +50,29 @@ from corpus_studio.platform.backends import (
 from corpus_studio.platform.contracts import (
     AttentionExecutionPolicy,
     CapabilityReport,
+    CustomModelCodeSpec,
     DeviceMapEntry,
     EnvironmentProfile,
     ExecutionInputBinding,
     ExecutionInputs,
+    ModelInitializationSpec,
     ParameterAccountingReport,
     PhysicalExecutionSpec,
     PhysicalResource,
     PhysicalScopeSelector,
     ParallelismSpec,
+    PreferenceDataPolicy,
+    PreferenceOptimizationSpec,
+    PretrainingDataPolicy,
     RankBinding,
+    ReferenceModelBinding,
     ResolvedExecutionConfiguration,
+    ResolvedPreferenceExecutionConfiguration,
+    ResolvedPretrainingExecutionConfiguration,
     RunPlan,
     StatePlacement,
     StorageProfile,
+    TokenizerSourceSpec,
     TrainerInterfacePolicy,
     TrainingDataPolicy,
     TrainingSchedule,
@@ -77,6 +88,7 @@ from corpus_studio.platform.enums import (
     ExportFormat,
     FailureTaxonomy,
     MemoryTier,
+    ObjectiveKind,
     OffloadStrategy,
     OperatingSystem,
     Optimizer,
@@ -85,11 +97,16 @@ from corpus_studio.platform.enums import (
     TaskType,
 )
 from corpus_studio.platform.execution_config import (
+    canonical_sha256,
     capability_report_ref_for,
     execution_configuration_hash_for,
     formatter_identity,
     huggingface_input_ref,
+    preference_execution_configuration_hash_for,
+    preference_formatter_identity,
+    pretraining_execution_configuration_hash_for,
 )
+from corpus_studio.schemas.project_schemas import resolve_schema
 from corpus_studio.platform.host_platform import flash_sdpa_deadlocks
 from corpus_studio.platform.parameter_accounting import verify_parameter_accounting_hash
 from corpus_studio.platform.objectives import get_objective
@@ -182,6 +199,35 @@ class PlannerConstraints:
     truncation_allowed: bool = False
     chat_template_sha256: str | None = None
     allow_cpu_toy: bool = False
+    # Preference (DPO) knobs - consumed only by the preference resolver; ignored on the SFT/pretraining
+    # paths. ``preference_max_prompt_length`` defaults to half the sequence window when None.
+    preference_beta: float = 0.1
+    preference_label_smoothing: float = 0.0
+    preference_max_prompt_length: int | None = None
+    # Pretraining (S3a-2): from-scratch / continued corpus + init + tokenizer knobs. ``init_mode`` None
+    # marks a NON-pretraining plan; a pretraining task requires them (checked in _build_pretraining_plan).
+    init_mode: str | None = None  # "random" | "continued"
+    architecture_ref_id: str | None = None
+    architecture_ref_sha256: str | None = None
+    init_vocab_size: int | None = None
+    init_seed: int | None = None
+    init_initializer_range: float | None = None
+    source_checkpoint_ref_id: str | None = None
+    source_checkpoint_ref_sha256: str | None = None
+    tokenizer_source_mode: str | None = None  # "train" | "import" | "freeze"
+    tokenizer_algorithm: str | None = None
+    tokenizer_vocab_size: int | None = None
+    tokenizer_special_tokens: tuple[str, ...] | None = None
+    tokenizer_min_frequency: int | None = None
+    tokenizer_location: str | None = None  # import/freeze: where the worker loads the pinned tokenizer
+    # Custom-block (mode 3): a hash-pinned, ADMITTED local code bundle. Set only for a custom_decoder
+    # architecture; the platform-plan layer verifies the vetting report admitted these exact bytes first.
+    custom_code_bundle_ref_id: str | None = None
+    custom_code_bundle_ref_sha256: str | None = None
+    custom_code_entry_symbol: str | None = None
+    custom_code_interface_version: str | None = None
+    custom_code_vetting_ref_id: str | None = None
+    custom_code_vetting_ref_sha256: str | None = None
 
 
 def _require_enum(value: str, enum_cls: type[Enum], label: str) -> None:
@@ -810,6 +856,461 @@ def _precision_policy(precision: str, quantization: str, optimizer: str) -> dict
     }
 
 
+def _resolve_preference_execution(
+    *,
+    plan_id: str,
+    shared_fields: dict[str, Any],
+    constraints: PlannerConstraints,
+    resolved_physical: PhysicalExecutionSpec,
+    chat_template_sha256: str | None,
+    project_dir: Path | str | None,
+) -> ResolvedPreferenceExecutionConfiguration:
+    """Lower a preference + ``dpo_qlora`` plan into a SEALED
+    :class:`ResolvedPreferenceExecutionConfiguration` - the DPO sibling of the SFT resolver. Reuses every
+    shared execution sub-spec already assembled in ``shared_fields`` and adds only what DPO needs: a
+    :class:`PreferenceDataPolicy` (resolved ``preference`` schema identity + formatter + prompt/response
+    budget) and a :class:`PreferenceOptimizationSpec` (beta / sigmoid loss / label-smoothing + frozen-base
+    reference), bound to the sealed ``dpo_qlora`` objective. Admitted at planning; the runner refuses it at
+    EXECUTION until the DPOTrainer branch + workload-verified evidence + milestone wheel land.
+
+    ``beta`` / ``label_smoothing`` / ``max_prompt_length`` come from the operator's ``PlannerConstraints``
+    (``preference_*`` knobs), defaulting to 0.1 / 0.0 / half-the-window when unset."""
+    objective = get_objective("dpo_qlora")
+    if objective is None:  # pragma: no cover - sealed built-in catalog invariant
+        raise PlannerError("the dpo_qlora objective is absent from the sealed registry")
+    objective_ref = Ref(id=objective.objective_id, hash=HashRef(value=objective.objective_hash))
+
+    # Deferred #779 finding: the resolved device_map must reconcile with the sealed physical execution -
+    # the single dense compute device is the placement root, never an unrelated device.
+    root_device = resolved_physical.resources[0].device_id
+    expected_device = "cpu" if root_device == "cpu:0" else root_device
+    mapped_devices = {entry["device"] for entry in shared_fields["device_map"]}
+    if expected_device is not None and mapped_devices != {expected_device}:
+        raise PlannerError(
+            f"preference device_map {sorted(mapped_devices)} does not reconcile with the sealed physical "
+            f"execution device {expected_device!r}"
+        )
+
+    # Resolved 'preference' dataset-schema identity: id + version + a content digest of the schema that
+    # ACTUALLY governs the dataset (a project-local schema shadows the builtin of the same id), so a
+    # row-layout drift fails closed even under a project-local override.
+    schema, _schema_source = resolve_schema(project_dir, "preference")
+    # A project-local schema can make prompt/chosen/rejected optional or retype them; the sealed
+    # chosen_rejected pair layout + format_preference_pair REQUIRE all three as text. Refuse an
+    # incompatible resolved schema rather than sealing a config the formatter would reject at execution.
+    _string_field_types = {"text", "markdown", "string"}
+    schema_fields = {field.name: field for field in schema.fields}
+    unusable = sorted(
+        name
+        for name in ("prompt", "chosen", "rejected")
+        if (field := schema_fields.get(name)) is None
+        or not getattr(field, "required", False)
+        or field.type not in _string_field_types
+    )
+    if unusable:
+        raise PlannerError(
+            f"the resolved 'preference' schema is incompatible with the chosen_rejected pair formatter: "
+            f"field(s) {unusable} must each be present, required, and text/markdown (a project-local "
+            f"schema may have made them optional or retyped them)"
+        )
+    # The preference-pair formatter (prompt/chosen/rejected), NOT the SFT format_example_text.
+    formatter_id, formatter_hash = preference_formatter_identity()
+    max_length = constraints.sequence_len
+    # Validate the operator's DPO knobs fail-closed (a clean PlannerError, never a silent clamp or a raw
+    # pydantic error): an out-of-range or non-finite value hides operator intent rather than surfacing it.
+    beta = constraints.preference_beta
+    if not math.isfinite(beta) or beta <= 0:
+        raise PlannerError(f"preference_beta must be a finite positive number (got {beta!r})")
+    smoothing = constraints.preference_label_smoothing
+    if not math.isfinite(smoothing) or not 0.0 <= smoothing < 0.5:
+        raise PlannerError(f"preference_label_smoothing must be in [0, 0.5) (got {smoothing!r})")
+    cap = constraints.preference_max_prompt_length
+    if cap is not None and not 1 <= cap < max_length:
+        raise PlannerError(
+            f"preference_max_prompt_length must be in [1, {max_length}) - below the sequence window so "
+            f"the response has room (got {cap!r})"
+        )
+    # The sealed prompt cap is the (validated) operator knob, else half the window.
+    max_prompt_length = cap if cap is not None else max(1, max_length // 2)
+    data_policy = PreferenceDataPolicy(
+        schema_id=schema.id,
+        schema_version=schema.version,
+        schema_sha256=canonical_sha256(schema.model_dump(mode="json")),
+        pair_schema="chosen_rejected",
+        formatter_id=formatter_id,
+        formatter_sha256=formatter_hash,
+        chat_template_sha256=chat_template_sha256,
+        max_prompt_length=max_prompt_length,
+        max_length=max_length,
+        truncation_policy="allow" if constraints.truncation_allowed else "refuse",
+        data_seed=constraints.data_seed if constraints.data_seed is not None else constraints.seed,
+    )
+    preference_spec = PreferenceOptimizationSpec(
+        beta=beta,
+        label_smoothing=smoothing,
+        reference_model=ReferenceModelBinding(mode="frozen_base", precompute_ref_log_probs=False),
+    )
+    try:
+        draft = ResolvedPreferenceExecutionConfiguration.model_validate(
+            {
+                **shared_fields,
+                "configuration_hash": "0" * 64,
+                "objective_ref": objective_ref.model_dump(mode="json"),
+                "data": data_policy.model_dump(mode="json"),
+                "preference": preference_spec.model_dump(mode="json"),
+            }
+        )
+    except ValidationError as exc:
+        raise PlannerError(
+            f"the resolved preference execution configuration is invalid: {exc}"
+        ) from exc
+    return draft.model_copy(
+        update={"configuration_hash": preference_execution_configuration_hash_for(draft)}
+    )
+
+
+def _custom_code_spec(constraints: PlannerConstraints) -> CustomModelCodeSpec | None:
+    """The ADMITTED custom-block spec when platform-plan verified + set its fields (all-or-nothing); else
+    None. Any partial set trips the contract validators, surfaced as a PlannerError by the caller."""
+    if constraints.custom_code_bundle_ref_id is None:
+        return None
+    return CustomModelCodeSpec(
+        code_bundle_ref=Ref(
+            id=constraints.custom_code_bundle_ref_id,
+            hash=HashRef(value=constraints.custom_code_bundle_ref_sha256),
+        ),
+        entry_symbol=constraints.custom_code_entry_symbol or "",
+        interface_version=constraints.custom_code_interface_version,  # type: ignore[arg-type]
+        vetting_ref=Ref(
+            id=constraints.custom_code_vetting_ref_id or "",
+            hash=HashRef(value=constraints.custom_code_vetting_ref_sha256),
+        ),
+        vetting_verdict="admitted",
+    )
+
+
+def _pretraining_init_spec(constraints: PlannerConstraints) -> ModelInitializationSpec:
+    """Lower the operator's init knobs into a sealed :class:`ModelInitializationSpec`, fail-closed with a
+    clean :class:`PlannerError` (never a raw pydantic error) so missing intent surfaces, not hides."""
+    try:
+        if constraints.init_mode == "random":
+            if constraints.architecture_ref_id is None or constraints.architecture_ref_sha256 is None:
+                raise PlannerError("random-init pretraining requires an architecture ref (id + sha256)")
+            # A from-scratch model sizes its embedding to its tokenizer: default the model vocab to the
+            # trained tokenizer's vocab when the operator does not pin one explicitly (the config seal
+            # then enforces they agree).
+            vocab_size = constraints.init_vocab_size
+            if vocab_size is None and constraints.tokenizer_source_mode == "train":
+                vocab_size = constraints.tokenizer_vocab_size
+            if vocab_size is None:
+                raise PlannerError(
+                    "random-init pretraining requires init_vocab_size (or a trained tokenizer vocab_size)"
+                )
+            return ModelInitializationSpec(
+                mode="random",
+                architecture_ref=Ref(
+                    id=constraints.architecture_ref_id,
+                    hash=HashRef(value=constraints.architecture_ref_sha256),
+                ),
+                vocab_size=vocab_size,
+                init_seed=(
+                    constraints.init_seed if constraints.init_seed is not None else constraints.seed
+                ),
+                initializer_range=constraints.init_initializer_range,
+                custom_code=_custom_code_spec(constraints),
+            )
+        if (
+            constraints.source_checkpoint_ref_id is None
+            or constraints.source_checkpoint_ref_sha256 is None
+        ):
+            raise PlannerError("continued pretraining requires a source checkpoint ref (id + sha256)")
+        return ModelInitializationSpec(
+            mode="continued",
+            source_checkpoint_ref=Ref(
+                id=constraints.source_checkpoint_ref_id,
+                hash=HashRef(value=constraints.source_checkpoint_ref_sha256),
+            ),
+        )
+    except ValidationError as exc:
+        raise PlannerError(f"the pretraining model initialization is invalid: {exc}") from exc
+
+
+def _tokenizer_source_spec(constraints: PlannerConstraints) -> TokenizerSourceSpec:
+    """Lower the operator's tokenizer knobs into a sealed :class:`TokenizerSourceSpec`, fail-closed."""
+    # model_validate (a dict) rather than the typed constructor: the operator's raw CLI strings are
+    # validated against the sealed Literals at RUNTIME (fail-closed below), not asserted by the type
+    # checker over an untrusted str.
+    try:
+        if constraints.tokenizer_source_mode == "train":
+            return TokenizerSourceSpec.model_validate(
+                {
+                    "mode": "train",
+                    "algorithm": constraints.tokenizer_algorithm,
+                    "vocab_size": constraints.tokenizer_vocab_size,
+                    "special_tokens": (
+                        list(constraints.tokenizer_special_tokens)
+                        if constraints.tokenizer_special_tokens is not None
+                        else None
+                    ),
+                    "min_frequency": constraints.tokenizer_min_frequency,
+                }
+            )
+        return TokenizerSourceSpec.model_validate(
+            {
+                "mode": constraints.tokenizer_source_mode,
+                "tokenizer_content_sha256": constraints.tokenizer_content_sha256,
+                "tokenizer_location": constraints.tokenizer_location,
+            }
+        )
+    except ValidationError as exc:
+        raise PlannerError(f"the pretraining tokenizer source is invalid: {exc}") from exc
+
+
+def _build_pretraining_plan(
+    *,
+    profile: EnvironmentProfile,
+    capabilities: CapabilityReport,
+    constraints: PlannerConstraints,
+    plan_id: str,
+    environment_ref: Ref | None,
+    physical_execution: PhysicalExecutionSpec | None,
+    pretraining_data: PretrainingDataPolicy | None,
+    now: str | None,
+) -> RunPlan:
+    """Lower a from-scratch / continued PRETRAINING request into a sealed RunPlan carrying a
+    :class:`ResolvedPretrainingExecutionConfiguration`. FULL-PARAMETER (no adapter, no 4-bit base, no
+    single dataset file): the corpus is the sharded :class:`PretrainingDataPolicy`, the model an init
+    spec, the tokenizer a source spec. Admitted at planning and, once the 'pretraining' variant is
+    workload_verified for the backend, executed by the first-party PretrainingRunner lane through
+    platform-run. Lives OUTSIDE the SFT/DPO ``build_run_plan`` body so the byte-locked SFT seal path
+    stays byte-identical."""
+    if pretraining_data is None:
+        raise PlannerError(
+            "a pretraining plan requires a corpus (a PretrainingDataPolicy of content-hashed shards)"
+        )
+    if constraints.init_mode not in {"random", "continued"}:
+        raise PlannerError("pretraining requires init_mode 'random' or 'continued'")
+    if constraints.tokenizer_source_mode not in {"train", "import", "freeze"}:
+        raise PlannerError("pretraining requires tokenizer_source 'train', 'import', or 'freeze'")
+
+    effective = capabilities.effective_capabilities
+    if capabilities.environment_ref.id != profile.environment_signature:
+        raise PlannerError(
+            "capability report environment does not match the profiled execution environment"
+        )
+    proven_precisions = {p.value for p in effective.precision_modes} if effective else set()
+    proven_attn = {a.value for a in effective.attention_impls} if effective else set()
+    proven_kernels = {item.value for item in effective.attention_kernels} if effective else set()
+    capability_ref = capability_report_ref_for(capabilities)
+    cc_major = _max_cc_major(profile)
+
+    if capabilities.readiness == "ready":
+        cpu_toy = False
+    elif capabilities.readiness == "cpu_toy_only":
+        if not constraints.allow_cpu_toy:
+            raise PlannerError(
+                "only the CPU-toy smoke path is available on this host; pass allow_cpu_toy to plan it"
+            )
+        cpu_toy = True
+    else:  # not_ready
+        missing = ", ".join(capabilities.missing_packages) or "the training runtime"
+        raise PlannerError(f"the environment is not ready for training (missing: {missing})")
+
+    if cpu_toy:
+        if "fp32" not in proven_precisions:
+            raise PlannerError("the CPU-toy path lacks a passing FP32 training-step probe")
+        precision = "fp32"
+        attention_backend = AttentionImpl.eager.value
+        attention_policy = _attention_policy(
+            kernel=AttentionKernel.eager,
+            kernel_probe_ref=capability_ref,
+            evidence_kind="cpu_reference",
+        )
+    else:
+        if "bf16" in proven_precisions:
+            precision = "bf16"
+        elif "fp32" in proven_precisions:
+            precision = "fp32"
+        else:
+            raise PlannerError("no functionally proven training precision is available")
+        attention_backend, attention_policy = _resolve_attention(
+            constraints.attention_backend,
+            cc_major,
+            proven_attn,
+            proven_kernels,
+            os_value=profile.host.os,
+            evidence_ref=capability_ref,
+            flash_attention_package=next(
+                (
+                    item
+                    for item in capabilities.installed_packages
+                    if item.name == "flash-attn" and item.version is not None
+                ),
+                None,
+            ),
+        )
+
+    backend = get_backend(constraints.backend)
+    if backend is None:
+        raise PlannerError(f"unknown training backend '{constraints.backend}'")
+    resolved_physical = physical_execution or default_physical_execution(profile, cpu_toy=cpu_toy)
+    root_device = resolved_physical.resources[0].device_id
+    if root_device is None:
+        raise PlannerError("the current dense trainer requires one explicit compute device")
+    device_map = [DeviceMapEntry(module="", device="cpu" if root_device == "cpu:0" else root_device)]
+    resolved_environment_ref = environment_ref or Ref(
+        id=profile.environment_signature,
+        hash=HashRef(value=profile.environment_signature),
+    )
+    if resolved_environment_ref.hash is None or resolved_environment_ref.hash.value is None:
+        raise PlannerError("the execution environment must be hash-pinned")
+
+    token_target = constraints.supervised_token_accumulation_target or max(
+        1,
+        constraints.sequence_len
+        * constraints.micro_batch_size
+        * constraints.gradient_accumulation_steps,
+    )
+    optimizer = {
+        "impl": constraints.optim,
+        "learning_rate": constraints.learning_rate,
+        "weight_decay": constraints.weight_decay,
+        "adam_beta1": constraints.adam_beta1,
+        "adam_beta2": constraints.adam_beta2,
+        "adam_epsilon": constraints.adam_epsilon,
+        "max_grad_norm": constraints.max_grad_norm,
+        "lr_scheduler": constraints.lr_scheduler,
+        "warmup_ratio": constraints.warmup_ratio,
+    }
+    # Pretraining PACKS documents (concat-and-split with boundaries per the PretrainingDataPolicy).
+    sequence = {
+        "max_sequence_len": constraints.sequence_len,
+        "packing": True,
+        "truncation_allowed": constraints.truncation_allowed,
+    }
+    batching = {
+        "micro_batch_size": constraints.micro_batch_size,
+        "supervised_token_accumulation_target": token_target,
+        "fallback_grad_accumulation_steps": constraints.gradient_accumulation_steps,
+    }
+    # Full-parameter pretraining checkpoints the WHOLE model (never adapter-only). Cadence lives on the
+    # PretrainingDataPolicy's later worker slice; the plan seals a checkpoint-free policy for now.
+    checkpoint_policy = {
+        "impl": "full_state",
+        "cadence_optimizer_steps": None,
+        "keep_last": None,
+        "reload_verify": False,
+    }
+    schedule = TrainingSchedule(
+        max_steps=(constraints.max_steps or 3) if cpu_toy else constraints.max_steps,
+        num_train_epochs=(
+            None if cpu_toy or constraints.max_steps is not None else constraints.num_train_epochs
+        ),
+    )
+    trainer_interface = _trainer_interface(
+        capabilities,
+        cpu_toy=cpu_toy,
+        quantized=False,
+        use_liger=constraints.use_liger,
+        use_max_steps=schedule.max_steps is not None,
+        require_package_integrity=environment_ref is not None,
+        external_attention_package=attention_policy.flash_attention_package,
+    )
+    loss_impl = "liger_fused_ce" if constraints.use_liger else "cross_entropy"
+
+    continued = constraints.init_mode == "continued"
+    objective = get_objective("continued_pretraining" if continued else "pretraining")
+    if objective is None:  # pragma: no cover - sealed built-in catalog invariant
+        raise PlannerError("the pretraining objective is absent from the sealed registry")
+    objective_ref = Ref(id=objective.objective_id, hash=HashRef(value=objective.objective_hash))
+    init = _pretraining_init_spec(constraints)
+    tokenizer_source = _tokenizer_source_spec(constraints)
+    # Full-parameter pretraining emits a full model, never a PEFT adapter.
+    export_format = (
+        constraints.export_format
+        if constraints.export_format != ExportFormat.adapter_peft.value
+        else ExportFormat.merged_safetensors.value
+    )
+
+    try:
+        draft_config = ResolvedPretrainingExecutionConfiguration.model_validate(
+            {
+                "configuration_id": f"{plan_id}-execution",
+                "configuration_hash": "0" * 64,
+                "backend_ref": backend_manifest_ref(backend).model_dump(mode="json"),
+                "environment_ref": resolved_environment_ref.model_dump(mode="json"),
+                "environment_binding": (
+                    "managed_lock" if environment_ref is not None else "profile_snapshot"
+                ),
+                "capability_report_ref": capability_ref.model_dump(mode="json"),
+                "objective_ref": objective_ref.model_dump(mode="json"),
+                "runtime_mode": "cpu_toy" if cpu_toy else "training",
+                "init": init.model_dump(mode="json"),
+                "tokenizer_source": tokenizer_source.model_dump(mode="json"),
+                "precision": _precision_policy(precision, "none", constraints.optim),
+                "attention": attention_policy.model_dump(mode="json"),
+                "device_map": [item.model_dump(mode="json") for item in device_map],
+                "optimizer": optimizer,
+                "loss_impl": loss_impl,
+                "sequence": sequence,
+                "batching": batching,
+                "checkpoint_policy": checkpoint_policy,
+                "schedule": schedule.model_dump(mode="json"),
+                "data": pretraining_data.model_dump(mode="json"),
+                "trainer_interface": trainer_interface.model_dump(mode="json"),
+                "export_format": export_format,
+                "gradient_checkpointing": True,
+                "output_dir": constraints.output_dir,
+                "seed": constraints.seed,
+                "data_seed": pretraining_data.data_seed,
+            }
+        )
+    except ValidationError as exc:
+        raise PlannerError(f"the resolved pretraining execution configuration is invalid: {exc}") from exc
+    pretraining_execution = draft_config.model_copy(
+        update={"configuration_hash": pretraining_execution_configuration_hash_for(draft_config)}
+    )
+
+    # The RunPlan's single dataset_ref is a hash-pinned handle over the whole corpus (the real shard set
+    # + its per-shard digests live in the sealed PretrainingDataPolicy on the execution config).
+    corpus_ref = Ref(
+        id=f"corpus:{plan_id}",
+        hash=HashRef(value=canonical_sha256(pretraining_data.model_dump(mode="json"))),
+    )
+    body: dict[str, Any] = {
+        "plan_id": plan_id,
+        "plan_hash": "0" * 64,
+        "backend_ref": backend_manifest_ref(backend).model_dump(mode="json"),
+        "environment_ref": resolved_environment_ref.model_dump(mode="json"),
+        "dataset_ref": corpus_ref.model_dump(mode="json"),
+        "task_type": "pretraining",
+        "base_model": constraints.base_model,
+        "precision": precision,
+        "quantization": "none",
+        "adapter": {"method": "full_finetune"},
+        "optimizer": optimizer,
+        "loss_impl": loss_impl,
+        "attention_backend": attention_backend,
+        "sequence": sequence,
+        "batching": batching,
+        "checkpoint_policy": checkpoint_policy,
+        "gradient_checkpointing": True,
+        "export": {"format": export_format, "output_dir": constraints.output_dir},
+        "seed": constraints.seed,
+        "training_config_snapshot": {},
+        "resolved_execution": None,
+        "resolved_preference_execution": None,
+        "resolved_pretraining_execution": pretraining_execution.model_dump(mode="json"),
+        "physical_execution": resolved_physical.model_dump(mode="json"),
+    }
+    try:
+        draft = RunPlan.model_validate({**body, "created_at": None})
+    except ValidationError as exc:
+        raise PlannerError(f"the resolved pretraining plan is invalid: {exc}") from exc
+    plan_hash = compute_plan_hash(run_plan_hash_payload(draft))
+    return draft.model_copy(update={"plan_hash": plan_hash, "created_at": now or _now_iso()})
+
+
 def build_run_plan(
     *,
     profile: EnvironmentProfile,
@@ -823,6 +1324,8 @@ def build_run_plan(
     storage_profile: StorageProfile | None = None,
     allow_marginal_storage: bool = False,
     allow_unknown_storage: bool = False,
+    project_dir: Path | str | None = None,
+    pretraining_data: PretrainingDataPolicy | None = None,
     now: str | None = None,
 ) -> RunPlan:
     """Resolve one immutable, hash-sealed :class:`RunPlan` from the host profile + proven
@@ -835,6 +1338,7 @@ def build_run_plan(
     # falls back to dense_qlora_sft. The per-variant executable seal + worker land with each variant (S2+).
     from corpus_studio.platform.execution_variants import (  # noqa: PLC0415
         ExecutionVariantRefused,
+        ExecutionVariantSupport,
         admit_task_execution_variant,
         reference_execution_variants,
     )
@@ -849,18 +1353,60 @@ def build_run_plan(
     # differ). The caller names it via constraints.objective_id; admission maps only the built ones
     # (dpo_qlora -> preference_dpo, declared at contract_validated so it is refused at execution until
     # the worker lands) and refuses the rest fail-closed. SFT/pretraining resolve by task alone.
+    # A preference OBJECTIVE requires the preference TASK. Without this guard a plan that names a
+    # preference objective (e.g. dpo_qlora) while leaving task_type=sft would silently lower to a dense-SFT
+    # run - build_run_plan ignores objective_id for non-preference tasks - retaining a misleading DPO
+    # identity in the resolution. Refuse the contradiction fail-closed.
+    if constraints.objective_id is not None and constraints.task_type != TaskType.preference.value:
+        named_objective = get_objective(constraints.objective_id)
+        if named_objective is not None and named_objective.kind == ObjectiveKind.preference_optimization:
+            raise PlannerError(
+                f"objective '{constraints.objective_id}' is a preference objective but task_type is "
+                f"'{constraints.task_type}' - a preference objective requires task_type='preference'"
+            )
     admission_objective_id = (
         constraints.objective_id if constraints.task_type == TaskType.preference.value else None
     )
+    # QLoRA-DPO is admitted AT PLANNING (contract_validated) so the resolver can seal a reviewable
+    # ResolvedPreferenceExecutionConfiguration; it is then refused AT EXECUTION by the runner (the
+    # DPOTrainer branch + workload-verified evidence + wheel are the gated milestone). Every other shape
+    # keeps the workload_verified bar - MoE / non-DPO preference / unbuilt objectives stay refused here.
+    is_preference_dpo = (
+        constraints.task_type == TaskType.preference.value
+        and admission_objective_id == "dpo_qlora"
+        and not plan_targets_moe
+    )
+    # Pretraining (from-scratch / continued) resolves by task alone (no objective_id); its dedicated
+    # builder seals a reviewable config, and once the 'pretraining' variant is workload_verified for the
+    # backend the first-party PretrainingRunner lane executes it. A MoE topology routes to the
+    # declared-only 'moe' shape and stays refused here.
+    is_pretraining = constraints.task_type == TaskType.pretraining.value and not plan_targets_moe
     try:
         admit_task_execution_variant(
             TaskType(constraints.task_type),
             is_moe=plan_targets_moe,
             objective_id=admission_objective_id,
             declared_variants=reference_execution_variants(),
+            required_support=(
+                ExecutionVariantSupport.contract_validated
+                if (is_preference_dpo or is_pretraining)
+                else ExecutionVariantSupport.workload_verified
+            ),
         )
     except ExecutionVariantRefused as exc:
         raise PlannerError(str(exc)) from exc
+    # Pretraining is lowered by its OWN builder so the byte-locked SFT/DPO body below stays untouched.
+    if is_pretraining:
+        return _build_pretraining_plan(
+            profile=profile,
+            capabilities=capabilities,
+            constraints=constraints,
+            plan_id=plan_id,
+            environment_ref=environment_ref,
+            physical_execution=physical_execution,
+            pretraining_data=pretraining_data,
+            now=now,
+        )
     _require_enum(constraints.export_format, ExportFormat, "export_format")
     _require_enum(constraints.optim, Optimizer, "optimizer")
     _require_enum(constraints.allocator_policy, AllocatorPolicy, "allocator_policy")
@@ -1043,6 +1589,9 @@ def build_run_plan(
         )
     device = "cpu" if cpu_toy else ("cuda" if profile.gpus else "cpu")
     host_os = profile.host.os.value
+    # A preference plan's loss IS the DPO loss - fit-check that, not the SFT loss_impl, so the backend
+    # capability evidence reflects the plan the resolver actually seals.
+    fit_loss = "dpo" if is_preference_dpo else loss_impl
     unmet = unmet_requirements(
         backend,
         os=host_os,
@@ -1054,11 +1603,22 @@ def build_run_plan(
         attention=attention_backend,
         attention_kernel=attention_policy.effective_backend_required.value,
         optimizer=constraints.optim,
-        loss=loss_impl,
+        loss=fit_loss,
         checkpoint=checkpoint_impl,
         export_format=constraints.export_format,
         execution_contract_version=_EXECUTION_CONTRACT_VERSION,
     )
+    if is_preference_dpo:
+        # The corpus_studio manifest cannot yet DECLARE the preference task OR the dpo loss: both are
+        # content-hashed into backend_manifest_ref, which is sealed into the byte-locked SFT configuration,
+        # so declaring either is coupled to a new manifest + milestone wheel. A preference+dpo_qlora plan is
+        # therefore admitted at planning despite exactly those not-yet-declarable reasons (every OTHER
+        # fit-check still applies), and the runner refuses it at execution until the wheel promotes it.
+        not_yet_declarable = {
+            f"task '{constraints.task_type}' not supported",
+            f"loss '{fit_loss}' not supported",
+        }
+        unmet = [reason for reason in unmet if reason not in not_yet_declarable]
     if unmet:
         alternatives = [
             b.backend_id
@@ -1232,50 +1792,70 @@ def build_run_plan(
     device_map = [
         DeviceMapEntry(module="", device="cpu" if root_device == "cpu:0" else root_device)
     ]
-    try:
-        execution_draft = ResolvedExecutionConfiguration.model_validate(
-            {
-            "configuration_id": f"{plan_id}-execution",
-            "configuration_hash": "0" * 64,
-            "backend_ref": backend_manifest_ref(backend).model_dump(mode="json"),
-            "environment_ref": resolved_environment_ref.model_dump(mode="json"),
-            "environment_binding": (
-                "managed_lock" if environment_ref is not None else "profile_snapshot"
-            ),
-            "capability_report_ref": capability_ref.model_dump(mode="json"),
-            "inputs": execution_inputs.model_dump(mode="json"),
-            "objective_ref": objective_ref.model_dump(mode="json"),
-            "runtime_mode": "cpu_toy" if cpu_toy else "training",
-            "precision": _precision_policy(precision, quantization, constraints.optim),
-            "attention": attention_policy.model_dump(mode="json"),
-            "device_map": [item.model_dump(mode="json") for item in device_map],
-            "adapter": adapter,
-            "optimizer": optimizer,
-            "loss_impl": loss_impl,
-            "sequence": sequence,
-            "batching": batching,
-            "checkpoint_policy": checkpoint_policy,
-            "schedule": schedule.model_dump(mode="json"),
-            "data": data_policy.model_dump(mode="json"),
-            "trainer_interface": trainer_interface.model_dump(mode="json"),
-            "export_format": constraints.export_format,
-            "trust_remote_code": False,
-            "use_safetensors": True,
-            "bnb_4bit_use_double_quant": quantization != "none",
-            "adapter_task_type": "CAUSAL_LM",
-            "save_strategy": "no",
-            "gradient_checkpointing": True,
-            "output_dir": constraints.output_dir,
-            "output_layout": "run_scoped_v1",
-            "seed": constraints.seed,
-            "data_seed": constraints.data_seed if constraints.data_seed is not None else constraints.seed,
-            }
+    # Shared execution sub-specs common to the SFT and preference(DPO) seals. Assembling them once keeps
+    # the two resolvers consistent by construction; the SFT seal stays byte-identical because its
+    # configuration_hash is over the validated MODEL (field values), not this input dict's shape.
+    shared_fields: dict[str, Any] = {
+        "configuration_id": f"{plan_id}-execution",
+        "backend_ref": backend_manifest_ref(backend).model_dump(mode="json"),
+        "environment_ref": resolved_environment_ref.model_dump(mode="json"),
+        "environment_binding": (
+            "managed_lock" if environment_ref is not None else "profile_snapshot"
+        ),
+        "capability_report_ref": capability_ref.model_dump(mode="json"),
+        "inputs": execution_inputs.model_dump(mode="json"),
+        "runtime_mode": "cpu_toy" if cpu_toy else "training",
+        "precision": _precision_policy(precision, quantization, constraints.optim),
+        "attention": attention_policy.model_dump(mode="json"),
+        "device_map": [item.model_dump(mode="json") for item in device_map],
+        "adapter": adapter,
+        "optimizer": optimizer,
+        "sequence": sequence,
+        "batching": batching,
+        "checkpoint_policy": checkpoint_policy,
+        "schedule": schedule.model_dump(mode="json"),
+        "trainer_interface": trainer_interface.model_dump(mode="json"),
+        "export_format": constraints.export_format,
+        "trust_remote_code": False,
+        "use_safetensors": True,
+        "bnb_4bit_use_double_quant": quantization != "none",
+        "adapter_task_type": "CAUSAL_LM",
+        "save_strategy": "no",
+        "gradient_checkpointing": True,
+        "output_dir": constraints.output_dir,
+        "output_layout": "run_scoped_v1",
+        "seed": constraints.seed,
+        "data_seed": constraints.data_seed if constraints.data_seed is not None else constraints.seed,
+    }
+    resolved_execution_field: dict[str, Any] | None = None
+    resolved_preference_field: dict[str, Any] | None = None
+    if is_preference_dpo:
+        preference_execution = _resolve_preference_execution(
+            plan_id=plan_id,
+            shared_fields=shared_fields,
+            constraints=constraints,
+            resolved_physical=resolved_physical,
+            chat_template_sha256=constraints.chat_template_sha256,
+            project_dir=project_dir,
         )
-    except ValidationError as exc:
-        raise PlannerError(f"the resolved execution configuration is invalid: {exc}") from exc
-    execution = execution_draft.model_copy(
-        update={"configuration_hash": execution_configuration_hash_for(execution_draft)}
-    )
+        resolved_preference_field = preference_execution.model_dump(mode="json")
+    else:
+        try:
+            execution_draft = ResolvedExecutionConfiguration.model_validate(
+                {
+                    **shared_fields,
+                    "configuration_hash": "0" * 64,
+                    "objective_ref": objective_ref.model_dump(mode="json"),
+                    "loss_impl": loss_impl,
+                    "data": data_policy.model_dump(mode="json"),
+                }
+            )
+        except ValidationError as exc:
+            raise PlannerError(f"the resolved execution configuration is invalid: {exc}") from exc
+        execution = execution_draft.model_copy(
+            update={"configuration_hash": execution_configuration_hash_for(execution_draft)}
+        )
+        resolved_execution_field = execution.model_dump(mode="json")
 
     body: dict[str, Any] = {
         "plan_id": plan_id,
@@ -1289,7 +1869,9 @@ def build_run_plan(
         "quantization": quantization,
         "adapter": adapter,
         "optimizer": optimizer,
-        "loss_impl": loss_impl,
+        # A preference plan's loss summary IS the DPO loss (the supervised loss_impl would contradict the
+        # preference seal the runner cross-checks); the SFT loss stays on the dense path.
+        "loss_impl": "dpo" if is_preference_dpo else loss_impl,
         "attention_backend": attention_backend,
         "sequence": sequence,
         "batching": batching,
@@ -1302,7 +1884,8 @@ def build_run_plan(
         "export": {"format": constraints.export_format, "output_dir": constraints.output_dir},
         "seed": constraints.seed,
         "training_config_snapshot": {},
-        "resolved_execution": execution.model_dump(mode="json"),
+        "resolved_execution": resolved_execution_field,
+        "resolved_preference_execution": resolved_preference_field,
         "parameter_accounting_ref": (
             parameter_accounting_ref.model_dump(mode="json")
             if parameter_accounting_ref is not None

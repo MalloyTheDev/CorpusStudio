@@ -1,7 +1,15 @@
 # Pretraining Architecture
 
-**Status: architecture proposal for review. Docs-only. No pretraining code, dependency, model, dataset,
-GPU, or corpus action is part of this document.** Part of
+**Status: LARGELY IMPLEMENTED (2026-08-06).** From-scratch full-parameter pretraining is now
+`workload_verified` and executable on the first-party backend: `create-model` composes an architecture
+config, `platform-plan --task-type pretraining` seals the plan, the packed-corpus + train-from-corpus
+tokenizer + `PretrainingDataPolicy` primitives ship, and `run_pretraining` (via the first-party
+`PretrainingRunner`) trains a random-init model end to end (a 124M GPT-2 on the RTX 5070; see
+[`HOST_STATE.md`](HOST_STATE.md)). This document is the ORIGINAL architecture proposal: the support table
+and Sections 2-3 below are stale wherever they still mark shipped work "planned / no code" (the
+`PretrainingDataPolicy`, packed corpus, train **and** import tokenizer, and the dense pretraining run have
+all shipped). Treat [`CURRENT_STATE.md`](CURRENT_STATE.md) as authoritative for current status;
+continued-pretraining from a checkpoint is the main remaining item. Part of
 [`TRAINING_SYSTEMS_ARCHITECTURE.md`](TRAINING_SYSTEMS_ARCHITECTURE.md).
 
 Pretraining (from-scratch and continued) is a **first-class objective**, not an SFT config with a
@@ -27,9 +35,9 @@ Both are content-addressed and recorded in the plan's immutable inputs.
 Pretraining may **train** a tokenizer, not just consume one. Three explicit modes, each frozen before any
 token is consumed (a tokenizer change invalidates all downstream token accounting):
 
-- **train** - corpus sample -> algorithm/vocab-size/special-tokens -> new tokenizer; sealed by hash. A
-  **new** subsystem: no tokenizer-training code exists today (import and freeze are the shipped modes;
-  "freeze" is import-then-pin).
+- **train** - corpus sample -> algorithm/vocab-size/special-tokens -> new tokenizer; sealed by hash.
+  **Shipped**: `pretraining_trainer.py` trains a corpus BPE tokenizer from the packed corpus (import is
+  also shipped; "freeze" is import-then-pin).
 - **import** - an existing tokenizer bound by `tokenizer_content_sha256` (as SFT does today).
 - **freeze** - the exact tokenizer identity that produced the token stream, pinned into the plan and
   every checkpoint (`CheckpointBoundIdentities.tokenizer_ref` already exists).
@@ -117,12 +125,14 @@ pretraining run - it remains a SEALED_RESEARCH-only gate (see
 
 | Capability | Support level |
 |---|---|
-| `ObjectiveKind.pretraining` family + label/mask/update semantics | contract shipped (`DECLARED`) |
-| `PretrainingDataPolicy` (shards/streaming/mixture/boundaries/budget) | **planned (P1)** |
+| `ObjectiveKind.pretraining` family + label/mask/update semantics | shipped; the variant is now `workload_verified` |
+| `PretrainingDataPolicy` (shards/streaming/mixture/boundaries/budget) | contract + packed single-corpus consumption shipped; sharded/streaming/mixture is future |
 | Data-cursor checkpoint extension | **planned (P1)** |
-| Tokenizer train/import/freeze | import shipped; train **planned** |
-| Dense small-model pretraining run | **planned (P1)**, gated by `WORKLOAD_VERIFIED` |
+| Tokenizer train/import/freeze | train **and** import shipped; freeze = import-then-pin |
+| Dense small-model pretraining run | **`workload_verified`** (124M GPT-2 on the RTX 5070) |
 | Continued pretraining | **planned (P2)** |
-| Consumed-data + validation-loss evidence | telemetry suite shipped; pretraining wiring **planned** |
+| Consumed-data + validation-loss evidence | run + loss + execution-integrity evidence shipped; per-shard consumed-data + held-out validation-loss is future |
 
-No pretraining workload is claimed until it is workload-verified on real hardware.
+The dense from-scratch pretraining run is now workload-verified on real hardware (124M GPT-2, RTX 5070);
+the sharded/streaming-corpus, data-cursor resume, and per-shard/validation-loss evidence items above remain
+future work.

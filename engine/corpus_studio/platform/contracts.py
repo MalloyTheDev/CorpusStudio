@@ -4174,6 +4174,373 @@ class ResolvedPreferenceExecutionConfiguration(ContractModel):
         return self
 
 
+class CustomModelCodeSpec(ContractModel):
+    """A hash-pinned, ADMITTED local custom-block bundle for a from-scratch run - the mode-3 'your own
+    model code' path (your own IMPLEMENTATION, the only not-borrowed mode). It seals WHICH exact bytes
+    (``code_bundle_ref``) an ADMITTED :class:`ModelCodeVettingReport` (``vetting_ref``) screened, plus the
+    entry class + interface. This path NEVER uses HF ``trust_remote_code`` (``Literal[False]``); the
+    module is loaded locally, by path, from the pinned bundle.
+
+    Sealing this admits the design AT PLANNING; a static screen is not a safety proof, so EXECUTION stays
+    gated behind the (later) worker sandbox exactly as pretraining itself is refused at the worker today.
+    Both refs must be hash-pinned so admission binds to specific bytes and cannot silently re-point."""
+
+    code_bundle_ref: Ref
+    entry_symbol: str = Field(min_length=1)
+    interface_version: Literal["custom_decoder_v1"]
+    vetting_ref: Ref
+    vetting_verdict: Literal["admitted"]
+    trust_remote_code: Literal[False] = False
+
+    @model_validator(mode="after")
+    def _validate_custom_code(self) -> CustomModelCodeSpec:
+        if not _is_pinned_ref(self.code_bundle_ref):
+            raise ValueError("custom code requires a hash-pinned code_bundle_ref")
+        if not _is_pinned_ref(self.vetting_ref):
+            raise ValueError("custom code requires a hash-pinned vetting_ref")
+        return self
+
+
+class ModelInitializationSpec(ContractModel):
+    """How a PRETRAINING run instantiates its model. From-scratch has NO source weights: it builds a
+    model from an architecture config with reproducible random init (the worker's ``from_config`` path,
+    never ``from_pretrained``), pinned by ``architecture_ref`` + ``vocab_size`` + ``init_seed``.
+    Continued pretraining loads a hash-pinned ``source_checkpoint_ref`` and states explicitly what is
+    reset (optimizer / lr scheduler / data cursor) vs carried. Dense/MoE-safe: this seals init INTENT
+    and assumes no dense-specific model shape."""
+
+    mode: Literal["random", "continued"]
+    # random init: the architecture config identity + the exact vocab/context the init reproduces.
+    architecture_ref: Ref | None = None
+    vocab_size: int | None = Field(default=None, ge=1)
+    max_position_embeddings: int | None = Field(default=None, ge=1)
+    init_seed: int | None = Field(default=None, ge=0)
+    initializer_range: float | None = Field(default=None, gt=0)
+    # random init, mode-3 only: an ADMITTED custom-block bundle (else the architecture is a known family
+    # or a composed-on-standard-blocks design that needs no custom code).
+    custom_code: CustomModelCodeSpec | None = None
+    # continued init: the exact source checkpoint + what carries vs resets.
+    source_checkpoint_ref: Ref | None = None
+    reset_optimizer: bool = True
+    reset_lr_scheduler: bool = True
+    reset_data_cursor: bool = True
+
+    @model_validator(mode="after")
+    def _validate_init(self) -> ModelInitializationSpec:
+        if self.mode == "random":
+            if self.architecture_ref is None or not _is_pinned_ref(self.architecture_ref):
+                raise ValueError("random init requires a hash-pinned architecture_ref")
+            if self.vocab_size is None or self.init_seed is None:
+                raise ValueError(
+                    "random init requires vocab_size and init_seed so the initialization reproduces"
+                )
+            if self.source_checkpoint_ref is not None:
+                raise ValueError("random init must not name a source checkpoint")
+        else:  # continued
+            if self.source_checkpoint_ref is None or not _is_pinned_ref(self.source_checkpoint_ref):
+                raise ValueError("continued init requires a hash-pinned source_checkpoint_ref")
+            if self.architecture_ref is not None:
+                raise ValueError("continued init derives its architecture from the checkpoint")
+            if self.custom_code is not None:
+                raise ValueError("continued init derives its architecture from the checkpoint (no custom code)")
+        return self
+
+
+class TokenizerSourceSpec(ContractModel):
+    """How the tokenizer is obtained, frozen by hash BEFORE any token is consumed (a tokenizer change
+    invalidates all downstream token accounting). ``train`` builds a NEW tokenizer from a corpus sample
+    (a new subsystem the worker slice implements); ``import`` / ``freeze`` pin an existing tokenizer by
+    its content digest exactly as the SFT path does today."""
+
+    mode: Literal["train", "import", "freeze"]
+    # train: the algorithm + vocab + special tokens the new tokenizer is built with.
+    algorithm: Literal["bpe", "unigram", "wordpiece"] | None = None
+    vocab_size: int | None = Field(default=None, ge=1)
+    special_tokens: list[str] | None = None
+    min_frequency: int | None = Field(default=None, ge=1)
+    # import / freeze: the exact tokenizer bytes (content digest) + WHERE the worker loads them from.
+    tokenizer_content_sha256: str | None = Field(default=None, pattern=SHA256_PATTERN)
+    tokenizer_location: str | None = Field(default=None, min_length=1)
+
+    @model_validator(mode="after")
+    def _validate_tokenizer_source(self) -> TokenizerSourceSpec:
+        if self.mode == "train":
+            if self.algorithm is None or self.vocab_size is None:
+                raise ValueError("training a tokenizer requires an algorithm and a vocab_size")
+            if not self.special_tokens:
+                raise ValueError(
+                    "a trained tokenizer must declare its special tokens (e.g. BOS/EOS/PAD/UNK)"
+                )
+            if len(set(self.special_tokens)) != len(self.special_tokens):
+                raise ValueError("special tokens must be unique")
+            if self.tokenizer_content_sha256 is not None or self.tokenizer_location is not None:
+                raise ValueError("a to-be-trained tokenizer has no pre-existing content digest or location")
+        else:  # import / freeze
+            if self.tokenizer_content_sha256 is None:
+                raise ValueError(
+                    f"an {self.mode} tokenizer requires a pinned tokenizer_content_sha256"
+                )
+            # Only import (bring-your-own) needs WHERE to load from; freeze reuses the checkpoint's
+            # tokenizer, so it carries the digest but no separate location.
+            if self.mode == "import" and self.tokenizer_location is None:
+                raise ValueError("an import tokenizer requires a tokenizer_location to load from")
+        return self
+
+
+class VettingFinding(ContractModel):
+    """A single finding from statically screening a custom-block bundle (nested in ModelCodeVettingReport,
+    not a root contract)."""
+
+    severity: Literal["error", "warning"]
+    code: str = Field(min_length=1)
+    message: str = Field(min_length=1)
+    lineno: int | None = Field(default=None, ge=1)
+
+
+class ModelCodeVettingReport(ContractModel):
+    """The recorded result of STATICALLY screening a local custom-block bundle - the auditable admission
+    token for the mode-3 'your own model code' path (your own IMPLEMENTATION, not a borrowed family nor a
+    composed-from-standard-blocks design).
+
+    Content-addressed evidence: it pins the exact bundle bytes it screened (``bundle_sha256``), so a plan
+    can bind admission to those bytes and nothing else. A static pre-screen is NECESSARY, NOT SUFFICIENT:
+    it executes nothing and does not prove the code safe - runtime containment is the (gated) worker
+    sandbox, and admission stays human-gated. This path never uses HF ``trust_remote_code`` (which stays
+    ``Literal[False]``); the module is loaded locally, by path, from the pinned bundle. ``verdict`` is
+    ``admitted`` iff there are no error-severity findings."""
+
+    contract_version: CONTRACT_VERSION_LITERAL = "1.0.0"
+    analyzer_version: str = Field(min_length=1)
+    bundle_sha256: str = Field(pattern=SHA256_PATTERN)
+    entry_symbol: str = Field(min_length=1)
+    interface_version: Literal["custom_decoder_v1"]
+    verdict: Literal["admitted", "rejected"]
+    findings: list[VettingFinding] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _validate_verdict_matches_findings(self) -> ModelCodeVettingReport:
+        # The verdict must be self-consistent with the findings so a report cannot claim "admitted" while
+        # carrying an error (or "rejected" with nothing to point at). This is a static screen, not a proof.
+        has_error = any(f.severity == "error" for f in self.findings)
+        if self.verdict == "admitted" and has_error:
+            raise ValueError("an admitted vetting report must carry no error-severity findings")
+        if self.verdict == "rejected" and not has_error:
+            raise ValueError("a rejected vetting report must carry at least one error-severity finding")
+        return self
+
+
+class SandboxPolicy(ContractModel):
+    """The OS-level containment policy for executing VETTED-BUT-UNTRUSTED custom-block code (mode 3, slice
+    3). A static screen is not a safety proof; this policy is the real blast-radius limit. Three invariants
+    are TYPE-LOCKED so an untrusted-code sandbox can never be weakened: no network, a read-only root, and
+    no-new-privileges. ``writable_paths`` are the only rw exceptions (the run-scoped output dir);
+    ``gpu_devices`` is an HONEST, documented hole - a GPU training block must reach the CUDA devices, so a
+    GPU workload is blast-radius-limited, NOT fully isolated. Enforced by the sandbox launcher; a host with
+    no usable backend refuses to run custom code (fail-closed). ``bubblewrap`` is the primary backend, with
+    an ``unshare`` + rlimits fallback that is weaker (no filesystem confinement)."""
+
+    contract_version: CONTRACT_VERSION_LITERAL = "1.0.0"
+    network_isolated: Literal[True] = True
+    readonly_root: Literal[True] = True
+    no_new_privileges: Literal[True] = True
+    writable_paths: list[str] = Field(default_factory=list)
+    gpu_devices: list[str] = Field(default_factory=list)
+    rlimit_address_space_bytes: int | None = Field(default=None, ge=1)
+    rlimit_cpu_seconds: int | None = Field(default=None, ge=1)
+    rlimit_open_files: int | None = Field(default=None, ge=1)
+    rlimit_processes: int | None = Field(default=None, ge=0)
+
+    @model_validator(mode="after")
+    def _validate_sandbox_policy(self) -> SandboxPolicy:
+        for path in (*self.writable_paths, *self.gpu_devices):
+            if not path or not path.startswith("/"):
+                raise ValueError(f"sandbox paths must be absolute, got {path!r}")
+        return self
+
+
+class ResolvedPretrainingExecutionConfiguration(ContractModel):
+    """The hash-sealed configuration for a from-scratch / continued PRETRAINING run - the sibling of
+    :class:`ResolvedExecutionConfiguration` for the ``pretraining`` execution variant.
+
+    The dense-QLoRA-SFT seal is byte-locked (its own ``configuration_hash`` AND a committed semantic
+    golden), so pretraining semantics live on THIS separate contract, never as new fields on the SFT
+    config. Unlike SFT/DPO this is a FULL-PARAMETER causal-LM run: there is no adapter, no 4-bit base,
+    and no single dataset file. The three input kinds are captured by method sub-specs rather than the
+    SFT-shaped ``ExecutionInputs`` (which fail-closed requires one local dataset file + a model-weights
+    binding, neither of which a from-scratch run has): the model by a :class:`ModelInitializationSpec`
+    (random from a config, or a continued checkpoint), the tokenizer by a :class:`TokenizerSourceSpec`,
+    and the corpus by the sharded :class:`PretrainingDataPolicy`.
+
+    Carried on ``RunPlan.resolved_pretraining_execution`` (a plan carries exactly one of the SFT /
+    preference / pretraining configs). What remains gated is EXECUTION: the pretraining worker loop
+    (``from_config`` init, corpus streaming, packing, per-rank cursor), a workload-verified run, and the
+    milestone wheel that promotes ``pretraining`` to ``workload_verified``. ``trainer_interface`` is an
+    execution-shaped placeholder until that worker seals the exact trainer surface."""
+
+    contract_version: CONTRACT_VERSION_LITERAL = "1.0.0"
+    configuration_id: str = Field(pattern=_ID)
+    configuration_hash: str = Field(pattern=SHA256_PATTERN)
+    backend_ref: Ref
+    environment_ref: Ref
+    environment_binding: Literal["profile_snapshot", "managed_lock"]
+    capability_report_ref: Ref
+    objective_ref: Ref
+    runtime_mode: Literal["training", "cpu_toy"]
+    init: ModelInitializationSpec
+    tokenizer_source: TokenizerSourceSpec
+    precision: PrecisionExecutionPolicy
+    attention: AttentionExecutionPolicy
+    device_map: list[DeviceMapEntry] = Field(min_length=1)
+    optimizer: OptimizerSpec
+    loss_impl: LossImpl
+    sequence: SequenceSpec
+    batching: BatchingSpec
+    checkpoint_policy: CheckpointPolicy
+    schedule: TrainingSchedule
+    data: PretrainingDataPolicy
+    trainer_interface: TrainerInterfacePolicy
+    export_format: ExportFormat
+    trust_remote_code: Literal[False] = False
+    use_safetensors: Literal[True] = True
+    gradient_checkpointing: bool = True
+    output_dir: str = Field(min_length=1)
+    output_layout: Literal["run_scoped_v1"] = "run_scoped_v1"
+    seed: int = Field(default=42, ge=0)
+    data_seed: int = Field(default=42, ge=0)
+
+    @model_validator(mode="after")
+    def _validate_pretraining_configuration(self) -> ResolvedPretrainingExecutionConfiguration:
+        # Shared safety invariants are enforced independently here rather than by refactoring the
+        # byte-locked SFT validator - the seals stay decoupled so a change to one can never perturb the
+        # other's hash.
+        for label, ref in (
+            ("backend_ref", self.backend_ref),
+            ("environment_ref", self.environment_ref),
+            ("capability_report_ref", self.capability_report_ref),
+            ("objective_ref", self.objective_ref),
+        ):
+            if not _is_pinned_ref(ref):
+                raise ValueError(f"resolved pretraining execution {label} must be hash-pinned")
+        if self.backend_ref.id != "corpus_studio":
+            raise ValueError(
+                "resolved pretraining execution requires the first-party corpus_studio worker backend"
+            )
+        # The only admitted pretraining shapes are the from-scratch + continued causal-LM objectives.
+        if self.objective_ref.id not in {"pretraining", "continued_pretraining"}:
+            raise ValueError(
+                "pretraining execution must bind the 'pretraining' or 'continued_pretraining' objective"
+            )
+        # Full-parameter next-token cross entropy - never a preference/DPO loss.
+        if self.loss_impl not in {
+            LossImpl.cross_entropy,
+            LossImpl.liger_fused_ce,
+            LossImpl.chunked_ce,
+        }:
+            raise ValueError(
+                "pretraining loss must be a next-token cross entropy "
+                "(cross_entropy / liger_fused_ce / chunked_ce)"
+            )
+        # init.mode and the objective must agree: 'continued' <-> continued_pretraining.
+        continued_objective = self.objective_ref.id == "continued_pretraining"
+        if (self.init.mode == "continued") != continued_objective:
+            raise ValueError(
+                "init.mode must match the objective: 'continued' <-> continued_pretraining, "
+                "'random' <-> pretraining"
+            )
+        # A continued run inherits the checkpoint's tokenizer; it cannot train a fresh one over an
+        # existing model (that would desync the embedding table from the vocabulary).
+        if self.init.mode == "continued" and self.tokenizer_source.mode == "train":
+            raise ValueError(
+                "continued pretraining cannot train a new tokenizer (it must match the checkpoint)"
+            )
+        # A from-scratch model's embedding must match the tokenizer it is trained with: a model vocab
+        # that disagrees with a freshly-trained tokenizer's vocab is a GUARANTEED embedding/vocab mismatch
+        # at train time. (import/freeze pin a tokenizer by hash - verified at load - so there is no count
+        # to compare there.)
+        if (
+            self.init.mode == "random"
+            and self.tokenizer_source.mode == "train"
+            and self.init.vocab_size != self.tokenizer_source.vocab_size
+        ):
+            raise ValueError(
+                "init.vocab_size must equal the trained tokenizer's vocab_size (the model embedding "
+                "must match its tokenizer)"
+            )
+        # Full-parameter: an unquantized base with coherent storage/forward dtypes (no 4-bit path).
+        if self.precision.quantized_storage_format != QuantizationMode.none:
+            raise ValueError("full-parameter pretraining does not quantize the base (no 4-bit)")
+        if self.precision.weight_storage_dtype is None:
+            raise ValueError("full-parameter pretraining must seal the weight storage dtype")
+        if self.precision.weight_storage_dtype != self.precision.forward_compute_dtype:
+            raise ValueError(
+                "full-parameter pretraining requires weight and forward dtypes to match"
+            )
+        # Exact gradient accumulation with a derived advisory token target (mirror the SFT/DPO trainer).
+        if self.batching.fallback_grad_accumulation_steps is None:
+            raise ValueError("the first-party trainer requires exact gradient accumulation")
+        expected_token_target = (
+            self.sequence.max_sequence_len
+            * self.batching.micro_batch_size
+            * self.batching.fallback_grad_accumulation_steps
+        )
+        if self.batching.supervised_token_accumulation_target != expected_token_target:
+            raise ValueError(
+                "the fixed-microbatch trainer requires its advisory token target to be derived exactly"
+            )
+        if self.sequence.buckets:
+            raise ValueError("the first-party trainer does not implement sequence buckets")
+        if any(
+            value is None
+            for value in (
+                self.optimizer.weight_decay,
+                self.optimizer.lr_scheduler,
+                self.optimizer.warmup_ratio,
+            )
+        ):
+            raise ValueError("the first-party trainer requires all optimizer defaults")
+        # Full-parameter pretraining checkpoints the whole model - never an adapter-only checkpoint - and
+        # emits a full model, never a PEFT adapter. (full_state / sharded / distcp keep it MoE-safe.)
+        if self.checkpoint_policy.impl == CheckpointImpl.adapter_only:
+            raise ValueError("full-parameter pretraining does not use adapter-only checkpoints")
+        if self.checkpoint_policy.cadence_seconds is not None:
+            raise ValueError("the first-party trainer does not implement time-based checkpoints")
+        if self.checkpoint_policy.reload_verify:
+            raise ValueError(
+                "the first-party trainer does not implement checkpoint reload verification"
+            )
+        if self.export_format == ExportFormat.adapter_peft:
+            raise ValueError("full-parameter pretraining emits a full model, not a PEFT adapter")
+        # One reproducible sample order: the data policy's seed and the top-level data seed must agree.
+        if self.data.data_seed != self.data_seed:
+            raise ValueError(
+                "the pretraining data_seed and the top-level data_seed must match for one "
+                "reproducible sample order"
+            )
+        # device_map well-formedness + cpu_toy placement (mirror the SFT/DPO rule).
+        keys = [item.module for item in self.device_map]
+        if keys != sorted(set(keys)) or "" not in keys:
+            raise ValueError("device_map must be sorted, unique, and bind the root module")
+        if self.runtime_mode == "cpu_toy" and self.device_map != [
+            DeviceMapEntry(module="", device="cpu")
+        ]:
+            raise ValueError("cpu_toy execution must bind the entire model to CPU")
+        # Environment binding identity (mirror the SFT/DPO rule).
+        environment_hash = self.environment_ref.hash
+        if environment_hash is None or environment_hash.value is None:
+            raise ValueError("environment_ref must be hash-pinned")
+        if (
+            self.environment_binding == "profile_snapshot"
+            and self.environment_ref.id != environment_hash.value
+        ):
+            raise ValueError("profile-snapshot environment identity must be its content hash")
+        if (
+            self.environment_binding == "managed_lock"
+            and self.environment_ref.id == environment_hash.value
+        ):
+            raise ValueError("managed-lock environment identity must name the managed environment")
+        return self
+
+
 class EvalSchedule(ContractModel):
     before_run: bool = True
     after_run: bool = True
@@ -4593,6 +4960,11 @@ class RunPlan(ContractModel):
     resolved_preference_execution: ResolvedPreferenceExecutionConfiguration | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
+    # The pretraining (from-scratch / continued) sibling seal. A plan carries exactly one of the SFT /
+    # preference / pretraining configs; excluded when unset so it never perturbs existing plan hashes.
+    resolved_pretraining_execution: ResolvedPretrainingExecutionConfiguration | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     # Pins the parameter evidence the planner consumed; it does not manufacture missing counts.
     parameter_accounting_ref: Ref | None = None
     # ``None`` identifies a legacy plan. The planner always emits a fully resolved spec for new plans.
@@ -4606,9 +4978,15 @@ class RunPlan(ContractModel):
             raise ValueError("parameter_accounting_ref must pin the sealed report hash")
         # A plan carries exactly one execution authority - checked before the per-config summary
         # cross-checks so a double-authority plan fails on THAT, not on an incidental summary mismatch.
-        if self.resolved_execution is not None and self.resolved_preference_execution is not None:
+        _execution_authorities = (
+            self.resolved_execution,
+            self.resolved_preference_execution,
+            self.resolved_pretraining_execution,
+        )
+        if sum(1 for authority in _execution_authorities if authority is not None) > 1:
             raise ValueError(
-                "a RunPlan carries either the SFT or the preference execution config, never both"
+                "a RunPlan carries exactly one execution config (SFT, preference, or pretraining), "
+                "never more than one"
             )
         execution = self.resolved_execution
         if execution is not None:
@@ -4728,6 +5106,72 @@ class RunPlan(ContractModel):
                 or preference.output_dir != self.export.output_dir
             ):
                 raise ValueError("resolved preference export format/output must match the RunPlan summary")
+        pretraining = self.resolved_pretraining_execution
+        if pretraining is not None:
+            expected_pretraining_hash = _canonical_contract_sha256(
+                pretraining.model_dump(mode="json", exclude={"configuration_hash"})
+            )
+            if pretraining.configuration_hash != expected_pretraining_hash:
+                raise ValueError(
+                    "resolved_pretraining_execution configuration_hash does not match its body"
+                )
+            if self.training_config_snapshot:
+                raise ValueError("new resolved plans cannot carry a second trainer-config authority")
+            if pretraining.backend_ref != self.backend_ref:
+                raise ValueError("resolved pretraining execution backend_ref must match the RunPlan")
+            if pretraining.environment_ref != self.environment_ref:
+                raise ValueError(
+                    "resolved pretraining execution environment_ref must match the RunPlan"
+                )
+            # A full-parameter from-scratch / continued plan has no adapter and no single dataset/model
+            # binding (the corpus is a shard set; the model is a config or a checkpoint), so the SFT-shaped
+            # dataset/model/adapter cross-checks do not apply - only the shared summary invariants below.
+            if self.task_type != TaskType.pretraining:
+                raise ValueError("a resolved pretraining execution requires a pretraining RunPlan")
+            if pretraining.precision.forward_compute_dtype != self.precision:
+                raise ValueError(
+                    "resolved pretraining forward precision must match the RunPlan summary"
+                )
+            if pretraining.precision.quantized_storage_format != self.quantization:
+                raise ValueError("resolved pretraining quantization must match the RunPlan summary")
+            if pretraining.loss_impl != self.loss_impl:
+                raise ValueError("resolved pretraining loss must match the RunPlan summary")
+            for label, resolved, summary in (
+                ("optimizer", pretraining.optimizer, self.optimizer),
+                ("sequence", pretraining.sequence, self.sequence),
+                ("batching", pretraining.batching, self.batching),
+                ("checkpoint", pretraining.checkpoint_policy, self.checkpoint_policy),
+            ):
+                if resolved != summary:
+                    raise ValueError(
+                        f"resolved pretraining {label} policy must match the RunPlan summary"
+                    )
+            pretraining_attention_summary = {
+                AttentionKernel.eager: AttentionImpl.eager,
+                AttentionKernel.torch_sdpa_math: AttentionImpl.math,
+                AttentionKernel.torch_sdpa_flash: AttentionImpl.sdpa,
+                AttentionKernel.torch_sdpa_mem_efficient: AttentionImpl.sdpa,
+                AttentionKernel.flash_attention_2: AttentionImpl.flash_attention_2,
+                AttentionKernel.flash_attention_3: AttentionImpl.flash_attention_3,
+                AttentionKernel.xformers: AttentionImpl.xformers,
+            }[pretraining.attention.effective_backend_required]
+            if pretraining_attention_summary != self.attention_backend:
+                raise ValueError(
+                    "resolved pretraining attention policy must match the RunPlan summary"
+                )
+            if pretraining.seed != self.seed or (
+                pretraining.gradient_checkpointing != self.gradient_checkpointing
+            ):
+                raise ValueError(
+                    "resolved pretraining seed/checkpointing must match the RunPlan summary"
+                )
+            if (
+                pretraining.export_format != self.export.format
+                or pretraining.output_dir != self.export.output_dir
+            ):
+                raise ValueError(
+                    "resolved pretraining export format/output must match the RunPlan summary"
+                )
         if self.physical_execution is None:
             return self
         if (
@@ -4780,7 +5224,7 @@ class ArtifactManifest(ContractModel):
     created_at: str | None = None
     updated_at: str | None = None
     kind: Literal[
-        "adapter", "checkpoint", "merged_model", "gguf", "onnx", "quantized", "other"
+        "adapter", "model", "checkpoint", "merged_model", "gguf", "onnx", "quantized", "other"
     ] = "adapter"
     path: str
     status: Literal["candidate", "kept", "rejected"] = "candidate"
@@ -5064,6 +5508,34 @@ class GradientCoverageEvidence(ContractModel):
         return self
 
 
+def _validate_safetensors_export_change(
+    *,
+    before_sha256: str,
+    after_sha256: str,
+    tensor_count: int,
+    tensor_names: list[str],
+    changed_tensor_count: int,
+    changed_tensor_names: list[str],
+    noun: str,
+    activity: str,
+) -> None:
+    """Shared fail-closed checks for a safetensors export-state identity, so the adapter and full-model
+    sibling evidence models cannot drift. ``noun`` ('adapter' / 'model') + ``activity`` ('training' /
+    'pretraining') reproduce each model's exact messages; the checks themselves are identical."""
+    if before_sha256 == after_sha256:
+        raise ValueError(f"{noun} export state must change during successful {activity}")
+    if tensor_names != sorted(set(tensor_names)):
+        raise ValueError(f"{noun} export tensor names must be sorted and unique")
+    if tensor_count != len(tensor_names):
+        raise ValueError(f"{noun} export tensor count must match its complete name inventory")
+    if changed_tensor_names != sorted(set(changed_tensor_names)):
+        raise ValueError(f"changed {noun} export names must be sorted and unique")
+    if changed_tensor_count != len(changed_tensor_names):
+        raise ValueError(f"changed {noun} export count must match its name inventory")
+    if not set(changed_tensor_names).issubset(tensor_names):
+        raise ValueError(f"changed {noun} export names must belong to the export inventory")
+
+
 class AdapterExportStateEvidence(ContractModel):
     """Canonical identity for the exact PEFT state expected in adapter_model.safetensors."""
 
@@ -5080,18 +5552,16 @@ class AdapterExportStateEvidence(ContractModel):
 
     @model_validator(mode="after")
     def _proved_export_change(self) -> AdapterExportStateEvidence:
-        if self.before_sha256 == self.after_sha256:
-            raise ValueError("adapter export state must change during successful training")
-        if self.tensor_names != sorted(set(self.tensor_names)):
-            raise ValueError("adapter export tensor names must be sorted and unique")
-        if self.tensor_count != len(self.tensor_names):
-            raise ValueError("adapter export tensor count must match its complete name inventory")
-        if self.changed_tensor_names != sorted(set(self.changed_tensor_names)):
-            raise ValueError("changed adapter export names must be sorted and unique")
-        if self.changed_tensor_count != len(self.changed_tensor_names):
-            raise ValueError("changed adapter export count must match its name inventory")
-        if not set(self.changed_tensor_names).issubset(self.tensor_names):
-            raise ValueError("changed adapter export names must belong to the export inventory")
+        _validate_safetensors_export_change(
+            before_sha256=self.before_sha256,
+            after_sha256=self.after_sha256,
+            tensor_count=self.tensor_count,
+            tensor_names=self.tensor_names,
+            changed_tensor_count=self.changed_tensor_count,
+            changed_tensor_names=self.changed_tensor_names,
+            noun="adapter",
+            activity="training",
+        )
         return self
 
 
@@ -5145,6 +5615,200 @@ class TrainingSuccessEvidence(ContractModel):
     measured_peak: MemoryMetrics | None = None
 
 
+class FullModelExportStateEvidence(ContractModel):
+    """Canonical identity for the exact full-parameter model state expected in model.safetensors.
+
+    The full-parameter sibling of :class:`AdapterExportStateEvidence`: from-scratch / continued
+    pretraining exports the WHOLE model (model.safetensors), not a PEFT adapter, so the pinned config is
+    the model config (``model_config_semantic_sha256``), never an adapter config. Dense- and MoE-safe:
+    the tensor inventory is a plain name/hash set, so a MoE model simply carries more expert tensors."""
+
+    hash_algorithm: Literal["sha256-safetensors-tensor-state-v1"] = (
+        "sha256-safetensors-tensor-state-v1"
+    )
+    before_sha256: str = Field(pattern=SHA256_PATTERN)
+    after_sha256: str = Field(pattern=SHA256_PATTERN)
+    tensor_count: int = Field(ge=1)
+    tensor_names: list[str] = Field(min_length=1)
+    changed_tensor_count: int = Field(ge=1)
+    changed_tensor_names: list[str] = Field(min_length=1)
+    model_config_semantic_sha256: str = Field(pattern=SHA256_PATTERN)
+
+    @model_validator(mode="after")
+    def _proved_export_change(self) -> FullModelExportStateEvidence:
+        _validate_safetensors_export_change(
+            before_sha256=self.before_sha256,
+            after_sha256=self.after_sha256,
+            tensor_count=self.tensor_count,
+            tensor_names=self.tensor_names,
+            changed_tensor_count=self.changed_tensor_count,
+            changed_tensor_names=self.changed_tensor_names,
+            noun="model",
+            activity="pretraining",
+        )
+        return self
+
+
+class PretrainingExecutionEvidence(ContractModel):
+    """Trainer-side proof produced before a full-parameter pretraining model is admitted as a success.
+
+    The full-parameter sibling of :class:`TrainingExecutionEvidence`. It REUSES the generic, adapter-free
+    evidence pieces - :class:`TrainableStateChangeEvidence` (here the trainable set is the COMPLETE
+    parameter inventory, not an adapter), :class:`GradientCoverageEvidence`, and
+    :class:`OptimizerStepLossEvidence` - and swaps the adapter export for the full-model export
+    (:class:`FullModelExportStateEvidence`). None of these are part of the sealed execution config, so the
+    reuse cannot perturb the byte-locked SFT / pretraining seals."""
+
+    trainable_state: TrainableStateChangeEvidence
+    model_export_state: FullModelExportStateEvidence
+    gradient_coverage: GradientCoverageEvidence
+    optimizer_created: Literal[True]
+    completed_optimizer_steps: int = Field(ge=1)
+    step_losses: list[OptimizerStepLossEvidence] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _one_loss_per_completed_step(self) -> PretrainingExecutionEvidence:
+        observed_steps = [item.optimizer_step for item in self.step_losses]
+        expected_steps = list(range(1, self.completed_optimizer_steps + 1))
+        if observed_steps != expected_steps:
+            raise ValueError(
+                "step_losses must contain exactly one ordered finite loss for every completed step"
+            )
+        changed = set(self.trainable_state.changed_tensor_names)
+        observed_gradients = set(self.gradient_coverage.observed_tensor_names)
+        if (
+            self.gradient_coverage.eligible_tensor_names
+            != self.trainable_state.trainable_tensor_names
+        ):
+            raise ValueError(
+                "gradient eligibility must equal the complete trainable-state inventory"
+            )
+        if not changed.intersection(observed_gradients):
+            raise ValueError(
+                "at least one changed trainable tensor must have an observed materialized gradient"
+            )
+        if self.model_export_state.tensor_count != self.trainable_state.trainable_tensor_count:
+            raise ValueError(
+                "model export tensor count must equal the complete trainable-state inventory"
+            )
+        return self
+
+
+class PretrainingSuccessEvidence(ContractModel):
+    """All gates required before a resolved from-scratch / continued pretraining run may be called
+    successful. The full-parameter sibling of :class:`TrainingSuccessEvidence` - it verifies the exported
+    model bytes (model.safetensors), not an adapter."""
+
+    execution: PretrainingExecutionEvidence
+    output_path_verified: Literal[True]
+    model_bytes_verified: Literal[True]
+    artifact_integrity_verified: Literal[True]
+    model_safetensors_sha256: str = Field(pattern=SHA256_PATTERN)
+    model_config_sha256: str = Field(pattern=SHA256_PATTERN)
+    measured_peak: MemoryMetrics | None = None
+
+
+class PreferenceRewardMarginEvidence(ContractModel):
+    """One optimizer step's DPO reward signal: the implicit rewards for the chosen and rejected
+    completions (each ``beta * (policy_logratio - reference_logratio)`` against the FROZEN reference)
+    and their margin. A real DPO step separates the pair; recording the margin proves the preference
+    signal was live and not a degenerate copy of an SFT loss."""
+
+    optimizer_step: int = Field(ge=1)
+    chosen_reward: float
+    rejected_reward: float
+    margin: float
+
+    @field_validator("chosen_reward", "rejected_reward", "margin", mode="before")
+    @classmethod
+    def _strict_numeric(cls, value: object) -> object:
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ValueError("preference reward evidence must be JSON numbers")
+        return value
+
+    @field_validator("chosen_reward", "rejected_reward", "margin")
+    @classmethod
+    def _finite(cls, value: float) -> float:
+        if not math.isfinite(value):
+            raise ValueError("preference reward evidence must be finite")
+        return value
+
+    @model_validator(mode="after")
+    def _margin_matches_rewards(self) -> PreferenceRewardMarginEvidence:
+        if not math.isclose(
+            self.margin, self.chosen_reward - self.rejected_reward, rel_tol=1e-6, abs_tol=1e-6
+        ):
+            raise ValueError("preference reward margin must equal chosen_reward - rejected_reward")
+        return self
+
+
+class PreferenceExecutionEvidence(ContractModel):
+    """Trainer-side proof for an offline DPO (preference) run before its adapter is admitted a success.
+
+    The adapter sibling of :class:`TrainingExecutionEvidence` for preference optimization: it REUSES the
+    generic adapter evidence pieces (:class:`TrainableStateChangeEvidence` over the PEFT adapter,
+    :class:`AdapterExportStateEvidence`, :class:`GradientCoverageEvidence`,
+    :class:`OptimizerStepLossEvidence`) and adds the preference-specific honesty signals: the reference
+    model was FROZEN (produced no gradient), real preference PAIRS were consumed, and every completed step
+    carries the DPO reward margin the loss was built from. None of these are part of the sealed execution
+    config, so the reuse cannot perturb the byte-locked SFT / pretraining / preference seals."""
+
+    trainable_state: TrainableStateChangeEvidence
+    adapter_export_state: AdapterExportStateEvidence
+    gradient_coverage: GradientCoverageEvidence
+    optimizer_created: Literal[True]
+    completed_optimizer_steps: int = Field(ge=1)
+    step_losses: list[OptimizerStepLossEvidence] = Field(min_length=1)
+    reference_model_frozen: Literal[True]
+    preference_pairs_consumed: int = Field(ge=1)
+    step_reward_margins: list[PreferenceRewardMarginEvidence] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _one_loss_and_margin_per_completed_step(self) -> PreferenceExecutionEvidence:
+        expected_steps = list(range(1, self.completed_optimizer_steps + 1))
+        if [item.optimizer_step for item in self.step_losses] != expected_steps:
+            raise ValueError(
+                "step_losses must contain exactly one ordered finite loss for every completed step"
+            )
+        if [item.optimizer_step for item in self.step_reward_margins] != expected_steps:
+            raise ValueError(
+                "step_reward_margins must contain exactly one ordered DPO reward margin for every "
+                "completed optimizer step"
+            )
+        changed = set(self.trainable_state.changed_tensor_names)
+        observed_gradients = set(self.gradient_coverage.observed_tensor_names)
+        if (
+            self.gradient_coverage.eligible_tensor_names
+            != self.trainable_state.trainable_tensor_names
+        ):
+            raise ValueError(
+                "gradient eligibility must equal the complete trainable-state inventory"
+            )
+        if not changed.intersection(observed_gradients):
+            raise ValueError(
+                "at least one changed trainable tensor must have an observed materialized gradient"
+            )
+        if self.adapter_export_state.tensor_count != self.trainable_state.trainable_tensor_count:
+            raise ValueError(
+                "adapter export tensor count must equal the complete trainable-state inventory"
+            )
+        return self
+
+
+class PreferenceSuccessEvidence(ContractModel):
+    """All gates required before a resolved offline DPO run may be called successful. The preference
+    sibling of :class:`TrainingSuccessEvidence` - it verifies the exported PEFT adapter bytes
+    (adapter_model.safetensors), not a full model."""
+
+    execution: PreferenceExecutionEvidence
+    output_path_verified: Literal[True]
+    adapter_bytes_verified: Literal[True]
+    artifact_integrity_verified: Literal[True]
+    adapter_safetensors_sha256: str = Field(pattern=SHA256_PATTERN)
+    adapter_config_sha256: str = Field(pattern=SHA256_PATTERN)
+    measured_peak: MemoryMetrics | None = None
+
+
 class RunManifest(ContractModel):
     """A single run INSTANCE: the crash-safe durable record of one execution of a RunPlan.
     Formalizes run_registry.TrainingRunRecord almost field-for-field + its state machine (terminal =
@@ -5177,10 +5841,37 @@ class RunManifest(ContractModel):
     # Post-run fit reconciliation from observed peak memory (planned NATIVE_SAFE, or a spill?).
     final_fit: FitClassification | None = None
     training_success_evidence: TrainingSuccessEvidence | None = None
+    # The full-parameter pretraining sibling of training_success_evidence: present on a succeeded
+    # from-scratch / continued pretraining run (model.safetensors export), mutually exclusive with the
+    # adapter evidence above. Absent until the (gated) pretraining worker capture lands.
+    pretraining_success_evidence: PretrainingSuccessEvidence | None = None
+    # Offline DPO (preference) run - a PEFT adapter over a frozen reference; mutually exclusive with the
+    # SFT-adapter and full-model evidence above. Absent until the (gated) DPO worker capture lands.
+    preference_success_evidence: PreferenceSuccessEvidence | None = None
     # Present only on a run that resumed from a parent checkpoint - explicit parent-run + parent-
     # checkpoint provenance for a fresh run identity (#440). Absent for an ordinary from-scratch run.
     resume_lineage: ResumeLineage | None = None
     notes: str = ""
+
+    @model_validator(mode="after")
+    def _one_success_evidence_family(self) -> RunManifest:
+        # A run has AT MOST ONE success-evidence family - they describe incompatible artifacts (an SFT
+        # adapter, a full pretraining model, or a DPO adapter). Enforce the invariant the field docs
+        # assert rather than leaving conflict resolution to callers; a prepared / running / failed run
+        # carries none.
+        families = (
+            self.training_success_evidence is not None,
+            self.pretraining_success_evidence is not None,
+            self.preference_success_evidence is not None,
+        )
+        if sum(families) > 1:
+            raise ValueError(
+                "a run carries at most one success-evidence family: SFT adapter "
+                "(training_success_evidence) XOR full-model pretraining "
+                "(pretraining_success_evidence) XOR preference/DPO adapter "
+                "(preference_success_evidence)"
+            )
+        return self
 
     @field_validator("parameter_accounting_refs")
     @classmethod
@@ -5201,6 +5892,10 @@ class RunManifest(ContractModel):
     def _success_evidence_is_terminal_only(self) -> RunManifest:
         if self.state != "succeeded" and self.training_success_evidence is not None:
             raise ValueError("only a succeeded run may carry training success evidence")
+        if self.state != "succeeded" and self.pretraining_success_evidence is not None:
+            raise ValueError("only a succeeded run may carry pretraining success evidence")
+        if self.state != "succeeded" and self.preference_success_evidence is not None:
+            raise ValueError("only a succeeded run may carry preference success evidence")
         if (
             self.state != "succeeded"
             and self.final_fit is not None
@@ -5211,8 +5906,16 @@ class RunManifest(ContractModel):
             self.final_fit is not None
             and self.final_fit.classification in {FitClass.NATIVE_SAFE, FitClass.NATIVE_TIGHT}
             and self.training_success_evidence is None
+            and self.pretraining_success_evidence is None
+            and self.preference_success_evidence is None
         ):
-            raise ValueError("a proven native fit requires complete training success evidence")
+            # A proven native fit is earned by an SFT adapter, a full-model pretraining, or a DPO adapter
+            # success - never none. The one-family XOR guard keeps them from co-existing; this keeps a
+            # proven fit from standing on no success evidence at all.
+            raise ValueError(
+                "a proven native fit requires complete success evidence (an SFT adapter, a full-model "
+                "pretraining, or a DPO adapter run)"
+            )
         return self
 
 
@@ -5926,6 +6629,35 @@ class TrainingPlanParameters(ContractModel):
     truncation_allowed: bool = False
     chat_template_sha256: str | None = None
     allow_cpu_toy: bool = False
+    # Preference (DPO) knobs - mirrored from PlannerConstraints (the drift test enforces lockstep);
+    # consumed only by the preference resolver, ignored on SFT/pretraining.
+    preference_beta: float = 0.1
+    preference_label_smoothing: float = 0.0
+    preference_max_prompt_length: int | None = None
+    # Pretraining (S3a-2) - mirrors PlannerConstraints field-for-field so the resolver lowers these
+    # verbatim into a pretraining RunPlan (init / tokenizer knobs; the corpus rides beside the plan).
+    init_mode: str | None = None
+    architecture_ref_id: str | None = None
+    architecture_ref_sha256: str | None = None
+    init_vocab_size: int | None = None
+    init_seed: int | None = None
+    init_initializer_range: float | None = None
+    source_checkpoint_ref_id: str | None = None
+    source_checkpoint_ref_sha256: str | None = None
+    tokenizer_source_mode: str | None = None
+    tokenizer_algorithm: str | None = None
+    tokenizer_vocab_size: int | None = None
+    tokenizer_special_tokens: tuple[str, ...] | None = None
+    tokenizer_min_frequency: int | None = None
+    tokenizer_location: str | None = None
+    # Custom-block (mode 3): mirror of the PlannerConstraints admission fields (kept field-for-field so
+    # the resolver copies parameters -> constraints verbatim). Set only for an admitted custom_decoder.
+    custom_code_bundle_ref_id: str | None = None
+    custom_code_bundle_ref_sha256: str | None = None
+    custom_code_entry_symbol: str | None = None
+    custom_code_interface_version: str | None = None
+    custom_code_vetting_ref_id: str | None = None
+    custom_code_vetting_ref_sha256: str | None = None
 
 
 class TrainingPlanComposition(ContractModel):

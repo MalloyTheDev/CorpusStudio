@@ -341,6 +341,70 @@
       "title": "FitClassification",
       "type": "object"
     },
+    "FullModelExportStateEvidence": {
+      "additionalProperties": false,
+      "description": "Canonical identity for the exact full-parameter model state expected in model.safetensors.\n\nThe full-parameter sibling of :class:`AdapterExportStateEvidence`: from-scratch / continued\npretraining exports the WHOLE model (model.safetensors), not a PEFT adapter, so the pinned config is\nthe model config (``model_config_semantic_sha256``), never an adapter config. Dense- and MoE-safe:\nthe tensor inventory is a plain name/hash set, so a MoE model simply carries more expert tensors.",
+      "properties": {
+        "after_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "After Sha256",
+          "type": "string"
+        },
+        "before_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Before Sha256",
+          "type": "string"
+        },
+        "changed_tensor_count": {
+          "minimum": 1,
+          "title": "Changed Tensor Count",
+          "type": "integer"
+        },
+        "changed_tensor_names": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Changed Tensor Names",
+          "type": "array"
+        },
+        "hash_algorithm": {
+          "const": "sha256-safetensors-tensor-state-v1",
+          "default": "sha256-safetensors-tensor-state-v1",
+          "title": "Hash Algorithm",
+          "type": "string"
+        },
+        "model_config_semantic_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Model Config Semantic Sha256",
+          "type": "string"
+        },
+        "tensor_count": {
+          "minimum": 1,
+          "title": "Tensor Count",
+          "type": "integer"
+        },
+        "tensor_names": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Tensor Names",
+          "type": "array"
+        }
+      },
+      "required": [
+        "before_sha256",
+        "after_sha256",
+        "tensor_count",
+        "tensor_names",
+        "changed_tensor_count",
+        "changed_tensor_names",
+        "model_config_semantic_sha256"
+      ],
+      "title": "FullModelExportStateEvidence",
+      "type": "object"
+    },
     "GradientCoverageEvidence": {
       "additionalProperties": false,
       "description": "Observed materialized adapter gradients without claiming unused tensors had gradients.",
@@ -569,6 +633,254 @@
         "loss"
       ],
       "title": "OptimizerStepLossEvidence",
+      "type": "object"
+    },
+    "PreferenceExecutionEvidence": {
+      "additionalProperties": false,
+      "description": "Trainer-side proof for an offline DPO (preference) run before its adapter is admitted a success.\n\nThe adapter sibling of :class:`TrainingExecutionEvidence` for preference optimization: it REUSES the\ngeneric adapter evidence pieces (:class:`TrainableStateChangeEvidence` over the PEFT adapter,\n:class:`AdapterExportStateEvidence`, :class:`GradientCoverageEvidence`,\n:class:`OptimizerStepLossEvidence`) and adds the preference-specific honesty signals: the reference\nmodel was FROZEN (produced no gradient), real preference PAIRS were consumed, and every completed step\ncarries the DPO reward margin the loss was built from. None of these are part of the sealed execution\nconfig, so the reuse cannot perturb the byte-locked SFT / pretraining / preference seals.",
+      "properties": {
+        "adapter_export_state": {
+          "$ref": "#/$defs/AdapterExportStateEvidence"
+        },
+        "completed_optimizer_steps": {
+          "minimum": 1,
+          "title": "Completed Optimizer Steps",
+          "type": "integer"
+        },
+        "gradient_coverage": {
+          "$ref": "#/$defs/GradientCoverageEvidence"
+        },
+        "optimizer_created": {
+          "const": true,
+          "title": "Optimizer Created",
+          "type": "boolean"
+        },
+        "preference_pairs_consumed": {
+          "minimum": 1,
+          "title": "Preference Pairs Consumed",
+          "type": "integer"
+        },
+        "reference_model_frozen": {
+          "const": true,
+          "title": "Reference Model Frozen",
+          "type": "boolean"
+        },
+        "step_losses": {
+          "items": {
+            "$ref": "#/$defs/OptimizerStepLossEvidence"
+          },
+          "minItems": 1,
+          "title": "Step Losses",
+          "type": "array"
+        },
+        "step_reward_margins": {
+          "items": {
+            "$ref": "#/$defs/PreferenceRewardMarginEvidence"
+          },
+          "minItems": 1,
+          "title": "Step Reward Margins",
+          "type": "array"
+        },
+        "trainable_state": {
+          "$ref": "#/$defs/TrainableStateChangeEvidence"
+        }
+      },
+      "required": [
+        "trainable_state",
+        "adapter_export_state",
+        "gradient_coverage",
+        "optimizer_created",
+        "completed_optimizer_steps",
+        "step_losses",
+        "reference_model_frozen",
+        "preference_pairs_consumed",
+        "step_reward_margins"
+      ],
+      "title": "PreferenceExecutionEvidence",
+      "type": "object"
+    },
+    "PreferenceRewardMarginEvidence": {
+      "additionalProperties": false,
+      "description": "One optimizer step's DPO reward signal: the implicit rewards for the chosen and rejected\ncompletions (each ``beta * (policy_logratio - reference_logratio)`` against the FROZEN reference)\nand their margin. A real DPO step separates the pair; recording the margin proves the preference\nsignal was live and not a degenerate copy of an SFT loss.",
+      "properties": {
+        "chosen_reward": {
+          "title": "Chosen Reward",
+          "type": "number"
+        },
+        "margin": {
+          "title": "Margin",
+          "type": "number"
+        },
+        "optimizer_step": {
+          "minimum": 1,
+          "title": "Optimizer Step",
+          "type": "integer"
+        },
+        "rejected_reward": {
+          "title": "Rejected Reward",
+          "type": "number"
+        }
+      },
+      "required": [
+        "optimizer_step",
+        "chosen_reward",
+        "rejected_reward",
+        "margin"
+      ],
+      "title": "PreferenceRewardMarginEvidence",
+      "type": "object"
+    },
+    "PreferenceSuccessEvidence": {
+      "additionalProperties": false,
+      "description": "All gates required before a resolved offline DPO run may be called successful. The preference\nsibling of :class:`TrainingSuccessEvidence` - it verifies the exported PEFT adapter bytes\n(adapter_model.safetensors), not a full model.",
+      "properties": {
+        "adapter_bytes_verified": {
+          "const": true,
+          "title": "Adapter Bytes Verified",
+          "type": "boolean"
+        },
+        "adapter_config_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Adapter Config Sha256",
+          "type": "string"
+        },
+        "adapter_safetensors_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Adapter Safetensors Sha256",
+          "type": "string"
+        },
+        "artifact_integrity_verified": {
+          "const": true,
+          "title": "Artifact Integrity Verified",
+          "type": "boolean"
+        },
+        "execution": {
+          "$ref": "#/$defs/PreferenceExecutionEvidence"
+        },
+        "measured_peak": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MemoryMetrics"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "output_path_verified": {
+          "const": true,
+          "title": "Output Path Verified",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "execution",
+        "output_path_verified",
+        "adapter_bytes_verified",
+        "artifact_integrity_verified",
+        "adapter_safetensors_sha256",
+        "adapter_config_sha256"
+      ],
+      "title": "PreferenceSuccessEvidence",
+      "type": "object"
+    },
+    "PretrainingExecutionEvidence": {
+      "additionalProperties": false,
+      "description": "Trainer-side proof produced before a full-parameter pretraining model is admitted as a success.\n\nThe full-parameter sibling of :class:`TrainingExecutionEvidence`. It REUSES the generic, adapter-free\nevidence pieces - :class:`TrainableStateChangeEvidence` (here the trainable set is the COMPLETE\nparameter inventory, not an adapter), :class:`GradientCoverageEvidence`, and\n:class:`OptimizerStepLossEvidence` - and swaps the adapter export for the full-model export\n(:class:`FullModelExportStateEvidence`). None of these are part of the sealed execution config, so the\nreuse cannot perturb the byte-locked SFT / pretraining seals.",
+      "properties": {
+        "completed_optimizer_steps": {
+          "minimum": 1,
+          "title": "Completed Optimizer Steps",
+          "type": "integer"
+        },
+        "gradient_coverage": {
+          "$ref": "#/$defs/GradientCoverageEvidence"
+        },
+        "model_export_state": {
+          "$ref": "#/$defs/FullModelExportStateEvidence"
+        },
+        "optimizer_created": {
+          "const": true,
+          "title": "Optimizer Created",
+          "type": "boolean"
+        },
+        "step_losses": {
+          "items": {
+            "$ref": "#/$defs/OptimizerStepLossEvidence"
+          },
+          "minItems": 1,
+          "title": "Step Losses",
+          "type": "array"
+        },
+        "trainable_state": {
+          "$ref": "#/$defs/TrainableStateChangeEvidence"
+        }
+      },
+      "required": [
+        "trainable_state",
+        "model_export_state",
+        "gradient_coverage",
+        "optimizer_created",
+        "completed_optimizer_steps",
+        "step_losses"
+      ],
+      "title": "PretrainingExecutionEvidence",
+      "type": "object"
+    },
+    "PretrainingSuccessEvidence": {
+      "additionalProperties": false,
+      "description": "All gates required before a resolved from-scratch / continued pretraining run may be called\nsuccessful. The full-parameter sibling of :class:`TrainingSuccessEvidence` - it verifies the exported\nmodel bytes (model.safetensors), not an adapter.",
+      "properties": {
+        "artifact_integrity_verified": {
+          "const": true,
+          "title": "Artifact Integrity Verified",
+          "type": "boolean"
+        },
+        "execution": {
+          "$ref": "#/$defs/PretrainingExecutionEvidence"
+        },
+        "measured_peak": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MemoryMetrics"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "model_bytes_verified": {
+          "const": true,
+          "title": "Model Bytes Verified",
+          "type": "boolean"
+        },
+        "model_config_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Model Config Sha256",
+          "type": "string"
+        },
+        "model_safetensors_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Model Safetensors Sha256",
+          "type": "string"
+        },
+        "output_path_verified": {
+          "const": true,
+          "title": "Output Path Verified",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "execution",
+        "output_path_verified",
+        "model_bytes_verified",
+        "artifact_integrity_verified",
+        "model_safetensors_sha256",
+        "model_config_sha256"
+      ],
+      "title": "PretrainingSuccessEvidence",
       "type": "object"
     },
     "Ref": {
@@ -1088,6 +1400,28 @@
     },
     "plan_ref": {
       "$ref": "#/$defs/Ref"
+    },
+    "preference_success_evidence": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PreferenceSuccessEvidence"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "pretraining_success_evidence": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PretrainingSuccessEvidence"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     },
     "process": {
       "anyOf": [

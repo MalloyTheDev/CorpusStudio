@@ -86,6 +86,10 @@
       "file": "ResolvedPreferenceExecutionConfiguration.schema.json"
     },
     {
+      "contract": "ResolvedPretrainingExecutionConfiguration",
+      "file": "ResolvedPretrainingExecutionConfiguration.schema.json"
+    },
+    {
       "contract": "RunPlan",
       "file": "RunPlan.schema.json"
     },
@@ -156,6 +160,14 @@
     {
       "contract": "PreferenceDataPolicy",
       "file": "PreferenceDataPolicy.schema.json"
+    },
+    {
+      "contract": "ModelCodeVettingReport",
+      "file": "ModelCodeVettingReport.schema.json"
+    },
+    {
+      "contract": "SandboxPolicy",
+      "file": "SandboxPolicy.schema.json"
     }
   ]
 }

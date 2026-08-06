@@ -22,7 +22,7 @@ import re
 import sys
 import time
 from collections.abc import Callable, Sequence
-from typing import TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 from pydantic import ValidationError
 
@@ -504,7 +504,32 @@ class TrainingRunner:
             backend_manifest_ref,
             get_backend,
         )
+        from corpus_studio.platform.execution_config import (  # noqa: PLC0415
+            PREFERENCE_NOT_EXECUTABLE_REASON,
+            PRETRAINING_NOT_EXECUTABLE_REASON,
+        )
 
+        if plan.resolved_execution is None and plan.resolved_preference_execution is not None:
+            # Refuse a sealed preference (DPO) plan with a TYPED reason at the FIRST resolution step on the
+            # direct-runner path (this runs before _resolve_config), so the refusal is reachable rather
+            # than surfacing the generic "backend does not implement the sealed execution contract" below.
+            raise RunnerFailure(
+                PREFERENCE_NOT_EXECUTABLE_REASON,
+                taxonomy=FailureTaxonomy.UNSUPPORTED_CONFIGURATION,
+                stage=StageMarker.env_loaded,
+                remediation="await the DPO worker milestone that promotes preference_dpo to "
+                "workload_verified; do not hand-edit the plan to the SFT lane",
+            )
+        if plan.resolved_execution is None and plan.resolved_pretraining_execution is not None:
+            # Same defense-in-depth for a sealed pretraining plan: a typed refusal at the first resolution
+            # step rather than the generic "backend does not implement the sealed execution contract".
+            raise RunnerFailure(
+                PRETRAINING_NOT_EXECUTABLE_REASON,
+                taxonomy=FailureTaxonomy.UNSUPPORTED_CONFIGURATION,
+                stage=StageMarker.env_loaded,
+                remediation="dispatch the plan through platform-run so required_runner_lane selects "
+                "the pretraining lane; do not hand-edit the plan to the SFT lane",
+            )
         backend_id = plan.backend_ref.id
         backend = get_backend(backend_id)
         if backend is None:
@@ -552,6 +577,8 @@ class TrainingRunner:
     def _resolve_config(self, plan: RunPlan, run_id: str) -> TrainRunConfig:
         """Consume the sealed policy and derive only its declared run-scoped output path."""
         from corpus_studio.platform.execution_config import (  # noqa: PLC0415
+            PREFERENCE_NOT_EXECUTABLE_REASON,
+            PRETRAINING_NOT_EXECUTABLE_REASON,
             ExecutionConfigurationError,
             run_scoped_training_output,
             verify_execution_configuration_hash,
@@ -562,6 +589,25 @@ class TrainingRunner:
 
         execution = plan.resolved_execution
         if execution is None:
+            if plan.resolved_preference_execution is not None:
+                # Defense-in-depth: _resolve_trainer already refuses a preference plan with this typed
+                # reason before this method runs; repeat it here so a direct _resolve_config call is legible
+                # too (admit-at-planning / refuse-at-execution).
+                raise RunnerFailure(
+                    PREFERENCE_NOT_EXECUTABLE_REASON,
+                    taxonomy=FailureTaxonomy.UNSUPPORTED_CONFIGURATION,
+                    stage=StageMarker.env_loaded,
+                    remediation="await the DPO worker milestone that promotes preference_dpo to "
+                    "workload_verified; do not hand-edit the plan to the SFT lane",
+                )
+            if plan.resolved_pretraining_execution is not None:
+                raise RunnerFailure(
+                    PRETRAINING_NOT_EXECUTABLE_REASON,
+                    taxonomy=FailureTaxonomy.UNSUPPORTED_CONFIGURATION,
+                    stage=StageMarker.env_loaded,
+                    remediation="dispatch the plan through platform-run so required_runner_lane "
+                    "selects the pretraining lane; do not hand-edit the plan to the SFT lane",
+                )
             raise RunnerFailure(
                 "the RunPlan carries no ResolvedExecutionConfiguration to execute",
                 taxonomy=FailureTaxonomy.UNSUPPORTED_CONFIGURATION,
@@ -615,6 +661,126 @@ class TrainingRunner:
                 taxonomy=FailureTaxonomy.UNSUPPORTED_CONFIGURATION,
                 stage=StageMarker.env_loaded,
             ) from exc
+
+
+class PretrainingRunner:
+    """Executes a sealed from-scratch / continued pretraining run through
+    ``training.pretraining_trainer.run_pretraining`` - the full-parameter sibling of ``TrainingRunner``.
+
+    It dispatches the proven worker, emits the run's stages, samples the measured peak, and reports the
+    worker-PROPOSED full-model success evidence on the context. It never runs an SFT / adapter path and
+    it NEVER self-admits success: ``execute_run`` independently re-verifies the saved model before the
+    evidence may reach the manifest. Whether a pretraining plan is admitted for a production run is gated
+    upstream (the CLI / worker select this runner only once ``pretraining`` is workload_verified)."""
+
+    def __init__(
+        self,
+        *,
+        cpu_toy: bool = False,
+        corpus_root: str = ".",
+        memory_sampler: MemorySampler = sample_gpu_memory,
+    ) -> None:
+        # No watchdog/heartbeat here yet (the SFT runner's stall-observability is a later slice for the
+        # pretraining lane); expose no no-op knobs until it is wired.
+        self.cpu_toy = cpu_toy
+        self.corpus_root = corpus_root
+        self.memory_sampler = memory_sampler
+        self.name = "pretraining_cpu_toy" if cpu_toy else "pretraining"
+
+    def run(self, ctx: RunContext) -> Sequence[ProducedArtifact]:
+        execution = ctx.plan.resolved_pretraining_execution
+        if execution is None:
+            raise RunnerFailure(
+                "the pretraining runner requires a resolved pretraining execution",
+                taxonomy=FailureTaxonomy.UNSUPPORTED_CONFIGURATION,
+                stage=StageMarker.process_start,
+            )
+        # Run-scope the output exactly like the SFT lane: derive <output_dir>/runs/<run_id>/artifacts/
+        # model from the sealed root + fresh run id, so two runs of one plan never collide and the sealed
+        # output_layout="run_scoped_v1" claim is ENFORCED, not merely declared.
+        from corpus_studio.platform.execution_config import (  # noqa: PLC0415
+            ExecutionConfigurationError,
+            run_scoped_pretraining_output,
+            verify_run_scoped_pretraining_output_path,
+        )
+
+        scoped_output = run_scoped_pretraining_output(execution, ctx.run_id)
+        ctx.emit_stage(
+            StageMarker.process_start,
+            f"pretraining run [{self.name}]: dispatching the full-parameter worker",
+        )
+        from corpus_studio.training.pretraining_trainer import (  # noqa: PLC0415
+            PretrainingError,
+            run_pretraining,
+        )
+
+        try:
+            result = run_pretraining(
+                execution, corpus_root=self.corpus_root, output_dir=str(scoped_output)
+            )
+        except PretrainingError as exc:
+            raise RunnerFailure(
+                str(exc),
+                taxonomy=FailureTaxonomy.UPDATE_FAILURE,
+                stage=StageMarker.optimizer_step,
+                remediation="preserve the failed run and inspect the first-party pretraining worker",
+            ) from exc
+
+        try:
+            verify_run_scoped_pretraining_output_path(
+                execution, ctx.run_id, observed_path=result.output_dir, require_exists=True
+            )
+        except ExecutionConfigurationError as exc:
+            raise RunnerFailure(
+                str(exc),
+                taxonomy=FailureTaxonomy.ARTIFACT_FAILURE,
+                stage=StageMarker.export,
+                remediation="preserve the failed run and repair the pretraining run-scoped output layout",
+            ) from exc
+
+        if result.execution_evidence is None:
+            # The worker must return full-model success evidence; a missing proof is a hard failure,
+            # never a silently-emitted artifact that execute_run would then reject downstream.
+            raise RunnerFailure(
+                "the pretraining worker returned without full-model success evidence",
+                taxonomy=FailureTaxonomy.UPDATE_FAILURE,
+                stage=StageMarker.optimizer_step,
+                remediation="preserve the failed run and repair the first-party pretraining worker",
+            )
+        # The runner REPORTS the worker-proposed success evidence; execute_run re-verifies before admit.
+        ctx.pretraining_success_evidence = result.execution_evidence
+        try:
+            ctx.measured_peak = self.memory_sampler()
+        except Exception:  # noqa: BLE001 - observability only; a probe fault is not a run failure
+            ctx.measured_peak = None
+
+        artifact = ProducedArtifact(
+            artifact_id=f"{ctx.run_id}-model-{result.execution_evidence.model_safetensors_sha256[:12]}",
+            kind="model",
+            path=result.output_dir,
+        )
+        ctx.emit_stage(StageMarker.export, f"full model saved: {result.output_dir}")
+        ctx.emit_artifact(artifact)
+        return [artifact]
+
+
+def build_lane_runner(
+    runner_name: str, *, max_steps: int | None = None, corpus_root: str = "."
+) -> Any:
+    """Single source of truth for lane name -> Runner, shared by the in-process ``platform_run`` path and
+    the subprocess worker (``worker._build_runner``) so the two cannot drift. The in-process CLI path once
+    lacked the pretraining lanes while the worker had them - exactly the drift one factory prevents.
+    ``max_steps`` is the CLI compatibility cap for the SFT trainer lane; ``corpus_root`` anchors a
+    pretraining plan's relative shard locations. Echo / cpu_toy / training fall through as before."""
+    from corpus_studio.platform.supervisor import EchoRunner  # noqa: PLC0415
+
+    if runner_name == "echo":
+        return EchoRunner()
+    if runner_name in ("pretraining", "pretraining_cpu_toy"):
+        return PretrainingRunner(
+            cpu_toy=(runner_name == "pretraining_cpu_toy"), corpus_root=corpus_root
+        )
+    return TrainingRunner(cpu_toy=(runner_name == "cpu_toy"), max_steps=max_steps)
 
 
 def demo_training_plan(plan_id: str = "demo-cpu-toy") -> RunPlan:

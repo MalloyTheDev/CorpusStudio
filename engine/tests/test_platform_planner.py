@@ -22,6 +22,8 @@ from corpus_studio.platform.contracts import (
     ParameterWindow,
     PhysicalExecutionSpec,
     ProbeResult,
+    PretrainingDataPolicy,
+    PretrainingShard,
     StorageProfile,
     StorageRoleAssessment,
 )
@@ -412,16 +414,112 @@ def test_planner_admits_the_dense_qlora_sft_task_and_refuses_unexecutable_varian
     # to it and the plan builds; a task whose shape the first-party harness cannot execute is refused
     # FAIL-CLOSED at planning - never silently downgraded to dense_qlora_sft.
     assert _plan(_profile(cc_major=8), _report(), task_type="sft").resolved_execution is not None
-    # pretraining maps to a declared-only shape -> refused below workload_verified.
-    with pytest.raises(PlannerError, match="below the required 'workload_verified'"):
+    # pretraining maps to a worker_implemented shape -> ADMITTED at planning (below workload_verified, so
+    # still refused at execution); its dedicated builder then requires a corpus, so without one it fails
+    # THERE, not at the variant admission gate.
+    with pytest.raises(PlannerError, match="requires a corpus"):
         _plan(_profile(cc_major=8), _report(), task_type="pretraining")
     # a preference request must name its objective; without one it maps to no shape -> refused.
     with pytest.raises(PlannerError, match="no executable execution variant"):
         _plan(_profile(cc_major=8), _report(), task_type="preference")
-    # preference + the dpo_qlora objective maps to preference_dpo, declared at contract_validated ->
-    # admitted-as-known but refused at execution (below workload_verified), NOT "no variant".
-    with pytest.raises(PlannerError, match="'preference_dpo' is 'contract_validated'"):
+    # preference + the dpo_qlora objective maps to preference_dpo (contract_validated) -> ADMITTED at
+    # planning: the resolver seals a ResolvedPreferenceExecutionConfiguration and the plan carries it
+    # (not the SFT resolved_execution). Execution is refused separately by the runner (DPOTrainer + wheel
+    # gated), so the plan's loss summary is the DPO loss and it binds the dpo_qlora objective.
+    dpo_plan = _plan(_profile(cc_major=8), _report(), task_type="preference", objective_id="dpo_qlora")
+    assert dpo_plan.resolved_preference_execution is not None
+    assert dpo_plan.resolved_execution is None
+    assert dpo_plan.loss_impl.value == "dpo"
+    assert dpo_plan.resolved_preference_execution.objective_ref.id == "dpo_qlora"
+
+
+def test_preference_dpo_resolves_to_a_sealed_config_and_the_runner_refuses_it_at_execution():
+    from corpus_studio.platform.execution_config import preference_execution_configuration_hash_for
+    from corpus_studio.platform.runners import RunnerFailure, TrainingRunner
+
+    plan = _plan(_profile(cc_major=8), _report(), task_type="preference", objective_id="dpo_qlora")
+    pref = plan.resolved_preference_execution
+    assert pref is not None and plan.resolved_execution is None
+    # the resolver sealed a self-consistent config bound to the dpo_qlora objective + the DPO loss/data
+    assert pref.configuration_hash == preference_execution_configuration_hash_for(pref)
+    assert pref.objective_ref.id == "dpo_qlora"
+    assert pref.preference.objective == "dpo" and pref.data.schema_id == "preference"
+    # the sealed data policy binds the PREFERENCE-pair formatter, not the SFT instruction formatter
+    assert pref.data.formatter_id == "corpus-studio:preference-pair-v1"
+    assert pref.data.max_prompt_length < pref.data.max_length  # room for the response
+    # deferred #779 finding: device_map reconciles to exactly the one sealed compute device
+    assert len(pref.device_map) == 1
+    # refuse-at-execution must be REACHABLE with a TYPED reason at the actual gates, not just the innermost
+    # _resolve_config: the dispatch lane selector AND the direct runner's first resolution step both refuse
+    # a preference plan before the generic "no ResolvedExecutionConfiguration" path.
+    from corpus_studio.platform.execution_config import (
+        ExecutionConfigurationError,
+        required_runner_lane,
+    )
+
+    with pytest.raises(ExecutionConfigurationError, match="not yet executable"):
+        required_runner_lane(plan)  # dispatch gate (shipping platform-run flow)
+    with pytest.raises(RunnerFailure, match="not yet executable"):
+        TrainingRunner(cpu_toy=False)._resolve_trainer(plan)  # direct runner, before _resolve_config
+    with pytest.raises(RunnerFailure, match="not yet executable"):
+        TrainingRunner(cpu_toy=False)._resolve_config(plan, "run-x")  # defense-in-depth
+
+
+def test_preference_resolver_threads_the_dpo_knobs():
+    # beta / label_smoothing / max_prompt_length are operator knobs, not fixed defaults - they flow from
+    # PlannerConstraints into the sealed preference config.
+    plan = _plan(
+        _profile(cc_major=8), _report(), task_type="preference", objective_id="dpo_qlora",
+        preference_beta=0.3, preference_label_smoothing=0.2, preference_max_prompt_length=1234)
+    pref = plan.resolved_preference_execution
+    assert pref.preference.beta == 0.3 and pref.preference.label_smoothing == 0.2
+    assert pref.data.max_prompt_length == 1234
+    # unset -> documented defaults (half the window for the prompt cap)
+    dpref = _plan(
+        _profile(cc_major=8), _report(), task_type="preference", objective_id="dpo_qlora"
+    ).resolved_preference_execution
+    assert dpref.preference.beta == 0.1 and dpref.preference.label_smoothing == 0.0
+    assert dpref.data.max_prompt_length == dpref.data.max_length // 2
+
+
+def test_preference_resolver_rejects_invalid_dpo_knobs():
+    # Fail-closed on out-of-range / non-finite knobs (a clean PlannerError, never a silent clamp).
+    base = dict(task_type="preference", objective_id="dpo_qlora")
+    for bad_beta in (0.0, -1.0, float("inf"), float("nan")):
+        with pytest.raises(PlannerError, match="preference_beta"):
+            _plan(_profile(cc_major=8), _report(), **base, preference_beta=bad_beta)
+    with pytest.raises(PlannerError, match="label_smoothing"):
+        _plan(_profile(cc_major=8), _report(), **base, preference_label_smoothing=0.5)
+    for bad_cap in (0, -5, 999999):  # < 1 or >= the sequence window
+        with pytest.raises(PlannerError, match="max_prompt_length"):
+            _plan(_profile(cc_major=8), _report(), **base, preference_max_prompt_length=bad_cap)
+
+
+def test_preference_resolver_refuses_an_incompatible_project_local_schema(monkeypatch):
+    # A project-local 'preference' schema that makes a required pair field optional (or retypes it) is
+    # rejected - the sealed chosen_rejected formatter needs prompt/chosen/rejected as required text.
+    import corpus_studio.platform.planner as planner_mod
+    from corpus_studio.schemas.registry import load_builtin_schema
+
+    good = load_builtin_schema("preference")
+    incompatible = good.model_copy(
+        update={
+            "fields": [
+                field.model_copy(update={"required": False}) if field.name == "chosen" else field
+                for field in good.fields
+            ]
+        }
+    )
+    monkeypatch.setattr(planner_mod, "resolve_schema", lambda _project_dir, _schema_id: (incompatible, "project"))
+    with pytest.raises(PlannerError, match="incompatible with the chosen_rejected pair formatter"):
         _plan(_profile(cc_major=8), _report(), task_type="preference", objective_id="dpo_qlora")
+
+
+def test_planner_refuses_a_preference_objective_on_a_non_preference_task():
+    # A preference objective (dpo_qlora) with task_type=sft would silently lower to a dense-SFT run while
+    # retaining a misleading DPO identity - refuse the objective/task contradiction fail-closed.
+    with pytest.raises(PlannerError, match="requires task_type='preference'"):
+        _plan(_profile(cc_major=8), _report(), task_type="sft", objective_id="dpo_qlora")
 
 
 def test_native_windows_blackwell_host_forces_math_bf16_nf4_qlora():
@@ -1044,3 +1142,230 @@ def test_an_invalid_resolved_field_becomes_planner_error():
     # pydantic ValidationError leaking out.
     with pytest.raises(PlannerError, match="invalid"):
         _plan(_profile(cc_major=12), _report(), sequence_len=0)
+
+
+# ---- pretraining (S3a-2): from-scratch / continued planning through its own builder ----------------
+
+
+def _pretraining_data(**over):
+    base = dict(
+        shards=(
+            PretrainingShard(
+                shard_id="s0",
+                location="corpus/s0.jsonl",
+                source="web",
+                row_count=100,
+                token_count=100_000,
+                content_sha256="d" * 64,
+            ),
+        ),
+        data_seed=42,
+        global_batch_size=8,
+        token_budget=1_000_000,
+    )
+    base.update(over)
+    return PretrainingDataPolicy(**base)
+
+
+def _pretraining_plan(profile, report, *, pretraining_data=None, **kw):
+    kw.setdefault("base_model", "arch:demo-small")
+    kw.setdefault("dataset_path", "corpus/manifest.json")
+    kw.setdefault("task_type", "pretraining")
+    kw.setdefault("init_mode", "random")
+    kw.setdefault("architecture_ref_id", "arch:demo-small")
+    kw.setdefault("architecture_ref_sha256", "c" * 64)
+    kw.setdefault("init_vocab_size", 32000)
+    kw.setdefault("tokenizer_source_mode", "train")
+    kw.setdefault("tokenizer_algorithm", "bpe")
+    kw.setdefault("tokenizer_vocab_size", 32000)
+    kw.setdefault("tokenizer_special_tokens", ("<bos>", "<eos>", "<pad>", "<unk>"))
+    kw.setdefault("export_format", "merged_safetensors")
+    return build_run_plan(
+        profile=profile,
+        capabilities=report,
+        dataset_ref=Ref(id="corpus", hash=P.HashRef(value="d" * 64)),
+        constraints=PlannerConstraints(**kw),
+        plan_id="pt1",
+        now=_NOW,
+        pretraining_data=_pretraining_data() if pretraining_data is None else pretraining_data,
+    )
+
+
+def test_pretraining_plan_seals_a_from_scratch_config():
+    from corpus_studio.platform.execution_config import (
+        verify_pretraining_execution_configuration_hash,
+    )
+
+    plan = _pretraining_plan(_profile(cc_major=8), _report())
+    assert plan.task_type.value == "pretraining"
+    assert plan.resolved_pretraining_execution is not None
+    assert plan.resolved_execution is None and plan.resolved_preference_execution is None
+    cfg = plan.resolved_pretraining_execution
+    assert verify_pretraining_execution_configuration_hash(cfg)
+    assert cfg.init.mode == "random" and cfg.objective_ref.id == "pretraining"
+    assert cfg.tokenizer_source.mode == "train"
+    # the base-model-less body synthesizes a full-parameter, unquantized summary
+    assert plan.adapter.method.value == "full_finetune"
+    assert plan.quantization.value == "none"
+    assert plan.loss_impl.value in {"cross_entropy", "liger_fused_ce"}
+    assert verify_run_plan_hash(plan)
+
+
+def test_cpu_toy_pretraining_actually_trains_a_from_scratch_model(tmp_path):
+    # S3b-1a inc 3a: the CPU proof - run_pretraining trains a random-init model with a from-scratch BPE
+    # tokenizer over packed sequences. Skipped in the base gate (no torch); runs where the [train] libs are.
+    import hashlib
+    import json
+
+    pytest.importorskip("torch")
+    pytest.importorskip("transformers")
+    pytest.importorskip("tokenizers")
+    pytest.importorskip("datasets")
+    pytest.importorskip("accelerate")
+    from corpus_studio.training.pretraining_trainer import run_pretraining
+
+    arch = tmp_path / "arch.json"
+    arch.write_text(
+        json.dumps(
+            {"model_type": "gpt2", "n_embd": 32, "n_layer": 2, "n_head": 2, "n_inner": 64,
+             "n_positions": 128, "vocab_size": 300}
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "corpus").mkdir()
+    shard = tmp_path / "corpus" / "s0.jsonl"
+    shard.write_text(
+        "\n".join(
+            json.dumps({"text": "the quick brown fox jumps over the lazy dog . " * 6}) for _ in range(60)
+        ),
+        encoding="utf-8",
+    )
+    data = _pretraining_data(
+        shards=(
+            PretrainingShard(
+                shard_id="s0", location="corpus/s0.jsonl", source="t", row_count=60, token_count=600,
+                content_sha256=hashlib.sha256(shard.read_bytes()).hexdigest(),
+            ),
+        ),
+        token_budget=600,
+    )
+    plan = _pretraining_plan(
+        _profile(cc_major=8), _report(readiness="cpu_toy_only"), pretraining_data=data,
+        architecture_ref_id=str(arch), architecture_ref_sha256=hashlib.sha256(arch.read_bytes()).hexdigest(),
+        init_vocab_size=300, tokenizer_vocab_size=300,
+        tokenizer_special_tokens=("<unk>", "<bos>", "<eos>", "<pad>"), sequence_len=32, allow_cpu_toy=True,
+    )
+    result = run_pretraining(
+        plan.resolved_pretraining_execution, corpus_root=tmp_path, output_dir=str(tmp_path / "out")
+    )
+    assert result.cpu_toy and result.tokenizer_source == "trained"
+    assert result.steps == plan.resolved_pretraining_execution.schedule.max_steps
+    assert result.num_blocks > 0 and result.final_loss is not None
+    assert (tmp_path / "out" / "model.safetensors").exists()
+
+
+def test_pretraining_import_tokenizer_seals_the_location():
+    # S3b-1a inc 3b: an import tokenizer is sealed with WHERE to load it (location) + its content digest.
+    plan = _pretraining_plan(
+        _profile(cc_major=8), _report(), tokenizer_source_mode="import",
+        tokenizer_content_sha256="b" * 64, tokenizer_location="/tokenizers/mine",
+    )
+    ts = plan.resolved_pretraining_execution.tokenizer_source
+    assert ts.mode == "import"
+    assert ts.tokenizer_location == "/tokenizers/mine" and ts.tokenizer_content_sha256 == "b" * 64
+
+
+def test_pretraining_plan_continued_binds_the_continued_objective():
+    plan = _pretraining_plan(
+        _profile(cc_major=8),
+        _report(),
+        init_mode="continued",
+        source_checkpoint_ref_id="ckpt:base",
+        source_checkpoint_ref_sha256="e" * 64,
+        tokenizer_source_mode="freeze",
+        tokenizer_content_sha256="f" * 64,
+        architecture_ref_id=None,
+        architecture_ref_sha256=None,
+        init_vocab_size=None,
+    )
+    cfg = plan.resolved_pretraining_execution
+    assert cfg.init.mode == "continued"
+    assert cfg.objective_ref.id == "continued_pretraining"
+
+
+def test_pretraining_plan_is_admitted_at_execution_and_routes_to_the_pretraining_lane():
+    from corpus_studio.platform.execution_config import required_runner_lane
+
+    # 'pretraining' is workload_verified, so the dispatch gate admits it and routes to the
+    # first-party PretrainingRunner lane (never the SFT/DPO lane).
+    plan = _pretraining_plan(_profile(cc_major=8), _report())
+    assert required_runner_lane(plan) in ("pretraining", "pretraining_cpu_toy")
+
+
+def test_pretraining_requires_a_corpus():
+    with pytest.raises(PlannerError, match="requires a corpus"):
+        build_run_plan(
+            profile=_profile(cc_major=8),
+            capabilities=_report(),
+            dataset_ref=Ref(id="corpus", hash=P.HashRef(value="d" * 64)),
+            constraints=PlannerConstraints(
+                base_model="arch:demo",
+                dataset_path="corpus/manifest.json",
+                task_type="pretraining",
+                init_mode="random",
+                architecture_ref_id="arch:demo",
+                architecture_ref_sha256="c" * 64,
+                init_vocab_size=32000,
+                tokenizer_source_mode="train",
+                tokenizer_algorithm="bpe",
+                tokenizer_vocab_size=32000,
+                tokenizer_special_tokens=("<eos>",),
+            ),
+            plan_id="pt1",
+            now=_NOW,
+        )
+
+
+def test_pretraining_random_init_requires_an_architecture():
+    with pytest.raises(PlannerError, match="architecture ref"):
+        _pretraining_plan(_profile(cc_major=8), _report(), architecture_ref_id=None)
+
+
+def test_pretraining_train_tokenizer_requires_an_algorithm():
+    with pytest.raises(PlannerError, match="algorithm"):
+        _pretraining_plan(_profile(cc_major=8), _report(), tokenizer_algorithm=None)
+
+
+def test_pretraining_fit_is_honestly_not_estimated_not_fabricated():
+    # AUDIT fix: a full-parameter pretraining plan must NOT be run through the LoRA/QLoRA VRAM estimator
+    # (which would fabricate a fit as if it were LoRA r16 over an HF base). The calibrator says so.
+    from corpus_studio.platform.calibrator import classify_fit
+
+    plan = _pretraining_plan(_profile(cc_major=8), _report())
+    fit = classify_fit(plan, _profile(cc_major=8))
+    assert fit.classification.name == "PLANNED_UNPROVEN"
+    assert "pretraining" in fit.rationale and "not estimated" in fit.rationale
+
+
+def test_pretraining_routes_to_its_lane_but_the_sft_runner_still_refuses_it():
+    # The dispatch gate now routes pretraining to the PretrainingRunner lane; the SFT runner keeps a
+    # defense-in-depth typed refusal so a pretraining plan can NEVER run the adapter path.
+    from corpus_studio.platform.execution_config import required_runner_lane
+    from corpus_studio.platform.runners import RunnerFailure, TrainingRunner
+
+    plan = _pretraining_plan(_profile(cc_major=8), _report())
+    assert required_runner_lane(plan) in ("pretraining", "pretraining_cpu_toy")
+    with pytest.raises(RunnerFailure, match="PretrainingRunner lane"):
+        TrainingRunner(cpu_toy=False)._resolve_trainer(plan)
+    with pytest.raises(RunnerFailure, match="PretrainingRunner lane"):
+        TrainingRunner(cpu_toy=False)._resolve_config(plan, "run-x")
+
+
+def test_pretraining_model_vocab_defaults_to_the_trained_tokenizer_vocab():
+    # AUDIT fix: a from-scratch model sizes its embedding to its tokenizer - the operator need not repeat
+    # the vocab on both knobs, and a mismatch can never be sealed.
+    plan = _pretraining_plan(
+        _profile(cc_major=8), _report(), init_vocab_size=None, tokenizer_vocab_size=50000
+    )
+    cfg = plan.resolved_pretraining_execution
+    assert cfg.init.vocab_size == 50000 and cfg.tokenizer_source.vocab_size == 50000

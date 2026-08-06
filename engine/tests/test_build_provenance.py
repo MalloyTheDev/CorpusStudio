@@ -63,7 +63,11 @@ def _minimal_wheel(path: Path, *, members: dict[str, bytes] | None = None) -> Pa
     path.parent.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(path, "w") as archive:
         for name, data in base.items():
-            archive.writestr(name, data)
+            # Fixed timestamp: writestr(str, ...) stamps the CURRENT time, so two builds that straddle a
+            # one-second tick differ - which intermittently flaked test_stamp_is_deterministic. The
+            # production stamp already uses a fixed date_time; the base wheel must too.
+            info = zipfile.ZipInfo(name, date_time=(1980, 1, 1, 0, 0, 0))
+            archive.writestr(info, data)
     return path
 
 

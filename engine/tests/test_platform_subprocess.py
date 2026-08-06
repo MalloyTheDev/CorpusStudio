@@ -201,7 +201,7 @@ def test_parent_refuses_wrong_runner_lane_before_spawning_worker():
 
 
 def test_build_runner_selects_the_runner():
-    from corpus_studio.platform.runners import TrainingRunner
+    from corpus_studio.platform.runners import PretrainingRunner, TrainingRunner
     from corpus_studio.platform.supervisor import EchoRunner
     from corpus_studio.platform.worker import _build_runner
 
@@ -209,6 +209,81 @@ def test_build_runner_selects_the_runner():
     trainer = _build_runner("cpu_toy")
     assert isinstance(trainer, TrainingRunner)
     assert trainer.cpu_toy is True and trainer.max_steps is None
+    # the workload_verified pretraining lanes route to the full-parameter PretrainingRunner, never SFT
+    assert isinstance(_build_runner("training"), TrainingRunner)
+    pretrain = _build_runner("pretraining")
+    assert isinstance(pretrain, PretrainingRunner) and pretrain.cpu_toy is False
+    pretrain_toy = _build_runner("pretraining_cpu_toy")
+    assert isinstance(pretrain_toy, PretrainingRunner) and pretrain_toy.cpu_toy is True
+    # corpus_root threads to the pretraining runner (relative shard anchor); default is CWD.
+    assert _build_runner("pretraining", corpus_root="/data/corpus").corpus_root == "/data/corpus"
+
+
+def test_build_lane_runner_is_the_shared_factory():
+    # The SINGLE lane->Runner mapping that BOTH the in-process platform_run path and the subprocess
+    # worker call, so they cannot drift - the exact defect where the in-process CLI path lacked the
+    # pretraining lanes while the worker had them. max_steps is the CLI-only trainer cap; corpus_root
+    # anchors a pretraining plan's relative shards.
+    from corpus_studio.platform.runners import (
+        PretrainingRunner,
+        TrainingRunner,
+        build_lane_runner,
+    )
+    from corpus_studio.platform.supervisor import EchoRunner
+
+    assert isinstance(build_lane_runner("echo"), EchoRunner)
+    train = build_lane_runner("training", max_steps=7)
+    assert isinstance(train, TrainingRunner) and train.cpu_toy is False and train.max_steps == 7
+    assert build_lane_runner("cpu_toy").cpu_toy is True
+    pre = build_lane_runner("pretraining", corpus_root="/data/corpus")
+    assert isinstance(pre, PretrainingRunner) and pre.cpu_toy is False
+    assert pre.corpus_root == "/data/corpus"
+    assert build_lane_runner("pretraining_cpu_toy").cpu_toy is True
+
+
+def test_worker_arg_parser_accepts_the_pretraining_lanes():
+    # Regression: the pretraining subprocess lane shipped broken because worker.main's argparse choices
+    # omitted it - _build_runner mapped it, but argparse exited 2 ("invalid choice") first, so a managed
+    # pretraining plan (forced to --subprocess) could never run. Gate on what the parser ACCEPTS.
+    from corpus_studio.platform.worker import _build_arg_parser
+
+    parser = _build_arg_parser()
+    base = ["--backend-id", "b", "--environment-id", "e"]
+    for lane in ("echo", "cpu_toy", "training", "pretraining", "pretraining_cpu_toy"):
+        assert parser.parse_args(["--runner", lane, *base]).runner == lane
+    assert parser.parse_args(base).corpus_root == "."
+    assert parser.parse_args([*base, "--corpus-root", "/data/corpus"]).corpus_root == "/data/corpus"
+    with pytest.raises(SystemExit):
+        parser.parse_args(["--runner", "not-a-lane", *base])
+
+
+def test_bind_protocol_stream_isolates_the_protocol_from_fd1_writes():
+    # #10 regression: a NATIVE/C write straight to fd 1 (which a Python-level redirect_stdout cannot
+    # catch - the pretraining worker's tokenizer training / transformers paths do this) must NOT corrupt
+    # the framed protocol. It must land on stderr, while the protocol stream (a private dup of the real
+    # stdout) still reaches the stdout the parent reads. Run in a SUBPROCESS so the fd-level dup2 never
+    # touches this test process's own fd 1.
+    import os as _os
+    import subprocess
+    import textwrap
+
+    engine_dir = _os.path.dirname(_os.path.dirname(__file__))
+    script = textwrap.dedent(
+        """
+        import os
+        from corpus_studio.platform.worker import _bind_protocol_stream
+        stream = _bind_protocol_stream()
+        os.write(1, b"NATIVE-NOISE\\n")   # native fd-1 write; bypasses sys.stdout
+        print("python-print")             # sys.stdout -> fd 1 -> stderr after the redirect
+        stream.write("PROTOCOL\\n"); stream.flush()
+        """
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", script], capture_output=True, text=True, cwd=engine_dir
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "PROTOCOL"  # ONLY the protocol reaches the real stdout
+    assert "NATIVE-NOISE" in result.stderr and "python-print" in result.stderr  # all fd-1 -> stderr
 
 
 def test_worker_main_runs_from_stdin(monkeypatch, capsys):

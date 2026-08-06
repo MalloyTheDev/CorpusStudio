@@ -1,6 +1,7 @@
 from pathlib import Path
 import contextlib
 import json
+import math
 import os
 import sqlite3
 import sys
@@ -511,6 +512,13 @@ def platform_run(
         "--max-steps",
         help="Compatibility assertion only; must equal the schedule already sealed in the RunPlan.",
     ),
+    corpus_root: str = typer.Option(
+        ".",
+        "--corpus-root",
+        help="Directory a from-scratch / continued pretraining plan's RELATIVE shard locations resolve "
+        "against (default: the current directory). Absolute shard paths and non-pretraining lanes "
+        "ignore it.",
+    ),
     out_dir: Optional[Path] = typer.Option(
         None, "--out", help="Write the terminal RunManifest.json to this directory (atomic)."
     ),
@@ -554,10 +562,21 @@ def platform_run(
     becomes a real KERNEL_STALL; a crash is isolated). The RunManifest classifies the terminal state
     (succeeded / failed / cancelled) with a FailureRecord taxonomy on abnormal termination."""
     from corpus_studio.platform.contracts import RunPlan
-    from corpus_studio.platform.supervisor import EchoRunner, Runner, demo_run_plan, execute_run
+    from corpus_studio.platform.supervisor import Runner, demo_run_plan, execute_run
 
-    if runner_name not in ("auto", "echo", "cpu_toy", "training"):
-        typer.echo(f"Unknown runner '{runner_name}' (auto | echo | cpu_toy | training).", err=True)
+    if runner_name not in (
+        "auto",
+        "echo",
+        "cpu_toy",
+        "training",
+        "pretraining",
+        "pretraining_cpu_toy",
+    ):
+        typer.echo(
+            f"Unknown runner '{runner_name}' (auto | echo | cpu_toy | training | pretraining | "
+            "pretraining_cpu_toy).",
+            err=True,
+        )
         raise typer.Exit(2)
 
     if demo:
@@ -658,6 +677,10 @@ def platform_run(
             from corpus_studio.platform.subprocess_supervisor import worker_identity_argv
 
             managed_worker_argv += worker_identity_argv(plan)
+            # A non-default corpus root anchors a managed pretraining plan's relative shard locations
+            # inside the isolated interpreter; the default is left off so ordinary argv is unchanged.
+            if corpus_root != ".":
+                managed_worker_argv += ["--corpus-root", corpus_root]
         except EnvironmentManagerError as exc:
             managed_lease.close()
             typer.echo(exc.failure.model_dump_json(indent=2), err=True)
@@ -697,6 +720,7 @@ def platform_run(
                 plan,
                 run_id=run_identity,
                 runner_name=runner_name,
+                corpus_root=corpus_root,
                 max_steps=max_steps,
                 silence_timeout_s=silence_timeout,
                 preflight_timeout_s=preflight_timeout,
@@ -705,12 +729,15 @@ def platform_run(
                 telemetry=sampler,
             )
         else:
-            if runner_name == "echo":
-                runner: Runner = EchoRunner()
-            else:
-                from corpus_studio.platform.runners import TrainingRunner
+            # The SAME lane factory the subprocess worker uses, so the in-process path can't drift (it
+            # once lacked the pretraining lanes while the worker had them). A workload_verified
+            # pretraining plan gets the full-parameter runner, never the SFT/DPO adapter runner (which
+            # execute_run's runner-type gate would reject).
+            from corpus_studio.platform.runners import build_lane_runner
 
-                runner = TrainingRunner(cpu_toy=(runner_name == "cpu_toy"), max_steps=max_steps)
+            runner: Runner = build_lane_runner(
+                runner_name, max_steps=max_steps, corpus_root=corpus_root
+            )
             result = execute_run(
                 plan, runner, run_id=run_identity, out_dir=out_dir, telemetry=sampler
             )
@@ -862,6 +889,20 @@ def checkpoint_verify(
         )
 
 
+def _project_dir_for_dataset(dataset_path: str) -> Optional[Path]:
+    """The nearest project root (a directory containing ``project.json``) at or above the dataset, or None.
+    A preference plan resolves its dataset schema against this root, so a project-local schema that shadows
+    the builtin governs the sealed digest (rather than silently sealing the builtin)."""
+    try:
+        start = Path(dataset_path).resolve().parent
+    except (OSError, ValueError):
+        return None
+    for candidate in (start, *start.parents):
+        if (candidate / "project.json").is_file():
+            return candidate
+    return None
+
+
 @app.command("platform-plan")
 def platform_plan(
     base_model: str = typer.Option(..., "--base-model", help="The base model to fine-tune."),
@@ -878,6 +919,85 @@ def platform_plan(
     dataset_path: str = typer.Option(..., "--dataset", help="Path to the training JSONL."),
     dataset_ref: str = typer.Option("dataset", "--dataset-ref", help="Stable id for the dataset the plan references."),
     task_type: str = typer.Option("sft", "--task-type", help="Training task type (sft / preference / ...)."),
+    objective: Optional[str] = typer.Option(
+        None,
+        "--objective",
+        help="Training objective id (REQUIRED for --task-type preference, e.g. dpo_qlora; "
+        "see 'training-objectives'). Ignored for sft/pretraining, which resolve by task.",
+    ),
+    dpo_beta: float = typer.Option(
+        0.1, "--dpo-beta", help="DPO KL strength (preference plans only)."
+    ),
+    dpo_label_smoothing: float = typer.Option(
+        0.0, "--dpo-label-smoothing", help="cDPO label smoothing for noisy preferences (0 <= x < 0.5)."
+    ),
+    max_prompt_length: Optional[int] = typer.Option(
+        None,
+        "--max-prompt-length",
+        help="DPO prompt token cap (preference plans only). Defaults to half the sequence window; "
+        "must be below --sequence-len so the response has room.",
+    ),
+    corpus_manifest: Optional[Path] = typer.Option(
+        None,
+        "--corpus-manifest",
+        help="Pretraining corpus: a JSON PretrainingDataPolicy (content-hashed shards + token budget / "
+        "mixture). Defaults to --dataset. Required for --task-type pretraining.",
+    ),
+    init_mode: Optional[str] = typer.Option(
+        None, "--init-mode", help="Pretraining init: 'random' (from-scratch) or 'continued'."
+    ),
+    architecture_config: Optional[Path] = typer.Option(
+        None,
+        "--architecture-config",
+        help="Random-init: the model architecture config file (hashed into the sealed init spec).",
+    ),
+    custom_code_bundle: Optional[Path] = typer.Option(
+        None,
+        "--custom-code-bundle",
+        help="Mode-3 custom_decoder: the local custom-block bundle (.py); its bytes are pinned into the seal.",
+    ),
+    custom_code_vetting: Optional[Path] = typer.Option(
+        None,
+        "--custom-code-vetting",
+        help="Mode-3 custom_decoder: the ADMITTED vetting report (from vet-model-code) for that bundle.",
+    ),
+    init_vocab_size: Optional[int] = typer.Option(
+        None, "--init-vocab-size", help="Random-init vocabulary size."
+    ),
+    init_seed: Optional[int] = typer.Option(
+        None, "--init-seed", help="Random-init seed (defaults to --seed)."
+    ),
+    source_checkpoint_sha256: Optional[str] = typer.Option(
+        None,
+        "--source-checkpoint-sha256",
+        help="Continued init: the base checkpoint content digest (its id is --base-model).",
+    ),
+    tokenizer_source: Optional[str] = typer.Option(
+        None,
+        "--tokenizer-source",
+        help="Pretraining tokenizer: 'train' (from the corpus), 'import', or 'freeze'.",
+    ),
+    tokenizer_algorithm: Optional[str] = typer.Option(
+        None, "--tokenizer-algorithm", help="Train-tokenizer algorithm: bpe / unigram / wordpiece."
+    ),
+    tokenizer_vocab_size: Optional[int] = typer.Option(
+        None, "--tokenizer-vocab-size", help="Train-tokenizer vocabulary size."
+    ),
+    tokenizer_special_tokens: Optional[str] = typer.Option(
+        None,
+        "--tokenizer-special-tokens",
+        help="Comma-separated special tokens for a trained tokenizer (e.g. '<bos>,<eos>,<pad>,<unk>').",
+    ),
+    tokenizer_location: Optional[str] = typer.Option(
+        None,
+        "--tokenizer-location",
+        help="Import/freeze tokenizer: the local path the worker loads the pinned tokenizer from.",
+    ),
+    tokenizer_digest: Optional[str] = typer.Option(
+        None,
+        "--tokenizer-content-sha256",
+        help="Import/freeze pretraining tokenizer: the exact tokenizer content digest.",
+    ),
     dataset_format: str = typer.Option("instruction", "--dataset-format", help="Row format: instruction (Alpaca) or chat (messages)."),
     output_dir: Optional[str] = typer.Option(
         None,
@@ -991,6 +1111,7 @@ def platform_plan(
     from corpus_studio.platform.contracts import (
         ParameterAccountingReport,
         PhysicalExecutionSpec,
+        PretrainingDataPolicy,
         StorageProfile,
     )
     from corpus_studio.platform.planner import (
@@ -1023,22 +1144,26 @@ def platform_plan(
         assess_dataset_file_conformance,
     )
 
-    try:
-        dataset_conformance = assess_dataset_file_conformance(dataset_path, dataset_format)
-    except DatasetConformanceError as exc:
-        typer.echo(f"dataset conformance preflight failed: {exc}", err=True)
-        raise typer.Exit(2) from exc
-    if not dataset_conformance.is_conformant:
-        typer.echo(dataset_conformance.describe_refusal(dataset_path), err=True)
-        raise typer.Exit(2)
-    # Partial conformance: some rows render, some do not. Sealing silently would over-claim the
-    # trained row count (the plan implies the whole dataset trains, but only the compatible rows do).
-    # Fail closed unless the caller explicitly accepts training only the compatible rows.
-    if dataset_conformance.rejected_rows > 0:
-        if not allow_unrenderable_rows:
-            typer.echo(dataset_conformance.describe_partial_refusal(dataset_path), err=True)
+    # Pretraining consumes a sharded corpus (a PretrainingDataPolicy), NOT an instruction/chat dataset,
+    # so the SFT/DPO row-conformance preflight does not apply to it (it stays None for a pretraining plan).
+    dataset_conformance = None
+    if task_type != "pretraining":
+        try:
+            dataset_conformance = assess_dataset_file_conformance(dataset_path, dataset_format)
+        except DatasetConformanceError as exc:
+            typer.echo(f"dataset conformance preflight failed: {exc}", err=True)
+            raise typer.Exit(2) from exc
+        if not dataset_conformance.is_conformant:
+            typer.echo(dataset_conformance.describe_refusal(dataset_path), err=True)
             raise typer.Exit(2)
-        typer.echo(dataset_conformance.describe_partial_warning(dataset_path), err=True)
+        # Partial conformance: some rows render, some do not. Sealing silently would over-claim the
+        # trained row count (the plan implies the whole dataset trains, but only the compatible rows do).
+        # Fail closed unless the caller explicitly accepts training only the compatible rows.
+        if dataset_conformance.rejected_rows > 0:
+            if not allow_unrenderable_rows:
+                typer.echo(dataset_conformance.describe_partial_refusal(dataset_path), err=True)
+                raise typer.Exit(2)
+            typer.echo(dataset_conformance.describe_partial_warning(dataset_path), err=True)
     # Resolve, canonicalize, and CONTAIN the sealed output root so a plan's write location is
     # CWD-independent and can never land inside the checkout (containment finding F5). Omission defaults
     # to the application-data runs root; an in-repo path is refused fail-closed before any plan id mints.
@@ -1047,15 +1172,144 @@ def platform_plan(
     except OutputContainmentError as exc:
         typer.echo(f"invalid output root: {exc}", err=True)
         raise typer.Exit(2) from exc
+    # Pretraining (S3a-2): read the corpus policy + derive the sealed architecture ref. The tokenizer
+    # digest overrides the model digest for an imported/frozen pretraining tokenizer.
+    pretraining_data = None
+    pretraining_arch_ref_id = None
+    pretraining_arch_ref_sha256 = None
+    custom_code_bundle_ref_id = None
+    custom_code_bundle_ref_sha256 = None
+    custom_code_entry_symbol = None
+    custom_code_interface_version = None
+    custom_code_vetting_ref_id = None
+    custom_code_vetting_ref_sha256 = None
+    resolved_tokenizer_digest = model_digest
+    # Custom-code flags are meaningful ONLY for a pretraining run with a custom_decoder architecture; a
+    # non-pretraining task or a missing --architecture-config would silently ignore them, so refuse.
+    if (custom_code_bundle is not None or custom_code_vetting is not None) and (
+        task_type != "pretraining" or architecture_config is None
+    ):
+        typer.echo(
+            "--custom-code-bundle / --custom-code-vetting apply only to a pretraining run with a "
+            "custom_decoder --architecture-config.",
+            err=True,
+        )
+        raise typer.Exit(2)
+    if task_type == "pretraining":
+        manifest_path = corpus_manifest or Path(dataset_path)
+        try:
+            pretraining_data = PretrainingDataPolicy.model_validate_json(
+                manifest_path.read_text(encoding="utf-8")
+            )
+        except (OSError, ValueError, ValidationError) as exc:
+            typer.echo(f"invalid corpus manifest: {exc}", err=True)
+            raise typer.Exit(2) from exc
+        if tokenizer_digest is not None:
+            resolved_tokenizer_digest = tokenizer_digest
+        if architecture_config is not None:
+            import hashlib  # noqa: PLC0415
+
+            try:
+                arch_bytes = architecture_config.read_bytes()
+                arch_config_json = json.loads(arch_bytes)
+            except (OSError, ValueError) as exc:
+                typer.echo(f"cannot read --architecture-config: {exc}", err=True)
+                raise typer.Exit(2) from exc
+            pretraining_arch_ref_id = str(architecture_config)
+            pretraining_arch_ref_sha256 = hashlib.sha256(arch_bytes).hexdigest()
+            # A design no reference implementation builds is emitted with model_type "custom_decoder" (and
+            # a corpus_studio_needs_custom_code marker): the mode-3 custom-block path. It may be sealed ONLY
+            # with an ADMITTED, hash-matching vetting report for the EXACT bundle bytes; without that it is
+            # refused fail-closed. Execution stays gated at the worker regardless of admission.
+            is_custom_decoder = isinstance(arch_config_json, dict) and (
+                arch_config_json.get("model_type") == "custom_decoder"
+                or arch_config_json.get("corpus_studio_needs_custom_code") is True
+            )
+            if is_custom_decoder:
+                if custom_code_bundle is None or custom_code_vetting is None:
+                    typer.echo(
+                        "a custom_decoder architecture requires --custom-code-bundle and "
+                        "--custom-code-vetting (an admitted vetting report from vet-model-code).",
+                        err=True,
+                    )
+                    raise typer.Exit(2)
+                from corpus_studio.platform.contracts import ModelCodeVettingReport  # noqa: PLC0415
+
+                try:
+                    bundle_bytes = custom_code_bundle.read_bytes()
+                    vetting_bytes = custom_code_vetting.read_bytes()
+                    vetting_report = ModelCodeVettingReport.model_validate_json(vetting_bytes)
+                except (OSError, ValueError, ValidationError) as exc:
+                    typer.echo(f"cannot read the custom-code inputs: {exc}", err=True)
+                    raise typer.Exit(2) from exc
+                from corpus_studio.platform.custom_code_vetting import (  # noqa: PLC0415
+                    ANALYZER_VERSION,
+                )
+
+                # Bind admission to the CURRENT screening rules: a report from an older analyzer may have
+                # admitted code the current rules reject, so refuse it rather than let it bypass them.
+                if vetting_report.analyzer_version != ANALYZER_VERSION:
+                    typer.echo(
+                        f"the vetting report was produced by a different analyzer version "
+                        f"({vetting_report.analyzer_version} != {ANALYZER_VERSION}); re-run vet-model-code.",
+                        err=True,
+                    )
+                    raise typer.Exit(2)
+                if vetting_report.verdict != "admitted":
+                    typer.echo(
+                        "the vetting report did not admit this bundle; resolve its findings and re-run "
+                        "vet-model-code before planning.",
+                        err=True,
+                    )
+                    raise typer.Exit(2)
+                if vetting_report.bundle_sha256 != hashlib.sha256(bundle_bytes).hexdigest():
+                    typer.echo(
+                        "the vetting report does not match the bundle bytes (it screened different code); "
+                        "re-run vet-model-code on this exact bundle.",
+                        err=True,
+                    )
+                    raise typer.Exit(2)
+                custom_code_bundle_ref_id = str(custom_code_bundle)
+                custom_code_bundle_ref_sha256 = vetting_report.bundle_sha256
+                custom_code_entry_symbol = vetting_report.entry_symbol
+                custom_code_interface_version = vetting_report.interface_version
+                custom_code_vetting_ref_id = str(custom_code_vetting)
+                custom_code_vetting_ref_sha256 = hashlib.sha256(vetting_bytes).hexdigest()
+            elif custom_code_bundle is not None or custom_code_vetting is not None:
+                typer.echo(
+                    "--custom-code-bundle / --custom-code-vetting apply only to a custom_decoder "
+                    "architecture (a family or composed-on-standard-blocks design needs no custom code).",
+                    err=True,
+                )
+                raise typer.Exit(2)
+            # The architecture config's vocab_size IS the model's embedding size: default --init-vocab-size
+            # to it, and refuse an explicit value that contradicts it (a silent mismatch = a broken model).
+            arch_vocab = (
+                arch_config_json.get("vocab_size") if isinstance(arch_config_json, dict) else None
+            )
+            if isinstance(arch_vocab, int) and not isinstance(arch_vocab, bool) and arch_vocab > 0:
+                if init_vocab_size is None:
+                    init_vocab_size = arch_vocab
+                elif init_vocab_size != arch_vocab:
+                    typer.echo(
+                        f"--init-vocab-size {init_vocab_size} contradicts the architecture config's "
+                        f"vocab_size {arch_vocab}",
+                        err=True,
+                    )
+                    raise typer.Exit(2)
     constraints = PlannerConstraints(
         base_model=base_model,
         model_revision=model_revision,
         tokenizer_revision=tokenizer_revision,
         model_content_sha256=model_digest,
-        tokenizer_content_sha256=model_digest,
+        tokenizer_content_sha256=resolved_tokenizer_digest,
         dataset_path=dataset_path,
         dataset_content_sha256=dataset_digest,
         task_type=task_type,
+        objective_id=objective,
+        preference_beta=dpo_beta,
+        preference_label_smoothing=dpo_label_smoothing,
+        preference_max_prompt_length=max_prompt_length,
         dataset_format=dataset_format,
         output_dir=output_dir,
         sequence_len=sequence_len,
@@ -1074,6 +1328,28 @@ def platform_plan(
         allocator_max_split_size_mb=max_split_size_mb,
         allocator_gc_threshold=gc_threshold,
         allow_cpu_toy=allow_cpu_toy,
+        init_mode=init_mode,
+        architecture_ref_id=pretraining_arch_ref_id,
+        architecture_ref_sha256=pretraining_arch_ref_sha256,
+        custom_code_bundle_ref_id=custom_code_bundle_ref_id,
+        custom_code_bundle_ref_sha256=custom_code_bundle_ref_sha256,
+        custom_code_entry_symbol=custom_code_entry_symbol,
+        custom_code_interface_version=custom_code_interface_version,
+        custom_code_vetting_ref_id=custom_code_vetting_ref_id,
+        custom_code_vetting_ref_sha256=custom_code_vetting_ref_sha256,
+        init_vocab_size=init_vocab_size,
+        init_seed=init_seed,
+        source_checkpoint_ref_id=(base_model if init_mode == "continued" else None),
+        source_checkpoint_ref_sha256=source_checkpoint_sha256,
+        tokenizer_source_mode=tokenizer_source,
+        tokenizer_algorithm=tokenizer_algorithm,
+        tokenizer_vocab_size=tokenizer_vocab_size,
+        tokenizer_special_tokens=(
+            tuple(token.strip() for token in tokenizer_special_tokens.split(",") if token.strip())
+            if tokenizer_special_tokens
+            else None
+        ),
+        tokenizer_location=tokenizer_location,
     )
     parameter_accounting = None
     storage_profile = None
@@ -1153,6 +1429,8 @@ def platform_plan(
             storage_profile=storage_profile,
             allow_marginal_storage=allow_marginal_storage,
             allow_unknown_storage=allow_unknown_storage,
+            project_dir=_project_dir_for_dataset(dataset_path),
+            pretraining_data=pretraining_data,
         )
     except PlannerError as exc:
         typer.echo(str(exc), err=True)
@@ -1167,9 +1445,11 @@ def platform_plan(
         (out_dir / "FitClassification.json").write_text(fit.model_dump_json(indent=2), encoding="utf-8")
         # Seal the structural-conformance verdict alongside the plan so the sealed evidence records
         # exactly how many rows the plan's dataset_format renders (compatible) vs drops (rejected).
-        (out_dir / "DatasetConformance.json").write_text(
-            json.dumps(dataset_conformance.as_dict(), indent=2), encoding="utf-8"
-        )
+        # A pretraining plan has no row-conformance verdict (its corpus is a sharded PretrainingDataPolicy).
+        if dataset_conformance is not None:
+            (out_dir / "DatasetConformance.json").write_text(
+                json.dumps(dataset_conformance.as_dict(), indent=2), encoding="utf-8"
+            )
         if parameter_accounting is not None:
             (out_dir / "ParameterAccountingReport.json").write_text(
                 parameter_accounting.model_dump_json(indent=2), encoding="utf-8"
@@ -1186,7 +1466,9 @@ def platform_plan(
                 {
                     "run_plan": plan.model_dump(mode="json"),
                     "fit_classification": fit.model_dump(mode="json"),
-                    "dataset_conformance": dataset_conformance.as_dict(),
+                    "dataset_conformance": (
+                        dataset_conformance.as_dict() if dataset_conformance is not None else None
+                    ),
                 },
                 indent=2,
             )
@@ -1414,6 +1696,292 @@ def platform_backends(
             f"    adapters: {', '.join(a.value for a in backend.adapter_methods)}"
             f"  |  attention: {', '.join(a.value for a in backend.attention_impls)}"
         )
+
+
+def _parse_param_count(text: str) -> int:
+    """Parse a friendly parameter target ('125M', '1B', '350000000') into an int (fail-closed)."""
+    cleaned = text.strip().upper()
+    multiplier = 1
+    if cleaned.endswith("K"):
+        multiplier, cleaned = 1_000, cleaned[:-1]
+    elif cleaned.endswith("M"):
+        multiplier, cleaned = 1_000_000, cleaned[:-1]
+    elif cleaned.endswith("B"):
+        multiplier, cleaned = 1_000_000_000, cleaned[:-1]
+    value = float(cleaned) * multiplier
+    # Reject NaN / inf (e.g. '1e999' overflows to inf): int(inf) would raise an uncaught OverflowError.
+    if not math.isfinite(value) or value <= 0:
+        raise ValueError("must be a finite positive parameter count (e.g. 125M, 1B)")
+    return int(value)
+
+
+@app.command("create-model")
+def create_model(
+    ctx: typer.Context,
+    from_family: Optional[str] = typer.Option(
+        None,
+        "--from-family",
+        help="BASE ON a known architecture (llama / mistral / qwen2 / qwen3 / gemma / gemma2 / phi / "
+        "phi3 / starcoder2 / stablelm / gpt2 / gpt_neox). The result is BASED ON that family - not your "
+        "own design. Use --compose to design your own.",
+    ),
+    compose: bool = typer.Option(
+        False,
+        "--compose",
+        help="COMPOSE your OWN architecture from building blocks (--positions / --mlp / --norm / ...) "
+        "+ your --name. Your design; realized on the matching reference block implementation.",
+    ),
+    name: Optional[str] = typer.Option(
+        None, "--name", help="Your model's name (required for --compose; defaults to the family name)."
+    ),
+    positions: str = typer.Option(
+        "rope", "--positions", help="Compose: position scheme - rope or learned."
+    ),
+    mlp: str = typer.Option("gated", "--mlp", help="Compose: MLP shape - gated (SwiGLU) or standard."),
+    activation: str = typer.Option("silu", "--activation", help="Compose: MLP activation."),
+    norm: str = typer.Option("rmsnorm", "--norm", help="Compose: normalization - rmsnorm or layernorm."),
+    attention_bias: bool = typer.Option(
+        False, "--attention-bias/--no-attention-bias", help="Compose: bias on attention projections."
+    ),
+    mlp_bias: bool = typer.Option(
+        False, "--mlp-bias/--no-mlp-bias", help="Compose: bias on MLP projections."
+    ),
+    intermediate_ratio: Optional[float] = typer.Option(
+        None,
+        "--intermediate-ratio",
+        help="Compose: MLP intermediate / hidden ratio (default: gated 8/3, standard 4).",
+    ),
+    preset: Optional[str] = typer.Option(
+        None, "--preset", help="Size: tiny / small / base / large."
+    ),
+    params: Optional[str] = typer.Option(
+        None, "--params", help="Size: target parameter count (e.g. 125M, 1B) - solved to the nearest config."
+    ),
+    hidden_size: Optional[int] = typer.Option(None, "--hidden-size", help="Size: explicit hidden size."),
+    num_layers: Optional[int] = typer.Option(None, "--num-layers", help="Explicit layer count."),
+    num_heads: Optional[int] = typer.Option(None, "--num-heads", help="Explicit attention heads."),
+    num_kv_heads: Optional[int] = typer.Option(
+        None, "--num-kv-heads", help="Grouped-query KV heads (defaults to --num-heads)."
+    ),
+    intermediate_size: Optional[int] = typer.Option(
+        None, "--intermediate-size", help="Explicit MLP intermediate size."
+    ),
+    vocab_size: int = typer.Option(
+        32000, "--vocab-size", help="Vocabulary size (match your tokenizer)."
+    ),
+    context_length: int = typer.Option(4096, "--context-length", help="Maximum sequence length."),
+    tie_embeddings: Optional[bool] = typer.Option(
+        None, "--tie-embeddings/--no-tie-embeddings", help="Tie input/output embeddings."
+    ),
+    out: Optional[Path] = typer.Option(
+        None,
+        "--out",
+        help="Write the architecture config JSON here (feeds 'platform-plan --architecture-config').",
+    ),
+    json_out: bool = typer.Option(
+        False, "--json", help="Emit the build result (config + estimate + provenance) as JSON."
+    ),
+):
+    """Create a from-scratch model architecture config. Two HONEST modes:
+    --from-family <name> configures a KNOWN architecture (based on that family, NOT your own); --compose
+    designs YOUR OWN from building blocks (--positions / --mlp / --norm / ...) + --name. Torch-free: no
+    model is instantiated here (that is the pretraining worker). A composed design no reference
+    implementation builds is flagged 'needs custom code' (the custom-block path)."""
+    from corpus_studio.platform.architecture_builder import (  # noqa: PLC0415
+        ArchitectureBuilderError,
+        build_composed,
+        build_from_family,
+    )
+
+    if (from_family is not None) == compose:
+        typer.echo("specify exactly one of --from-family <name> or --compose", err=True)
+        raise typer.Exit(2)
+    # Block-shape flags DESIGN a composed architecture; a family's shape is fixed. Refuse them in family
+    # mode rather than silently ignoring what the user typed (an ignored flag is a broken control).
+    if from_family is not None:
+        block_params = (
+            "positions", "mlp", "activation", "norm", "attention_bias", "mlp_bias", "intermediate_ratio",
+        )
+        # Compare the ParameterSource by NAME, not identity: click re-exports the enum such that the
+        # imported member is not the same object the Context returns, so `== COMMANDLINE` is False.
+        supplied_names = [
+            p for p in block_params
+            if getattr(ctx.get_parameter_source(p), "name", "") == "COMMANDLINE"
+        ]
+        if supplied_names:
+            # Derive each flag's spelling from the command's own parameters - no hand-maintained mapping
+            # to drift if an option is renamed.
+            flag_by_name = {
+                p.name: (p.opts[0] if p.opts else f"--{p.name}") for p in ctx.command.params
+            }
+            supplied = [flag_by_name.get(n, f"--{n}") for n in supplied_names]
+            typer.echo(
+                f"{', '.join(supplied)} only apply to --compose (a family's architecture is fixed); "
+                "use --compose to design your own block shape.",
+                err=True,
+            )
+            raise typer.Exit(2)
+    target_parameters = None
+    if params is not None:
+        try:
+            target_parameters = _parse_param_count(params)
+        except ValueError as exc:
+            typer.echo(f"invalid --params: {exc}", err=True)
+            raise typer.Exit(2) from exc
+    sizing: dict[str, Any] = dict(
+        preset=preset,
+        target_parameters=target_parameters,
+        hidden_size=hidden_size,
+        num_hidden_layers=num_layers,
+        num_attention_heads=num_heads,
+        num_key_value_heads=num_kv_heads,
+        intermediate_size=intermediate_size,
+        vocab_size=vocab_size,
+        max_position_embeddings=context_length,
+    )
+    try:
+        if compose:
+            if name is None:
+                typer.echo("--compose requires --name (name your own model)", err=True)
+                raise typer.Exit(2)
+            if mlp not in {"gated", "standard"}:
+                typer.echo("--mlp must be 'gated' or 'standard'", err=True)
+                raise typer.Exit(2)
+            built = build_composed(
+                name=name,
+                positions=positions,
+                gated_mlp=(mlp == "gated"),
+                activation=activation,
+                norm=norm,
+                attention_bias=attention_bias,
+                mlp_bias=mlp_bias,
+                tie_embeddings=bool(tie_embeddings),
+                intermediate_ratio=intermediate_ratio,
+                **sizing,
+            )
+        else:
+            built = build_from_family(
+                from_family,  # type: ignore[arg-type]
+                name=name,
+                tie_word_embeddings=tie_embeddings,
+                **sizing,
+            )
+    except ArchitectureBuilderError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(2) from exc
+    # No silent truncation of a --params ask.
+    if target_parameters is not None:
+        drift = abs(built.estimated_parameters - target_parameters) / target_parameters
+        if drift > 0.25:
+            typer.echo(
+                f"note: the nearest valid config is ~{built.estimated_parameters / 1e6:.1f}M, "
+                f"{drift * 100:.0f}% from the {target_parameters / 1e6:.0f}M target.",
+                err=True,
+            )
+    if out is not None:
+        try:
+            out.write_text(json.dumps(built.config, indent=2), encoding="utf-8")
+        except OSError as exc:
+            typer.echo(f"cannot write --out: {exc}", err=True)
+            raise typer.Exit(2) from exc
+    if json_out:
+        typer.echo(
+            json.dumps(
+                {
+                    "name": built.name,
+                    "design_source": built.design_source,
+                    "realizing_family": built.realizing_family,
+                    "needs_custom_code": built.needs_custom_code,
+                    "config": built.config,
+                    "estimated_parameters": built.estimated_parameters,
+                    "hidden_size": built.hidden_size,
+                    "num_hidden_layers": built.num_hidden_layers,
+                    "num_attention_heads": built.num_attention_heads,
+                    "num_key_value_heads": built.num_key_value_heads,
+                    "intermediate_size": built.intermediate_size,
+                    "vocab_size": built.vocab_size,
+                },
+                indent=2,
+            )
+        )
+        return
+    if built.design_source.startswith("family:"):
+        provenance = f"based on the {built.design_source.split(':', 1)[1]} architecture (not your own design)"
+    elif built.needs_custom_code:
+        provenance = (
+            "YOUR OWN design - NOVEL: no reference implementation builds this block combination, so "
+            "training it needs the custom-block path (custom model code)."
+        )
+    else:
+        provenance = f"YOUR OWN design - realized on the '{built.realizing_family}' block implementation."
+    typer.echo(
+        f"{built.name}: hidden={built.hidden_size} layers={built.num_hidden_layers} "
+        f"heads={built.num_attention_heads} kv_heads={built.num_key_value_heads} "
+        f"intermediate={built.intermediate_size} vocab={built.vocab_size} -> "
+        f"~{built.estimated_parameters / 1e6:.1f}M parameters (estimate)"
+    )
+    typer.echo(provenance, err=True)
+    if out is not None:
+        typer.echo(f"wrote architecture config to {out}")
+
+
+@app.command("vet-model-code")
+def vet_model_code(
+    bundle: Path = typer.Argument(
+        ..., help="Local single-file custom-block bundle (.py) to statically screen."
+    ),
+    entry_symbol: str = typer.Option(
+        ...,
+        "--entry-symbol",
+        help="The custom model class defined in the bundle (e.g. MyDecoderForCausalLM).",
+    ),
+    interface_version: str = typer.Option(
+        "custom_decoder_v1", "--interface-version", help="The custom-block ABI the code claims."
+    ),
+    out: Optional[Path] = typer.Option(
+        None, "--out", help="Write the vetting report JSON here (a content-addressed admission token)."
+    ),
+    json_out: bool = typer.Option(False, "--json", help="Emit the vetting report as JSON."),
+):
+    """Statically screen a LOCAL custom-block bundle (mode-3 'your own model code') and record a
+    ModelCodeVettingReport. The screen executes NOTHING and does not prove the code safe - it rejects the
+    obvious dangerous surface fail-closed and pins the exact bytes it looked at, so a later plan can bind
+    admission to them. Admission and execution stay gated. Exits 2 if the bundle is rejected."""
+    from corpus_studio.platform.custom_code_vetting import build_report  # noqa: PLC0415
+
+    try:
+        raw = bundle.read_bytes()
+    except OSError as exc:
+        typer.echo(f"cannot read bundle: {exc}", err=True)
+        raise typer.Exit(2) from exc
+    try:
+        report = build_report(raw, entry_symbol=entry_symbol, interface_version=interface_version)
+    except ValueError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(2) from exc
+    payload = report.model_dump(mode="json")
+    if out is not None:
+        try:
+            out.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        except OSError as exc:
+            typer.echo(f"cannot write --out: {exc}", err=True)
+            raise typer.Exit(2) from exc
+    if json_out:
+        typer.echo(json.dumps(payload, indent=2))
+    else:
+        typer.echo(
+            f"{bundle.name}: {report.verdict} (sha256={report.bundle_sha256[:12]}..., "
+            f"{len(report.findings)} finding(s))"
+        )
+        for finding in report.findings:
+            loc = f":{finding.lineno}" if finding.lineno else ""
+            typer.echo(f"  [{finding.severity}] {finding.code}{loc}: {finding.message}", err=True)
+        if out is not None:
+            typer.echo(f"wrote vetting report to {out}")
+    # Fail closed: a rejected bundle is a non-zero exit so scripts and the (later) plan gate cannot admit
+    # it by accident.
+    if report.verdict == "rejected":
+        raise typer.Exit(2)
 
 
 @app.command("model-inspect")
