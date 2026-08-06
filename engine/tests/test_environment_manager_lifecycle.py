@@ -2262,6 +2262,40 @@ def test_hashless_index_fetch_installs_a_no_redirect_opener(monkeypatch):
         handler().redirect_request(None, None, 302, "Found", {}, "http://169.254.169.254/latest/meta")
 
 
+def test_capability_snapshot_script_renders_none_probes_as_valid_python():
+    # Regression: a recipe with no required execution probe (e.g. the base backend-corpus-studio recipe
+    # that managed pretraining uses) yields probes=None, which was rendered json.dumps(None) -> "null" ->
+    # `probes=null` in the generated script -> NameError: name 'null' is not defined at probe time. It
+    # must be the Python literal None (run all default probes).
+    import ast
+
+    none_script = manager_module._capability_snapshot_script(None)
+    assert "probes=None" in none_script and "probes=null" not in none_script
+    ast.parse(none_script)  # syntactically valid Python
+    list_script = manager_module._capability_snapshot_script(["complete_qlora", "flash"])
+    assert 'probes=["complete_qlora", "flash"]' in list_script
+    ast.parse(list_script)
+
+
+def test_json_probe_reads_full_stdout_not_a_truncated_tail(tmp_path):
+    # Regression: a base-recipe capability report (full package profile + all default probes) is one
+    # >32 KB JSON line; the small default log-tail truncated it mid-object -> "did not emit structured
+    # JSON". The JSON read now uses a generous tail so a valid object parses whole.
+    import json
+
+    big = {"capability_report": {"pad": "x" * 40000}, "profile": {"ok": True}}
+    line = json.dumps(big)
+    assert len(line) > manager_module._PROBE_TAIL_LIMIT  # exceeds the small default tail
+    path = tmp_path / "probe.stdout"
+    path.write_text(line, encoding="utf-8")
+    with pytest.raises(json.JSONDecodeError):  # the small default tail truncates the object
+        manager_module._last_json_object(manager_module._read_tail(path))
+    parsed = manager_module._last_json_object(
+        manager_module._read_tail(path, limit=8_000_000)
+    )
+    assert parsed["profile"] == {"ok": True}
+
+
 def test_install_source_evidence_classifies_proven_local_vcs_index_and_sdist_sources(
     tmp_path,
 ):
