@@ -2143,6 +2143,87 @@ def test_install_source_evidence_sanitizes_credentials_and_preserves_unknown(tmp
     assert unknown.source_evidence_reason
 
 
+_PYTORCH_INDEX = "https://download.pytorch.org/whl/cu128"
+
+
+def _hashless_report(tmp_path, *, url, name, version):
+    report = tmp_path / "pip-report.json"
+    report.write_text(
+        json.dumps(
+            {
+                "version": "1",
+                "install": [
+                    {
+                        "download_info": {"url": url, "archive_info": {}},
+                        "is_direct": False,
+                        "requested": False,
+                        "metadata": {"name": name, "version": version},
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    return report
+
+
+def _install_step():
+    return InstallStep(
+        phase="install",
+        argv=["python", "-m", "pip", "install"],
+        configured_index_urls=[_PYTORCH_INDEX],
+    )
+
+
+def test_install_evidence_binds_hash_for_hashless_configured_index_wheel(tmp_path, monkeypatch):
+    # The PyTorch index omits sha256 for some pure-python wheels; the env-manager binds the artifact by
+    # its OWN content hash (fetch the pinned wheel) instead of skipping the honesty gate.
+    import hashlib
+
+    wheel_bytes = b"pinned-cuda-pathfinder-wheel-bytes"
+    monkeypatch.setattr(manager_module, "_fetch_index_artifact_bytes", lambda url, **k: wheel_bytes)
+    report = _hashless_report(
+        tmp_path,
+        url="https://download.pytorch.org/whl/cuda_pathfinder-1.2.2-py3-none-any.whl",
+        name="cuda-pathfinder",
+        version="1.2.2",
+    )
+    evidence = manager_module._install_evidence_from_report(
+        report, step=_install_step(), command_id="command-hashless"
+    )
+    item = next(i for i in evidence if i.normalized_name == "cuda-pathfinder")
+    assert item.artifact_hash is not None
+    assert item.artifact_hash.value == hashlib.sha256(wheel_bytes).hexdigest()
+
+
+def test_install_evidence_refuses_hashless_wheel_from_unconfigured_host(tmp_path, monkeypatch):
+    monkeypatch.setattr(manager_module, "_fetch_index_artifact_bytes", lambda url, **k: b"x")
+    report = _hashless_report(
+        tmp_path,
+        url="https://evil.invalid/cuda_pathfinder-1.2.2-py3-none-any.whl",
+        name="cuda-pathfinder",
+        version="1.2.2",
+    )
+    with pytest.raises(manager_module.EnvironmentManagerError, match="not a configured index"):
+        manager_module._install_evidence_from_report(
+            report, step=_install_step(), command_id="command-badhost"
+        )
+
+
+def test_install_evidence_refuses_hashless_wheel_filename_mismatch(tmp_path, monkeypatch):
+    monkeypatch.setattr(manager_module, "_fetch_index_artifact_bytes", lambda url, **k: b"x")
+    report = _hashless_report(
+        tmp_path,
+        url="https://download.pytorch.org/whl/other_pkg-9.9.9-py3-none-any.whl",
+        name="cuda-pathfinder",
+        version="1.2.2",
+    )
+    with pytest.raises(manager_module.EnvironmentManagerError, match="does not match"):
+        manager_module._install_evidence_from_report(
+            report, step=_install_step(), command_id="command-mismatch"
+        )
+
+
 def test_install_source_evidence_classifies_proven_local_vcs_index_and_sdist_sources(
     tmp_path,
 ):
