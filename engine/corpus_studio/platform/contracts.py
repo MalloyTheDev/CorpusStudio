@@ -3914,6 +3914,159 @@ class ResolvedExecutionConfiguration(ContractModel):
         return self
 
 
+class ResolvedFullFinetuneExecutionConfiguration(ContractModel):
+    """The hash-sealed configuration for a FULL-PARAMETER supervised fine-tune - the full-model sibling of
+    the adapter-only :class:`ResolvedExecutionConfiguration`. Same SFT data + objective path, but ALL model
+    parameters are trainable and the artifact is a full model (merged safetensors + full-state checkpoints),
+    so it is its OWN sealed config: the SFT config's validator hard-requires a PEFT adapter + adapter-only
+    export, which a full fine-tune cannot satisfy. Consumed directly by the first-party full-parameter
+    worker; refused at execution until dense_full_finetune is workload_verified.
+    """
+
+    contract_version: CONTRACT_VERSION_LITERAL = "1.0.0"
+    configuration_id: str = Field(pattern=_ID)
+    configuration_hash: str = Field(pattern=SHA256_PATTERN)
+    backend_ref: Ref
+    environment_ref: Ref
+    environment_binding: Literal["profile_snapshot", "managed_lock"]
+    capability_report_ref: Ref
+    inputs: ExecutionInputs
+    objective_ref: Ref
+    runtime_mode: Literal["training", "cpu_toy"]
+    precision: PrecisionExecutionPolicy
+    attention: AttentionExecutionPolicy
+    device_map: list[DeviceMapEntry] = Field(min_length=1)
+    adapter: AdapterSpec
+    optimizer: OptimizerSpec
+    loss_impl: LossImpl
+    sequence: SequenceSpec
+    batching: BatchingSpec
+    checkpoint_policy: CheckpointPolicy
+    schedule: TrainingSchedule
+    data: TrainingDataPolicy
+    trainer_interface: TrainerInterfacePolicy
+    export_format: ExportFormat
+    trust_remote_code: Literal[False] = False
+    use_safetensors: Literal[True] = True
+    bnb_4bit_use_double_quant: bool
+    adapter_task_type: Literal["CAUSAL_LM"] = "CAUSAL_LM"
+    save_strategy: Literal["no", "steps"] = "steps"
+    gradient_checkpointing: bool = True
+    output_dir: str = Field(min_length=1)
+    output_layout: Literal["run_scoped_v1"] = "run_scoped_v1"
+    seed: int = Field(default=42, ge=0)
+    data_seed: int = Field(default=42, ge=0)
+
+    @model_validator(mode="after")
+    def _validate_full_finetune_configuration(self) -> ResolvedFullFinetuneExecutionConfiguration:
+        for label, ref in (
+            ("backend_ref", self.backend_ref),
+            ("environment_ref", self.environment_ref),
+            ("capability_report_ref", self.capability_report_ref),
+            ("objective_ref", self.objective_ref),
+        ):
+            if not _is_pinned_ref(ref):
+                raise ValueError(f"resolved full-finetune {label} must be hash-pinned")
+        environment_hash = self.environment_ref.hash
+        assert environment_hash is not None and environment_hash.value is not None
+        if (
+            self.environment_binding == "profile_snapshot"
+            and self.environment_ref.id != environment_hash.value
+        ):
+            raise ValueError("profile-snapshot environment identity must be its content hash")
+        if (
+            self.environment_binding == "managed_lock"
+            and self.environment_ref.id == environment_hash.value
+        ):
+            raise ValueError("managed-lock environment identity must name the managed environment")
+        keys = [item.module for item in self.device_map]
+        if keys != sorted(set(keys)) or "" not in keys:
+            raise ValueError("device_map must be sorted, unique, and bind the root module")
+        if self.runtime_mode == "cpu_toy" and self.device_map != [
+            DeviceMapEntry(module="", device="cpu")
+        ]:
+            raise ValueError("cpu_toy execution must bind the entire model to CPU")
+        # Full-parameter: ALL weights train, so it is NOT an adapter run and carries no LoRA fields.
+        if self.adapter.method != AdapterMethod.full_finetune:
+            raise ValueError("full-parameter fine-tuning requires adapter.method='full_finetune'")
+        if any(
+            value is not None
+            for value in (
+                self.adapter.lora_r,
+                self.adapter.lora_alpha,
+                self.adapter.lora_dropout,
+                self.adapter.target_modules,
+                self.adapter.bias,
+            )
+        ):
+            raise ValueError("a full-parameter fine-tune carries no LoRA adapter fields")
+        # Trains real weights, so it must be UNQUANTIZED (no 4-bit frozen base) with matching dtypes.
+        if self.precision.quantized_storage_format != QuantizationMode.none:
+            raise ValueError("full-parameter fine-tuning must be unquantized (no 4-bit storage)")
+        if self.bnb_4bit_use_double_quant:
+            raise ValueError("double quantization is invalid for unquantized full-parameter execution")
+        if self.precision.weight_storage_dtype != self.precision.forward_compute_dtype:
+            raise ValueError(
+                "the first-party unquantized trainer requires weight and forward dtypes to match"
+            )
+        if self.batching.fallback_grad_accumulation_steps is None:
+            raise ValueError("the first-party trainer requires exact gradient accumulation")
+        expected_token_target = (
+            self.sequence.max_sequence_len
+            * self.batching.micro_batch_size
+            * self.batching.fallback_grad_accumulation_steps
+        )
+        if self.batching.supervised_token_accumulation_target != expected_token_target:
+            raise ValueError(
+                "the fixed-microbatch trainer requires its advisory token target to be derived exactly"
+            )
+        if self.sequence.buckets:
+            raise ValueError("the first-party trainer does not implement sequence buckets")
+        if self.sequence.packing != self.data.packing:
+            raise ValueError("sequence and data packing policies must match")
+        if not self.sequence.truncation_allowed and self.data.truncation_policy == "allow":
+            raise ValueError(
+                "sequence.truncation_allowed is False but data.truncation_policy is 'allow' - a config "
+                "that declares no truncation yet permits it at runtime would silently truncate"
+            )
+        if any(
+            value is None
+            for value in (
+                self.optimizer.weight_decay,
+                self.optimizer.lr_scheduler,
+                self.optimizer.warmup_ratio,
+            )
+        ):
+            raise ValueError("the first-party trainer requires all optimizer defaults")
+        if self.checkpoint_policy.cadence_seconds is not None:
+            raise ValueError("the first-party trainer does not implement time-based checkpoints")
+        # Full-parameter checkpoints the FULL model state (not an adapter delta).
+        if self.checkpoint_policy.impl != CheckpointImpl.full_state:
+            raise ValueError("full-parameter fine-tuning checkpoints the full model state")
+        if self.save_strategy == "steps":
+            if self.checkpoint_policy.cadence_optimizer_steps is None:
+                raise ValueError("step checkpointing requires an optimizer-step cadence")
+        elif (
+            self.checkpoint_policy.cadence_optimizer_steps is not None
+            or self.checkpoint_policy.keep_last is not None
+        ):
+            raise ValueError("disabled checkpointing cannot carry cadence or retention settings")
+        # Full-parameter emits a FULL model, never a PEFT adapter.
+        if self.export_format != ExportFormat.merged_safetensors:
+            raise ValueError("full-parameter fine-tuning emits a merged full model, not a PEFT adapter")
+        external_package = self.attention.flash_attention_package
+        if external_package is not None:
+            exact_packages = {
+                (item.name.lower(), item.version)
+                for item in self.trainer_interface.package_versions
+            }
+            if (external_package.name.lower(), external_package.version) not in exact_packages:
+                raise ValueError(
+                    "the sealed flash-attention package must appear in the trainer package versions"
+                )
+        return self
+
+
 class ReferenceModelBinding(ContractModel):
     """The frozen reference policy an offline DPO run scores its trainable policy against.
 
@@ -4965,6 +5118,11 @@ class RunPlan(ContractModel):
     resolved_pretraining_execution: ResolvedPretrainingExecutionConfiguration | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
+    # The full-parameter fine-tune sibling seal. A plan carries exactly one of the SFT / preference /
+    # pretraining / full-finetune configs; excluded when unset so it never perturbs existing plan hashes.
+    resolved_full_finetune_execution: ResolvedFullFinetuneExecutionConfiguration | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     # Pins the parameter evidence the planner consumed; it does not manufacture missing counts.
     parameter_accounting_ref: Ref | None = None
     # ``None`` identifies a legacy plan. The planner always emits a fully resolved spec for new plans.
@@ -4982,11 +5140,12 @@ class RunPlan(ContractModel):
             self.resolved_execution,
             self.resolved_preference_execution,
             self.resolved_pretraining_execution,
+            self.resolved_full_finetune_execution,
         )
         if sum(1 for authority in _execution_authorities if authority is not None) > 1:
             raise ValueError(
-                "a RunPlan carries exactly one execution config (SFT, preference, or pretraining), "
-                "never more than one"
+                "a RunPlan carries exactly one execution config (SFT, preference, pretraining, or "
+                "full-finetune), never more than one"
             )
         execution = self.resolved_execution
         if execution is not None:
@@ -5172,6 +5331,28 @@ class RunPlan(ContractModel):
                 raise ValueError(
                     "resolved pretraining export format/output must match the RunPlan summary"
                 )
+        full_finetune = self.resolved_full_finetune_execution
+        if full_finetune is not None:
+            expected_full_finetune_hash = _canonical_contract_sha256(
+                full_finetune.model_dump(mode="json", exclude={"configuration_hash"})
+            )
+            if full_finetune.configuration_hash != expected_full_finetune_hash:
+                raise ValueError(
+                    "resolved_full_finetune_execution configuration_hash does not match its body"
+                )
+            if self.training_config_snapshot:
+                raise ValueError("new resolved plans cannot carry a second trainer-config authority")
+            if full_finetune.backend_ref != self.backend_ref:
+                raise ValueError("resolved full-finetune execution backend_ref must match the RunPlan")
+            if full_finetune.environment_ref != self.environment_ref:
+                raise ValueError(
+                    "resolved full-finetune execution environment_ref must match the RunPlan"
+                )
+            # Full-parameter fine-tuning is a supervised (SFT) task that emits a FULL model. The detailed
+            # summary cross-checks (precision/loss/optimizer/export match) land with the resolver slice that
+            # produces the coherent RunPlan summary.
+            if self.task_type != TaskType.sft:
+                raise ValueError("a resolved full-finetune execution requires an SFT RunPlan")
         if self.physical_execution is None:
             return self
         if (

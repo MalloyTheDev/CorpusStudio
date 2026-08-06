@@ -82,6 +82,10 @@
       "file": "ResolvedExecutionConfiguration.schema.json"
     },
     {
+      "contract": "ResolvedFullFinetuneExecutionConfiguration",
+      "file": "ResolvedFullFinetuneExecutionConfiguration.schema.json"
+    },
+    {
       "contract": "ResolvedPreferenceExecutionConfiguration",
       "file": "ResolvedPreferenceExecutionConfiguration.schema.json"
     },

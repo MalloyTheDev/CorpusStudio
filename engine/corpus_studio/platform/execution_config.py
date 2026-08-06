@@ -21,6 +21,7 @@ from .contracts import (
     CapabilityReport,
     ExecutionInputBinding,
     ResolvedExecutionConfiguration,
+    ResolvedFullFinetuneExecutionConfiguration,
     ResolvedPreferenceExecutionConfiguration,
     ResolvedPretrainingExecutionConfiguration,
     RunPlan,
@@ -198,6 +199,21 @@ def verify_pretraining_execution_configuration_hash(
     config: ResolvedPretrainingExecutionConfiguration,
 ) -> bool:
     return config.configuration_hash == pretraining_execution_configuration_hash_for(config)
+
+
+def full_finetune_execution_configuration_hash_for(
+    config: ResolvedFullFinetuneExecutionConfiguration,
+) -> str:
+    """Seal a full-parameter fine-tune execution configuration exactly as the SFT/DPO/pretraining siblings
+    are sealed (canonical JSON over every field but ``configuration_hash``). A separate function keeps the
+    seals decoupled: the byte-locked SFT seal can never be perturbed by a full-finetune change."""
+    return canonical_sha256(config.model_dump(mode="json", exclude={"configuration_hash"}))
+
+
+def verify_full_finetune_execution_configuration_hash(
+    config: ResolvedFullFinetuneExecutionConfiguration,
+) -> bool:
+    return config.configuration_hash == full_finetune_execution_configuration_hash_for(config)
 
 
 def capability_report_hash_for(report: CapabilityReport) -> str:
