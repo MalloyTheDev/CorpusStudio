@@ -1293,15 +1293,13 @@ def test_pretraining_plan_continued_binds_the_continued_objective():
     assert cfg.objective_ref.id == "continued_pretraining"
 
 
-def test_pretraining_plan_is_refused_at_execution_with_a_typed_reason():
-    from corpus_studio.platform.execution_config import (
-        ExecutionConfigurationError,
-        required_runner_lane,
-    )
+def test_pretraining_plan_is_admitted_at_execution_and_routes_to_the_pretraining_lane():
+    from corpus_studio.platform.execution_config import required_runner_lane
 
+    # 'pretraining' is workload_verified, so the dispatch gate admits it and routes to the
+    # first-party PretrainingRunner lane (never the SFT/DPO lane).
     plan = _pretraining_plan(_profile(cc_major=8), _report())
-    with pytest.raises(ExecutionConfigurationError, match="not yet executable"):
-        required_runner_lane(plan)
+    assert required_runner_lane(plan) in ("pretraining", "pretraining_cpu_toy")
 
 
 def test_pretraining_requires_a_corpus():
@@ -1349,21 +1347,17 @@ def test_pretraining_fit_is_honestly_not_estimated_not_fabricated():
     assert "pretraining" in fit.rationale and "not estimated" in fit.rationale
 
 
-def test_pretraining_runner_refuses_with_a_typed_reason_at_both_gates():
-    # AUDIT fix: the DIRECT runner path gives the SAME typed reason as the dispatch gate (defense-in-depth),
-    # not the generic "no ResolvedExecutionConfiguration".
-    from corpus_studio.platform.execution_config import (
-        ExecutionConfigurationError,
-        required_runner_lane,
-    )
+def test_pretraining_routes_to_its_lane_but_the_sft_runner_still_refuses_it():
+    # The dispatch gate now routes pretraining to the PretrainingRunner lane; the SFT runner keeps a
+    # defense-in-depth typed refusal so a pretraining plan can NEVER run the adapter path.
+    from corpus_studio.platform.execution_config import required_runner_lane
     from corpus_studio.platform.runners import RunnerFailure, TrainingRunner
 
     plan = _pretraining_plan(_profile(cc_major=8), _report())
-    with pytest.raises(ExecutionConfigurationError, match="not yet executable"):
-        required_runner_lane(plan)
-    with pytest.raises(RunnerFailure, match="not yet executable"):
+    assert required_runner_lane(plan) in ("pretraining", "pretraining_cpu_toy")
+    with pytest.raises(RunnerFailure, match="PretrainingRunner lane"):
         TrainingRunner(cpu_toy=False)._resolve_trainer(plan)
-    with pytest.raises(RunnerFailure, match="not yet executable"):
+    with pytest.raises(RunnerFailure, match="PretrainingRunner lane"):
         TrainingRunner(cpu_toy=False)._resolve_config(plan, "run-x")
 
 

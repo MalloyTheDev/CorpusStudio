@@ -62,10 +62,10 @@ PREFERENCE_NOT_EXECUTABLE_REASON = (
 )
 
 PRETRAINING_NOT_EXECUTABLE_REASON = (
-    "this is a sealed pretraining plan - admitted at planning but not yet executable: 'pretraining' is "
-    "worker_implemented (the from_config worker loop + packed corpus + both tokenizer paths exist and are "
-    "CPU-proven), not workload_verified. The sealed runner dispatch + execution-evidence, a measured GPU "
-    "run, and the milestone wheel are the gated next step."
+    "a from-scratch / continued pretraining plan runs on the first-party PretrainingRunner lane, not the "
+    "SFT/DPO runner: dispatch it through platform-run so required_runner_lane selects the 'pretraining' "
+    "lane. (The same refusal fires if the 'pretraining' execution variant is not workload_verified for "
+    "this backend.)"
 )
 
 
@@ -85,9 +85,28 @@ def required_runner_lane(plan: RunPlan) -> str:
         # platform-run flow rather than surfacing the generic "no executable runner lane" below.
         raise ExecutionConfigurationError(PREFERENCE_NOT_EXECUTABLE_REASON)
     if plan.resolved_pretraining_execution is not None:
-        # A sealed pretraining plan is likewise admitted at planning but refused at EXECUTION until the
-        # pretraining worker + wheel land - the same earliest-dispatch typed refusal.
-        raise ExecutionConfigurationError(PRETRAINING_NOT_EXECUTABLE_REASON)
+        # Pretraining is admitted at planning; at EXECUTION it is admitted only once the pretraining
+        # variant reaches workload_verified (a measured GPU run through the first-party PretrainingRunner
+        # + the supervisor reload-verify). Gate on the ladder, then route to the PretrainingRunner lane -
+        # the SFT/DPO lane never runs a full-parameter model.
+        from corpus_studio.platform.enums import TaskType  # noqa: PLC0415
+        from corpus_studio.platform.execution_variants import (  # noqa: PLC0415
+            ExecutionVariantRefused,
+            admit_task_execution_variant,
+            reference_execution_variants,
+        )
+
+        try:
+            admit_task_execution_variant(
+                TaskType.pretraining, declared_variants=reference_execution_variants()
+            )
+        except ExecutionVariantRefused as exc:
+            raise ExecutionConfigurationError(PRETRAINING_NOT_EXECUTABLE_REASON) from exc
+        return (
+            "pretraining_cpu_toy"
+            if plan.resolved_pretraining_execution.runtime_mode == "cpu_toy"
+            else "pretraining"
+        )
     if plan.backend_ref.id == "echo":
         if plan.task_type.value != "evaluation":
             raise ExecutionConfigurationError(
