@@ -169,6 +169,7 @@
       "default": "adapter",
       "enum": [
         "adapter",
+        "model",
         "checkpoint",
         "merged_model",
         "gguf",

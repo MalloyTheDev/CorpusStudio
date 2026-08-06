@@ -32,7 +32,9 @@ from corpus_studio.platform.contracts import (
 )
 
 _ARTIFACT_KINDS = frozenset(
-    {"adapter", "checkpoint", "merged_model", "gguf", "onnx", "quantized", "other"}
+    # "model" is a full-parameter standalone model (from-scratch / continued pretraining output), as
+    # distinct from an "adapter" (PEFT) or a "merged_model" (base + adapter merged).
+    {"adapter", "model", "checkpoint", "merged_model", "gguf", "onnx", "quantized", "other"}
 )
 _MAX_ADAPTER_CONFIG_BYTES = 1024 * 1024
 

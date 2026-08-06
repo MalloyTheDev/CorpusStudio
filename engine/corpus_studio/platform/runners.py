@@ -663,6 +663,88 @@ class TrainingRunner:
             ) from exc
 
 
+class PretrainingRunner:
+    """Executes a sealed from-scratch / continued pretraining run through
+    ``training.pretraining_trainer.run_pretraining`` - the full-parameter sibling of ``TrainingRunner``.
+
+    It dispatches the proven worker, emits the run's stages, samples the measured peak, and reports the
+    worker-PROPOSED full-model success evidence on the context. It never runs an SFT / adapter path and
+    it NEVER self-admits success: ``execute_run`` independently re-verifies the saved model before the
+    evidence may reach the manifest. Whether a pretraining plan is admitted for a production run is gated
+    upstream (the CLI / worker select this runner only once ``pretraining`` is workload_verified)."""
+
+    def __init__(
+        self,
+        *,
+        cpu_toy: bool = False,
+        corpus_root: str = ".",
+        memory_sampler: MemorySampler = sample_gpu_memory,
+    ) -> None:
+        # No watchdog/heartbeat here yet (the SFT runner's stall-observability is a later slice for the
+        # pretraining lane); expose no no-op knobs until it is wired.
+        self.cpu_toy = cpu_toy
+        self.corpus_root = corpus_root
+        self.memory_sampler = memory_sampler
+        self.name = "pretraining_cpu_toy" if cpu_toy else "pretraining"
+
+    def run(self, ctx: RunContext) -> Sequence[ProducedArtifact]:
+        execution = ctx.plan.resolved_pretraining_execution
+        if execution is None:
+            raise RunnerFailure(
+                "the pretraining runner requires a resolved pretraining execution",
+                taxonomy=FailureTaxonomy.UNSUPPORTED_CONFIGURATION,
+                stage=StageMarker.process_start,
+            )
+        # NOTE: the SFT lexical run-scoped-output verification (verify_run_scoped_output_path) is typed
+        # for the SFT ResolvedExecutionConfiguration; extending it to the pretraining config is a small
+        # follow-up hardening. The worker writes to the sealed execution.output_dir.
+        ctx.emit_stage(
+            StageMarker.process_start,
+            f"pretraining run [{self.name}]: dispatching the full-parameter worker",
+        )
+        from corpus_studio.training.pretraining_trainer import (  # noqa: PLC0415
+            PretrainingError,
+            run_pretraining,
+        )
+
+        try:
+            result = run_pretraining(
+                execution, corpus_root=self.corpus_root, output_dir=execution.output_dir
+            )
+        except PretrainingError as exc:
+            raise RunnerFailure(
+                str(exc),
+                taxonomy=FailureTaxonomy.UPDATE_FAILURE,
+                stage=StageMarker.optimizer_step,
+                remediation="preserve the failed run and inspect the first-party pretraining worker",
+            ) from exc
+
+        if result.execution_evidence is None:
+            # The worker must return full-model success evidence; a missing proof is a hard failure,
+            # never a silently-emitted artifact that execute_run would then reject downstream.
+            raise RunnerFailure(
+                "the pretraining worker returned without full-model success evidence",
+                taxonomy=FailureTaxonomy.UPDATE_FAILURE,
+                stage=StageMarker.optimizer_step,
+                remediation="preserve the failed run and repair the first-party pretraining worker",
+            )
+        # The runner REPORTS the worker-proposed success evidence; execute_run re-verifies before admit.
+        ctx.pretraining_success_evidence = result.execution_evidence
+        try:
+            ctx.measured_peak = self.memory_sampler()
+        except Exception:  # noqa: BLE001 - observability only; a probe fault is not a run failure
+            ctx.measured_peak = None
+
+        artifact = ProducedArtifact(
+            artifact_id=f"{ctx.run_id}-model-{result.execution_evidence.model_safetensors_sha256[:12]}",
+            kind="model",
+            path=result.output_dir,
+        )
+        ctx.emit_stage(StageMarker.export, f"full model saved: {result.output_dir}")
+        ctx.emit_artifact(artifact)
+        return [artifact]
+
+
 def demo_training_plan(plan_id: str = "demo-cpu-toy") -> RunPlan:
     """A fully sealed CPU-toy plan. Missing train packages fail at execution, not plan parsing."""
 
