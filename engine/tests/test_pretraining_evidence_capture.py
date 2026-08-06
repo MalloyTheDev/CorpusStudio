@@ -38,6 +38,12 @@ def _trainable_snapshot(state_sha: str, tensor_sha: dict[str, str]) -> Trainable
     )
 
 
+class _FakeParam:
+    """A stand-in trainable parameter - the tracker only reads identity + requires_grad."""
+
+    requires_grad = True
+
+
 class _FakeOptimizer:
     def __init__(self, params: list[Any]) -> None:
         self.param_groups = [{"params": list(params)}]
@@ -97,7 +103,7 @@ def _run_two_steps(tracker: PretrainingExecutionTracker, opt: _FakeOptimizer) ->
 
 
 def test_tracker_full_lifecycle_builds_evidence() -> None:
-    p0, p1 = object(), object()
+    p0, p1 = _FakeParam(), _FakeParam()
     grads = _grad_tracker(["p.0", "p.1"], {"p.0": p0, "p.1": p1}, observed=["p.0"])
     tracker = PretrainingExecutionTracker(expected_steps=2, gradients=grads)
     _run_two_steps(tracker, _FakeOptimizer([p0, p1]))
@@ -116,7 +122,7 @@ def test_tracker_full_lifecycle_builds_evidence() -> None:
 
 
 def test_tracker_refuses_optimizer_not_covering_trainable_inventory() -> None:
-    p0, p1 = object(), object()
+    p0, p1 = _FakeParam(), _FakeParam()
     grads = _grad_tracker(["p.0", "p.1"], {"p.0": p0, "p.1": p1}, observed=["p.0"])
     tracker = PretrainingExecutionTracker(expected_steps=1, gradients=grads)
     # optimizer only steps p0 - not the full trainable inventory
@@ -125,7 +131,7 @@ def test_tracker_refuses_optimizer_not_covering_trainable_inventory() -> None:
 
 
 def test_tracker_refuses_out_of_order_step() -> None:
-    p0 = object()
+    p0 = _FakeParam()
     grads = _grad_tracker(["p.0"], {"p.0": p0}, observed=["p.0"])
     tracker = PretrainingExecutionTracker(expected_steps=2, gradients=grads)
     opt = _FakeOptimizer([p0])
@@ -135,7 +141,7 @@ def test_tracker_refuses_out_of_order_step() -> None:
 
 
 def test_tracker_refuses_duplicate_loss() -> None:
-    p0 = object()
+    p0 = _FakeParam()
     grads = _grad_tracker(["p.0"], {"p.0": p0}, observed=["p.0"])
     tracker = PretrainingExecutionTracker(expected_steps=1, gradients=grads)
     opt = _FakeOptimizer([p0])
@@ -147,7 +153,7 @@ def test_tracker_refuses_duplicate_loss() -> None:
 
 
 def test_tracker_refuses_missing_loss_at_finalize() -> None:
-    p0 = object()
+    p0 = _FakeParam()
     grads = _grad_tracker(["p.0"], {"p.0": p0}, observed=["p.0"])
     tracker = PretrainingExecutionTracker(expected_steps=1, gradients=grads)
     opt = _FakeOptimizer([p0])
@@ -164,20 +170,48 @@ def test_tracker_refuses_missing_loss_at_finalize() -> None:
         )
 
 
-def test_tracker_refuses_step_count_mismatch_at_finalize() -> None:
-    p0 = object()
+def test_tracker_refuses_step_overrun_past_schedule() -> None:
+    p0 = _FakeParam()
     grads = _grad_tracker(["p.0"], {"p.0": p0}, observed=["p.0"])
-    tracker = PretrainingExecutionTracker(expected_steps=2, gradients=grads)  # schedule says 2
+    tracker = PretrainingExecutionTracker(expected_steps=1, gradients=grads)  # sealed ceiling = 1
     opt = _FakeOptimizer([p0])
     tracker.on_train_begin(opt)
     tracker.on_step_end(1, opt)
     tracker.on_log(1, {"loss": 3.0})
-    with pytest.raises(PretrainingEvidenceError, match="does not match the sealed schedule"):
+    tracker.on_step_end(2, opt)  # ran past the sealed ceiling
+    tracker.on_log(2, {"loss": 2.5})
+    with pytest.raises(PretrainingEvidenceError, match="exceeds the sealed schedule"):
         tracker.finalize(
-            steps=1,  # only 1 completed, schedule expected 2
+            steps=2,
             before=_trainable_snapshot(_A, {"p.0": "1" * 64}),
             after=_trainable_snapshot(_B, {"p.0": "9" * 64}),
             before_export=_export_snapshot(_A, {"p.0": "1" * 64}),
             after_export=_export_snapshot(_B, {"p.0": "9" * 64}),
             model_config_semantic_sha256=_A,
         )
+
+
+def test_tracker_allows_early_stop_short_of_schedule() -> None:
+    # data-limited: the sealed ceiling is 5 but only 2 steps completed - record the ACTUAL 2 steps.
+    p0, p1 = _FakeParam(), _FakeParam()
+    grads = _grad_tracker(["p.0", "p.1"], {"p.0": p0, "p.1": p1}, observed=["p.0"])
+    tracker = PretrainingExecutionTracker(expected_steps=5, gradients=grads)
+    _run_two_steps(tracker, _FakeOptimizer([p0, p1]))
+    ev = tracker.finalize(
+        steps=2,
+        before=_trainable_snapshot(_A, {"p.0": "1" * 64, "p.1": "2" * 64}),
+        after=_trainable_snapshot(_B, {"p.0": "9" * 64, "p.1": "2" * 64}),
+        before_export=_export_snapshot(_A, {"p.0": "1" * 64, "p.1": "2" * 64}),
+        after_export=_export_snapshot(_B, {"p.0": "9" * 64, "p.1": "2" * 64}),
+        model_config_semantic_sha256=_A,
+    )
+    assert ev.completed_optimizer_steps == 2
+
+
+def test_tracker_refuses_non_parameter_in_optimizer_group() -> None:
+    p0 = _FakeParam()
+    grads = _grad_tracker(["p.0"], {"p.0": p0}, observed=["p.0"])
+    tracker = PretrainingExecutionTracker(expected_steps=1, gradients=grads)
+    # a stray non-parameter entry (no requires_grad) must be rejected at the interface
+    with pytest.raises(PretrainingEvidenceError, match="non-parameter entry"):
+        tracker.on_train_begin(_FakeOptimizer(["not-a-parameter"]))

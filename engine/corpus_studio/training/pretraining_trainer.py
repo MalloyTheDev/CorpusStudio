@@ -192,13 +192,32 @@ def _canonical_config_sha256(config: Mapping[str, Any]) -> str:
 def _build_success_evidence(  # pragma: no cover - filesystem/torch integration; proven by a run
     out: Path, execution: PretrainingExecutionEvidence
 ) -> PretrainingSuccessEvidence:
-    """Verify the saved model artifacts exist and seal the pretraining success evidence."""
+    """Parse-validate the saved model artifacts and seal the pretraining success evidence. This is
+    stronger than an existence check - the model.safetensors must open as a non-empty tensor archive and
+    the config as JSON - so the success flags are earned. The full reload-and-compare-to-trained-state
+    verification (SFT's runner reload-verify) is the slice-2b runner-admission step."""
+    from safetensors import safe_open  # noqa: PLC0415
+
     model_safetensors = out / "model.safetensors"
     config_json = out / "config.json"
     if not model_safetensors.is_file():
         raise PretrainingError("training completed without a saved model.safetensors")
     if not config_json.is_file():
         raise PretrainingError("training completed without a saved config.json")
+    try:
+        with safe_open(str(model_safetensors), framework="pt") as handle:
+            if not list(handle.keys()):
+                raise PretrainingError("the saved model.safetensors contains no tensors")
+    except PretrainingError:
+        raise
+    except Exception as exc:  # noqa: BLE001 - normalize any safetensors parse failure to fail-closed
+        raise PretrainingError(
+            f"the saved model.safetensors is not a valid safetensors archive: {exc}"
+        ) from exc
+    try:
+        json.loads(config_json.read_text(encoding="utf-8"))
+    except ValueError as exc:
+        raise PretrainingError(f"the saved config.json is not valid JSON: {exc}") from exc
     return PretrainingSuccessEvidence(
         execution=execution,
         output_path_verified=True,

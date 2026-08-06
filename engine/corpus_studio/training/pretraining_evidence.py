@@ -91,7 +91,14 @@ def _optimizer_parameter_ids(optimizer: Any, *, eligible_ids: list[int]) -> tupl
             group_parameters, (str, bytes, bytearray)
         ):
             raise PretrainingEvidenceError("optimizer parameter groups are not materialized sequences")
-        observed_ids.extend(id(parameter) for parameter in group_parameters)
+        for parameter in group_parameters:
+            # Reject a non-parameter entry (e.g. a stray scalar) at the interface, not later via an
+            # opaque inventory mismatch - a real trainable tensor exposes requires_grad.
+            if not hasattr(parameter, "requires_grad"):
+                raise PretrainingEvidenceError(
+                    "an optimizer parameter group holds a non-parameter entry"
+                )
+            observed_ids.append(id(parameter))
     if (
         not eligible_ids
         or len(observed_ids) != len(set(observed_ids))
@@ -189,9 +196,12 @@ class PretrainingExecutionTracker:
     ) -> PretrainingExecutionEvidence:
         """Assemble the sealed pretraining execution evidence from the collected callbacks + the
         before/after snapshots the caller captured around ``trainer.train()``."""
-        if steps != self.expected_steps:
+        # An overrun past the sealed schedule ceiling is impossible / a bug; refuse it. An early stop
+        # (a data-limited run that completes fewer steps) is allowed - the evidence records the ACTUAL
+        # completed steps, and whether the schedule was fully met is a separate completeness signal.
+        if steps > self.expected_steps:
             raise PretrainingEvidenceError(
-                f"completed step count {steps} does not match the sealed schedule {self.expected_steps}"
+                f"completed step count {steps} exceeds the sealed schedule ceiling {self.expected_steps}"
             )
         if self.optimizer is None:
             raise PretrainingEvidenceError(
