@@ -41,7 +41,11 @@ class ExecutionConfigurationError(ValueError):
 
 
 def run_scoped_training_output(
-    config: ResolvedExecutionConfiguration | ResolvedPretrainingExecutionConfiguration,
+    config: (
+        ResolvedExecutionConfiguration
+        | ResolvedPretrainingExecutionConfiguration
+        | ResolvedPreferenceExecutionConfiguration
+    ),
     run_id: str,
     *,
     leaf: str = "adapter",
@@ -84,10 +88,27 @@ def required_runner_lane(plan: RunPlan) -> str:
             )
         return "cpu_toy" if execution.runtime_mode == "cpu_toy" else "training"
     if plan.resolved_preference_execution is not None:
-        # A sealed preference (DPO) plan is admitted at planning but refused at EXECUTION here - the
-        # earliest dispatch gate - with a typed reason, so the refusal is reachable through the shipping
-        # platform-run flow rather than surfacing the generic "no executable runner lane" below.
-        raise ExecutionConfigurationError(PREFERENCE_NOT_EXECUTABLE_REASON)
+        # A sealed preference (DPO) plan is admitted at planning; at EXECUTION it is admitted only once the
+        # preference_dpo variant reaches workload_verified (a measured GPU run through the first-party
+        # PreferenceRunner + the supervisor adapter reload-verify). Gate on the ladder - keyed by the
+        # SPECIFIC objective (only dpo_qlora has a built shape) - then route to the PreferenceRunner lane;
+        # the SFT/pretraining lanes never run the DPO reference / log-prob path.
+        from corpus_studio.platform.enums import TaskType  # noqa: PLC0415
+        from corpus_studio.platform.execution_variants import (  # noqa: PLC0415
+            ExecutionVariantRefused,
+            admit_task_execution_variant,
+            reference_execution_variants,
+        )
+
+        try:
+            admit_task_execution_variant(
+                TaskType.preference,
+                declared_variants=reference_execution_variants(),
+                objective_id=plan.resolved_preference_execution.objective_ref.id,
+            )
+        except ExecutionVariantRefused as exc:
+            raise ExecutionConfigurationError(PREFERENCE_NOT_EXECUTABLE_REASON) from exc
+        return "preference"
     if plan.resolved_pretraining_execution is not None:
         # Pretraining is admitted at planning; at EXECUTION it is admitted only once the pretraining
         # variant reaches workload_verified (a measured GPU run through the first-party PretrainingRunner
@@ -249,7 +270,11 @@ def _within(path: Path, root: Path) -> bool:
 
 
 def verify_run_scoped_output_path(
-    config: ResolvedExecutionConfiguration | ResolvedPretrainingExecutionConfiguration,
+    config: (
+        ResolvedExecutionConfiguration
+        | ResolvedPretrainingExecutionConfiguration
+        | ResolvedPreferenceExecutionConfiguration
+    ),
     run_id: str,
     *,
     observed_path: str | Path | None = None,

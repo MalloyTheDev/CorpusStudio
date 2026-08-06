@@ -764,6 +764,85 @@ class PretrainingRunner:
         return [artifact]
 
 
+class PreferenceRunner:
+    """Executes a sealed offline-DPO (preference) run through ``training.preference_worker.run_preference``
+    - the adapter sibling of ``PretrainingRunner``. It dispatches the config-consuming DPO worker (which
+    reuses the #781 sequence-chunked primitive), emits the run's stages, samples the measured peak, and
+    reports the worker-PROPOSED adapter success evidence on the context. It NEVER self-admits: ``execute_run``
+    independently re-verifies the saved adapter before the evidence may reach the manifest. Whether a
+    preference plan is admitted is gated upstream (selected only once ``preference_dpo`` is
+    workload_verified)."""
+
+    def __init__(self, *, memory_sampler: MemorySampler = sample_gpu_memory) -> None:
+        self.memory_sampler = memory_sampler
+        self.name = "preference"
+
+    def run(self, ctx: RunContext) -> Sequence[ProducedArtifact]:
+        execution = ctx.plan.resolved_preference_execution
+        if execution is None:
+            raise RunnerFailure(
+                "the preference runner requires a resolved preference execution",
+                taxonomy=FailureTaxonomy.UNSUPPORTED_CONFIGURATION,
+                stage=StageMarker.process_start,
+            )
+        # DPO exports a PEFT adapter, so it reuses the SFT run-scoped output (leaf="adapter").
+        from corpus_studio.platform.execution_config import (  # noqa: PLC0415
+            ExecutionConfigurationError,
+            run_scoped_training_output,
+            verify_run_scoped_output_path,
+        )
+
+        scoped_output = run_scoped_training_output(execution, ctx.run_id)
+        ctx.emit_stage(
+            StageMarker.process_start,
+            f"preference (DPO) run [{self.name}]: dispatching the config-consuming worker",
+        )
+        from corpus_studio.training.preference_worker import (  # noqa: PLC0415
+            PreferenceWorkerError,
+            run_preference,
+        )
+
+        try:
+            result = run_preference(execution, output_dir=str(scoped_output))
+        except PreferenceWorkerError as exc:
+            raise RunnerFailure(
+                str(exc),
+                taxonomy=FailureTaxonomy.UPDATE_FAILURE,
+                stage=StageMarker.optimizer_step,
+                remediation="preserve the failed run and inspect the first-party DPO worker",
+            ) from exc
+
+        try:
+            verify_run_scoped_output_path(
+                execution, ctx.run_id, observed_path=result.output_dir, require_exists=True
+            )
+        except ExecutionConfigurationError as exc:
+            raise RunnerFailure(
+                str(exc),
+                taxonomy=FailureTaxonomy.ARTIFACT_FAILURE,
+                stage=StageMarker.export,
+                remediation="preserve the failed run and repair the preference run-scoped output layout",
+            ) from exc
+
+        # The runner REPORTS the worker-proposed success evidence; execute_run re-verifies before admit.
+        ctx.preference_success_evidence = result.success_evidence
+        try:
+            ctx.measured_peak = self.memory_sampler()
+        except Exception:  # noqa: BLE001 - observability only; a probe fault is not a run failure
+            ctx.measured_peak = None
+
+        artifact = ProducedArtifact(
+            artifact_id=(
+                f"{ctx.run_id}-adapter-{result.success_evidence.adapter_safetensors_sha256[:12]}"
+            ),
+            kind="adapter",
+            path=result.output_dir,
+        )
+        ctx.emit_stage(StageMarker.export, f"DPO adapter saved: {result.output_dir}")
+        ctx.emit_artifact(artifact)
+        return [artifact]
+
+
 def build_lane_runner(
     runner_name: str, *, max_steps: int | None = None, corpus_root: str = "."
 ) -> Any:
@@ -776,6 +855,8 @@ def build_lane_runner(
 
     if runner_name == "echo":
         return EchoRunner()
+    if runner_name == "preference":
+        return PreferenceRunner()
     if runner_name in ("pretraining", "pretraining_cpu_toy"):
         return PretrainingRunner(
             cpu_toy=(runner_name == "pretraining_cpu_toy"), corpus_root=corpus_root
