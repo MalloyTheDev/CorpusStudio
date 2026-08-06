@@ -56,6 +56,15 @@ def concrete_max_steps(execution: ResolvedPreferenceExecutionConfiguration, pair
     return max(1, int(steps_per_epoch * epochs))
 
 
+def paged_adamw_requested(optimizer_spec: Any) -> bool:
+    """Whether the SEALED optimizer impl is bitsandbytes paged 8-bit AdamW (vs plain ``adamw_torch``) - a
+    PURE read of the sealed enum. The DPO worker must build the memory-saving optimizer the seal specifies:
+    paged 8-bit is what keeps 4B DPO inside 12 GB at seq 4096, so silently substituting a full-precision
+    AdamW would both violate the seal and erase that headroom."""
+    impl = getattr(optimizer_spec, "impl", None)
+    return getattr(impl, "value", impl) == "paged_adamw_8bit"
+
+
 def run_preference(  # pragma: no cover - optional training-stack integration; proven by a GPU run
     execution: ResolvedPreferenceExecutionConfiguration,
     *,
@@ -91,6 +100,7 @@ def run_preference(  # pragma: no cover - optional training-stack integration; p
         build_preference_success_evidence,
     )
     from corpus_studio.training.trainer import (  # noqa: PLC0415
+        TrainerError,
         capture_adapter_export_state,
         capture_trainable_state,
         expected_saved_adapter_config_sha256,
@@ -159,30 +169,56 @@ def run_preference(  # pragma: no cover - optional training-stack integration; p
         get_peft_model_state_dict(model), torch, stage=StageMarker.adapter_attached
     )
     trainable = [parameter for parameter in model.parameters() if parameter.requires_grad]
-    optimizer = torch.optim.AdamW(trainable, lr=execution.optimizer.learning_rate)
+    # Build the optimizer the SEAL specifies - impl (paged 8-bit vs adamw_torch), betas, eps, weight_decay -
+    # not a plain lr-only AdamW: the sealed paged 8-bit optimizer is what keeps 4B DPO inside 12 GB at seq
+    # 4096, and dropping the sealed fields is exactly the "no silent trainer-field filtering" invariant.
+    opt = execution.optimizer
+    betas = (opt.adam_beta1, opt.adam_beta2)
+    weight_decay = opt.weight_decay or 0.0
+    if paged_adamw_requested(opt):
+        from bitsandbytes.optim import PagedAdamW8bit  # noqa: PLC0415
+
+        optimizer: Any = PagedAdamW8bit(
+            trainable, lr=opt.learning_rate, betas=betas, eps=opt.adam_epsilon, weight_decay=weight_decay
+        )
+    elif getattr(opt.impl, "value", opt.impl) == "adamw_torch":
+        optimizer = torch.optim.AdamW(
+            trainable, lr=opt.learning_rate, betas=betas, eps=opt.adam_epsilon, weight_decay=weight_decay
+        )
+    else:
+        raise PreferenceWorkerError(
+            f"the DPO worker does not support the sealed optimizer impl {opt.impl!r} "
+            "(expected adamw_torch or paged_adamw_8bit)"
+        )
     max_steps = concrete_max_steps(execution, len(pairs))
     tracker = PreferenceExecutionTracker(expected_steps=max_steps, gradients=gradient_tracker)
     tracker.on_train_begin(optimizer)
 
     # --- train via the #781 primitive (it OWNS stdout-safe training; the runner wraps the protocol) ---
-    result = run_dpo_training(
-        model,
-        tokenizer,
-        pairs,
-        seq_len=execution.sequence.max_sequence_len,
-        chunk_size=execution.preference.sequence_chunk_size,
-        beta=execution.preference.beta,
-        label_smoothing=execution.preference.label_smoothing,
-        average_log_prob=execution.preference.average_log_prob,
-        learning_rate=execution.optimizer.learning_rate,
-        max_steps=max_steps,
-        gradient_accumulation_steps=execution.batching.fallback_grad_accumulation_steps or 1,
-        max_prompt_length=execution.data.max_prompt_length,
-        score_response_eos=score_response_eos_for(objective),
-        gradient_checkpointing=execution.gradient_checkpointing,
-        optimizer=optimizer,
-        truncation_allowed=execution.sequence.truncation_allowed,
-    )
+    # A TrainerError is a fail-closed data/finiteness refusal from the primitive; surface it as the worker's
+    # typed error so the PreferenceRunner maps it to a classified RunnerFailure, not the generic catch-all.
+    try:
+        result = run_dpo_training(
+            model,
+            tokenizer,
+            pairs,
+            seq_len=execution.sequence.max_sequence_len,
+            chunk_size=execution.preference.sequence_chunk_size,
+            beta=execution.preference.beta,
+            label_smoothing=execution.preference.label_smoothing,
+            average_log_prob=execution.preference.average_log_prob,
+            learning_rate=opt.learning_rate,
+            max_steps=max_steps,
+            gradient_accumulation_steps=execution.batching.fallback_grad_accumulation_steps or 1,
+            max_prompt_length=execution.data.max_prompt_length,
+            score_response_eos=score_response_eos_for(objective),
+            gradient_checkpointing=execution.gradient_checkpointing,
+            max_grad_norm=opt.max_grad_norm,
+            optimizer=optimizer,
+            truncation_allowed=execution.sequence.truncation_allowed,
+        )
+    except TrainerError as exc:
+        raise PreferenceWorkerError(f"the DPO training primitive refused the run: {exc}") from exc
 
     # --- replay the per-step evidence into the tracker, snapshot AFTER, and seal the execution evidence ---
     losses = result["losses"]

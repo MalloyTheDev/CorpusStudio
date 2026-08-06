@@ -2918,6 +2918,7 @@ def run_dpo_training(  # pragma: no cover - optional training-stack integration 
     max_prompt_length: int | None = None,
     score_response_eos: bool = True,
     gradient_checkpointing: bool = True,
+    max_grad_norm: float = float("inf"),
     optimizer: Any = None,
     checkpoint_callback: Callable[[int], None] | None = None,
     checkpoint_every: int = 0,
@@ -2938,7 +2939,8 @@ def run_dpo_training(  # pragma: no cover - optional training-stack integration 
     ``gradient_accumulation_steps`` come from the plan, and the caller passes the sealed ``optimizer``
     (e.g. paged 8-bit AdamW) - only when it is ``None`` does this build a plain AdamW as a dev convenience.
     Each optimizer step accumulates ``gradient_accumulation_steps`` preference microbatches.
-    ``max_prompt_length`` / ``score_response_eos`` / ``gradient_checkpointing`` are threaded from the seal.
+    ``max_prompt_length`` / ``score_response_eos`` / ``gradient_checkpointing`` / ``max_grad_norm`` are
+    threaded from the seal (the sealed ceiling clips each optimizer step; the pre-clip norm is the evidence).
     ``max_steps`` is CONCRETE: a sealed ``schedule.num_train_epochs`` is converted to steps by the worker
     adapter (which knows the dataset size), not here. The sealed checkpoint cadence is honored via
     ``checkpoint_callback`` (invoked with the completed optimizer-step count every ``checkpoint_every``
@@ -3112,7 +3114,10 @@ def run_dpo_training(  # pragma: no cover - optional training-stack integration 
             micro_chosen += (policy_chosen - ref_chosen).item()
             micro_rejected += (policy_rejected - ref_rejected).item()
             micro_delta += float(chosen_len - rejected_len)
-        grad_norms.append(float(torch.nn.utils.clip_grad_norm_(trainable, float("inf"))))
+        # Honor the sealed max_grad_norm: clip_grad_norm_ RETURNS the pre-clip total norm (recorded as the
+        # evidence grad_norm) and clips in place at the sealed ceiling (default inf for direct callers = the
+        # unclipped exploratory behavior; the worker passes optimizer.max_grad_norm from the seal).
+        grad_norms.append(float(torch.nn.utils.clip_grad_norm_(trainable, max_grad_norm)))
         optimizer.step()
         losses.append(micro_loss / gradient_accumulation_steps)
         margins.append(micro_margin / gradient_accumulation_steps)
