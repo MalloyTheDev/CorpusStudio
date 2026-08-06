@@ -257,6 +257,35 @@ def test_worker_arg_parser_accepts_the_pretraining_lanes():
         parser.parse_args(["--runner", "not-a-lane", *base])
 
 
+def test_bind_protocol_stream_isolates_the_protocol_from_fd1_writes():
+    # #10 regression: a NATIVE/C write straight to fd 1 (which a Python-level redirect_stdout cannot
+    # catch - the pretraining worker's tokenizer training / transformers paths do this) must NOT corrupt
+    # the framed protocol. It must land on stderr, while the protocol stream (a private dup of the real
+    # stdout) still reaches the stdout the parent reads. Run in a SUBPROCESS so the fd-level dup2 never
+    # touches this test process's own fd 1.
+    import os as _os
+    import subprocess
+    import textwrap
+
+    engine_dir = _os.path.dirname(_os.path.dirname(__file__))
+    script = textwrap.dedent(
+        """
+        import os
+        from corpus_studio.platform.worker import _bind_protocol_stream
+        stream = _bind_protocol_stream()
+        os.write(1, b"NATIVE-NOISE\\n")   # native fd-1 write; bypasses sys.stdout
+        print("python-print")             # sys.stdout -> fd 1 -> stderr after the redirect
+        stream.write("PROTOCOL\\n"); stream.flush()
+        """
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", script], capture_output=True, text=True, cwd=engine_dir
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "PROTOCOL"  # ONLY the protocol reaches the real stdout
+    assert "NATIVE-NOISE" in result.stderr and "python-print" in result.stderr  # all fd-1 -> stderr
+
+
 def test_worker_main_runs_from_stdin(monkeypatch, capsys):
     from corpus_studio.platform import worker
 
