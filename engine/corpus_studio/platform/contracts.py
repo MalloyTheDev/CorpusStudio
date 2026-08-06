@@ -5775,6 +5775,8 @@ class RunManifest(ContractModel):
     def _success_evidence_is_terminal_only(self) -> RunManifest:
         if self.state != "succeeded" and self.training_success_evidence is not None:
             raise ValueError("only a succeeded run may carry training success evidence")
+        if self.state != "succeeded" and self.pretraining_success_evidence is not None:
+            raise ValueError("only a succeeded run may carry pretraining success evidence")
         if (
             self.state != "succeeded"
             and self.final_fit is not None
@@ -5785,8 +5787,14 @@ class RunManifest(ContractModel):
             self.final_fit is not None
             and self.final_fit.classification in {FitClass.NATIVE_SAFE, FitClass.NATIVE_TIGHT}
             and self.training_success_evidence is None
+            and self.pretraining_success_evidence is None
         ):
-            raise ValueError("a proven native fit requires complete training success evidence")
+            # A proven native fit is earned by EITHER an adapter (SFT/DPO) success or a full-model
+            # pretraining success - never neither. The one-family XOR guard above keeps both from
+            # co-existing; this keeps a proven fit from standing on no success evidence at all.
+            raise ValueError(
+                "a proven native fit requires complete success evidence (adapter or full-model)"
+            )
         return self
 
 

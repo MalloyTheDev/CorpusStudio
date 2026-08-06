@@ -3,7 +3,13 @@
 Single source of truth for what Corpus Studio actually does today. When another
 doc disagrees with this file, this file wins (and the other doc should be fixed).
 
-Last reconciled: 2026-08-04 — the offline **DPO / preference planning** vertical shipped (admit-at-planning
+Last reconciled: 2026-08-06 — **from-scratch pretraining is workload_verified** (the first-party
+`PretrainingRunner` lane trains a random-init model end to end - a 124M GPT-2 GPU bring-up with
+supervisor-admitted evidence, a milestone wheel + sealed env) and **`create-model`** shipped (compose /
+base-on-a-family; #789/#791/#792); this pass also HARDENED the production `platform-run` execute_run +
+managed-subprocess path for pretraining (RunManifest pretraining-fit admission, the subprocess runner
+lane, epoch-scheduled training, single-file large-model saves, run-scoped output) - see the entries below.
+Prior (2026-08-04) - the offline **DPO / preference planning** vertical shipped (admit-at-planning
 -> sealed `ResolvedPreferenceExecutionConfiguration` -> refuse-at-execution; #775/#778/#779/#782/#783), see
 the entry below. Prior (2026-07-29) — the bounded autonomous engineering loop was **extracted to a separate
 repo (`cs-loop`, #729)**; what remains here is the product, the **assurance plane**
@@ -364,6 +370,18 @@ per-item error isolation, and off-thread document opens.
   functional proof, so newly planned training is refused on every host rather than inferred from an
   import or static feature list. Native-Windows/WDDM Blackwell remains an additional hard refusal
   because its required math path is unavailable there.
+- **From-scratch full-parameter pretraining (`workload_verified`, EXECUTABLE)**: `create-model` composes a
+  from-scratch architecture config (compose-your-own / base-on-a-family; the custom-block path is
+  security-gated and not built). `platform-plan --task-type pretraining` seals a random-init / continued
+  plan (`ModelInitializationSpec` + a `TokenizerSourceSpec` that trains a BPE tokenizer from the corpus OR
+  imports a hash-pinned one + the sharded `PretrainingDataPolicy`), and `platform-run` routes it to the
+  first-party full-parameter `PretrainingRunner` - NOT the SFT/DPO adapter lane. The worker packs the corpus,
+  random-inits from the arch config, trains full-parameter, and returns `PretrainingSuccessEvidence`; the
+  supervisor INDEPENDENTLY reload-verifies the saved `model.safetensors` reproduces the trained export state
+  before admitting `RunManifest.pretraining_success_evidence`. Promoted to `workload_verified` by a measured
+  GPU bring-up (a 124M GPT-2 trained on the RTX 5070, seq 1024, supervisor-admitted evidence; see
+  [`HOST_STATE.md`](HOST_STATE.md)). A PRODUCT claim, not a sealed IEEE cell; continued-pretraining from a
+  checkpoint is the main remaining slice.
 - **Offline DPO (preference) planning** (`platform-plan --task-type preference --objective dpo_qlora`):
   a QLoRA-DPO plan is admitted AT PLANNING and lowered into a sealed `ResolvedPreferenceExecutionConfiguration`
   (its own byte-locked seal, sibling to the SFT config) - a `PreferenceDataPolicy` (pair schema +
@@ -548,10 +566,13 @@ per-item error isolation, and off-thread document opens.
 - **Surface the LLM judge in the Evaluation tab** — the `--judge-model` scorer ships in
   the engine and in suites; the desktop **Evaluation** tab still defaults to keyword
   overlap with no judge-model field.
-- **Tokenizer training/editing and isolated functional probes.** Exact per-model counts already work
-  when the optional `[model-tokenizer]` (`tokenizers`) extra can load the target tokenizer; tiktoken
-  and the documented Unicode heuristic remain fallbacks. The static descriptor inspector deliberately
-  does not execute a tokenizer, and the dependency-light core never makes a heavy tokenizer mandatory.
+- **A standalone tokenizer training/editing surface and isolated functional probes.** (The from-scratch
+  pretraining vertical already trains a corpus BPE tokenizer as part of a run - see the pretraining entry
+  above; what is unbuilt is a *dedicated* Studio surface to train/edit/inspect a tokenizer on its own.)
+  Exact per-model counts already work when the optional `[model-tokenizer]` (`tokenizers`) extra can load
+  the target tokenizer; tiktoken and the documented Unicode heuristic remain fallbacks. The static
+  descriptor inspector deliberately does not execute a tokenizer, and the dependency-light core never
+  makes a heavy tokenizer mandatory.
 - **HF export/push** (upload/publishing) — see the hard boundary above; it stays a
   deliberate non-goal for now. (Read-only Hub *import* already ships.)
 - **Decommission the WPF/Avalonia desktop** — it is a retiring prototype (#545); the target UI is the

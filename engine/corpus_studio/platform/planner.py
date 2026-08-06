@@ -1080,9 +1080,10 @@ def _build_pretraining_plan(
     """Lower a from-scratch / continued PRETRAINING request into a sealed RunPlan carrying a
     :class:`ResolvedPretrainingExecutionConfiguration`. FULL-PARAMETER (no adapter, no 4-bit base, no
     single dataset file): the corpus is the sharded :class:`PretrainingDataPolicy`, the model an init
-    spec, the tokenizer a source spec. Admitted at planning (contract_validated); the runner refuses it
-    at EXECUTION until the pretraining worker + workload-verified evidence + milestone wheel land. Lives
-    OUTSIDE the SFT/DPO ``build_run_plan`` body so the byte-locked SFT seal path stays byte-identical."""
+    spec, the tokenizer a source spec. Admitted at planning and, once the 'pretraining' variant is
+    workload_verified for the backend, executed by the first-party PretrainingRunner lane through
+    platform-run. Lives OUTSIDE the SFT/DPO ``build_run_plan`` body so the byte-locked SFT seal path
+    stays byte-identical."""
     if pretraining_data is None:
         raise PlannerError(
             "a pretraining plan requires a corpus (a PretrainingDataPolicy of content-hashed shards)"
@@ -1375,10 +1376,10 @@ def build_run_plan(
         and admission_objective_id == "dpo_qlora"
         and not plan_targets_moe
     )
-    # Pretraining (from-scratch / continued) resolves by task alone (no objective_id), admitted at
-    # planning at contract_validated so its dedicated builder can seal a reviewable config; it is then
-    # refused AT EXECUTION by the runner until the pretraining worker + wheel land. A MoE topology routes
-    # to the declared-only 'moe' shape and stays refused here.
+    # Pretraining (from-scratch / continued) resolves by task alone (no objective_id); its dedicated
+    # builder seals a reviewable config, and once the 'pretraining' variant is workload_verified for the
+    # backend the first-party PretrainingRunner lane executes it. A MoE topology routes to the
+    # declared-only 'moe' shape and stays refused here.
     is_pretraining = constraints.task_type == TaskType.pretraining.value and not plan_targets_moe
     try:
         admit_task_execution_variant(

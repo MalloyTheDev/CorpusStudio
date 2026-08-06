@@ -2224,6 +2224,44 @@ def test_install_evidence_refuses_hashless_wheel_filename_mismatch(tmp_path, mon
         )
 
 
+def test_hashless_index_fetch_installs_a_no_redirect_opener(monkeypatch):
+    # SSRF / host-rebind hardening: the host allowlist is enforced on the ORIGINAL url only, so the fetch
+    # that binds a hashless wheel's content hash must REFUSE a 3xx - never follow it to an arbitrary or
+    # link-local host and bind THOSE bytes as the wheel's identity. Prove it installs a no-redirect
+    # opener whose redirect_request fails closed.
+    import urllib.request
+
+    captured = {}
+
+    class _Resp:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_a):
+            return False
+
+        def read(self, _n):
+            return b"pinned-wheel-bytes"
+
+    class _Opener:
+        def open(self, _url, timeout=None):
+            return _Resp()
+
+    def _fake_build_opener(handler):
+        captured["handler"] = handler
+        return _Opener()
+
+    monkeypatch.setattr(urllib.request, "build_opener", _fake_build_opener)
+    data = manager_module._fetch_index_artifact_bytes(
+        "https://download.pytorch.org/whl/cuda_pathfinder-1.2.2-py3-none-any.whl"
+    )
+    assert data == b"pinned-wheel-bytes"
+    handler = captured["handler"]
+    assert issubclass(handler, urllib.request.HTTPRedirectHandler)
+    with pytest.raises(manager_module.EnvironmentManagerError, match="refusing to follow it off"):
+        handler().redirect_request(None, None, 302, "Found", {}, "http://169.254.169.254/latest/meta")
+
+
 def test_install_source_evidence_classifies_proven_local_vcs_index_and_sdist_sources(
     tmp_path,
 ):

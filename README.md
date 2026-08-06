@@ -25,8 +25,10 @@ run control plane covering the dataset-to-model workflow: create datasets, valid
 clean and measure them, grade their outstanding debt, run pass/warn/block gates,
 generate or rewrite candidates only with policy-approved providers under human
 review, test and compare models, export them, version/diff/restore the dataset,
-generate training configs, execute first-party QLoRA only from a hash-sealed RunPlan through the
-supervised worker path, or launch your own installed trainer with live logs and checkpoints, plan against measured hardware,
+create a model from scratch (`create-model`), generate training configs, execute first-party training -
+QLoRA-SFT **and** from-scratch full-parameter pretraining (both `workload_verified`) - from a hash-sealed
+RunPlan through the supervised worker path, or launch your own installed trainer with live logs and
+checkpoints, plan against measured hardware,
 isolate the reference training backend in a lock-pinned managed environment, track every run and the
 model artifacts it produces, and measure the before/after improvement.
 
@@ -39,6 +41,10 @@ Corpus Studio covers the full local loop from authoring, through governed
 cleaning and gating, evaluation and model comparison, to launching and tracking
 a training run — its own opt-in first-party backend through the sealed Platform lifecycle, or your
 installed external trainer:
+
+> **On "desktop" / "... tab" phrasings below:** these name surfaces of the WPF/Avalonia desktop
+> **prototype**, which was **removed (#545)**. The engine **CLI is the current surface** and the
+> Tauri/React `apps/web` client is in progress; the per-bullet reframe is tracked in #560.
 
 **Author & validate**
 - create projects from built-in schema templates with pre-filled examples
@@ -130,10 +136,13 @@ installed external trainer:
   token budget (tokens-per-epoch after truncation, over-length counts), a rough VRAM
   planning estimate, and a LoRA rank/alpha suggestion. External targets include the exact launch
   command; the first-party target deliberately requires a sealed Platform plan instead
-- an **opt-in first-party QLoRA backend** (the `[train]` extra): `platform-plan` binds immutable
-  model/tokenizer/dataset/objective/environment/capability evidence, and `platform-run` supervises
-  the exact worker configuration. Every execution receives a fresh UUIDv7 run ID and writes under
-  `<output-root>/runs/<run-id>/`; its adapter ID includes the run, role, and weight-content hash.
+- an **opt-in first-party training backend** (the `[train]` extra) that executes **QLoRA-SFT and
+  from-scratch full-parameter pretraining** - both `workload_verified` (DPO/preference is sealed at
+  planning but not yet executable). `create-model` composes a from-scratch architecture config;
+  `platform-plan` binds immutable model/tokenizer/dataset/objective/environment/capability evidence, and
+  `platform-run` supervises the exact worker configuration (routing pretraining to the first-party
+  `PretrainingRunner`). Every execution receives a fresh UUIDv7 run ID and writes under
+  `<output-root>/runs/<run-id>/`; an adapter ID includes the run, role, and weight-content hash.
   `train-check`, `train-merge`, and `model-fetch` remain supporting tools. The low-level `train-run`
   entry point is development-only: it refuses unless explicitly acknowledged and labels its result
   `UNSEALED_DIRECT_EXECUTION`, `NON_REPRODUCIBLE`, and `NO_PLATFORM_LINEAGE`
@@ -290,7 +299,7 @@ For what is implemented today, see [`docs/CURRENT_STATE.md`](docs/CURRENT_STATE.
 and [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 For hands-on setup, see [`docs/DEVELOPER_GUIDE.md`](docs/DEVELOPER_GUIDE.md).
-For every engine command (the desktop shells out to the same ones), see the
+For every engine command (the CLI is the single execution authority; the UI is a client over it), see the
 [`docs/CLI_REFERENCE.md`](docs/CLI_REFERENCE.md).
 For copyable row formats, see [`docs/SCHEMA_SYSTEM.md`](docs/SCHEMA_SYSTEM.md) and
 the per-schema reference in [`docs/schemas/`](docs/schemas/README.md).

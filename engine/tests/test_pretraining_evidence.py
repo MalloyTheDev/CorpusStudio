@@ -149,16 +149,57 @@ def test_pretraining_success_evidence_rides_the_run_manifest() -> None:
         model_safetensors_sha256=_A,
         model_config_sha256=_B,
     )
+    # Regression for the production execute_run crash: a real GPU pretraining run reconciles a MEASURED
+    # fit (NATIVE_SAFE) and carries full-model evidence with NO adapter evidence. The terminal-fit
+    # validator used to demand adapter training_success_evidence for a proven fit, so EVERY successful
+    # GPU pretraining run raised at RunManifest construction (outside execute_run's try/except).
     manifest = RunManifest(
         run_id="run-pretrain-1",
         plan_ref=Ref(id="plan-pretrain-1"),
         created_at="2026-08-05T00:00:00+00:00",
         updated_at="2026-08-05T00:00:03+00:00",
+        state="succeeded",
+        final_fit={"classification": "NATIVE_SAFE"},
         pretraining_success_evidence=success,
     )
     assert manifest.pretraining_success_evidence is not None
+    assert manifest.final_fit is not None
     # a from-scratch pretraining run carries the model evidence, not the adapter evidence
     assert manifest.training_success_evidence is None
+
+
+def test_pretraining_success_evidence_requires_a_succeeded_run() -> None:
+    success = PretrainingSuccessEvidence(
+        execution=_execution(),
+        output_path_verified=True,
+        model_bytes_verified=True,
+        artifact_integrity_verified=True,
+        model_safetensors_sha256=_A,
+        model_config_sha256=_B,
+    )
+    # A non-terminal run may not carry full-model success evidence (mirrors the SFT invariant).
+    with pytest.raises(ValidationError, match="only a succeeded run may carry pretraining"):
+        RunManifest(
+            run_id="run-pretrain-2",
+            plan_ref=Ref(id="plan-pretrain-2"),
+            created_at="2026-08-05T00:00:00+00:00",
+            updated_at="2026-08-05T00:00:03+00:00",
+            pretraining_success_evidence=success,
+        )
+
+
+def test_proven_native_fit_still_requires_some_success_evidence() -> None:
+    # The #1 fix WIDENED the proven-fit guard to accept pretraining evidence; it did not remove the
+    # requirement. A succeeded run with a proven fit but NEITHER evidence family is still refused.
+    with pytest.raises(ValidationError, match="proven native fit requires complete success evidence"):
+        RunManifest(
+            run_id="run-pretrain-3",
+            plan_ref=Ref(id="plan-pretrain-3"),
+            created_at="2026-08-05T00:00:00+00:00",
+            updated_at="2026-08-05T00:00:03+00:00",
+            state="succeeded",
+            final_fit={"classification": "NATIVE_SAFE"},
+        )
 
 
 def test_success_model_verified_flags_are_type_locked() -> None:

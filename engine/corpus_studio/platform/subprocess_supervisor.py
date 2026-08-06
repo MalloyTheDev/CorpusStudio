@@ -106,8 +106,10 @@ def worker_identity_argv(plan: RunPlan) -> list[str]:
     return argv
 
 
-def _default_worker_argv(plan: RunPlan, runner_name: str) -> list[str]:
-    return [
+def _default_worker_argv(
+    plan: RunPlan, runner_name: str, *, corpus_root: str = "."
+) -> list[str]:
+    argv = [
         sys.executable,
         "-m",
         "corpus_studio.platform.worker",
@@ -115,6 +117,10 @@ def _default_worker_argv(plan: RunPlan, runner_name: str) -> list[str]:
         runner_name,
         *worker_identity_argv(plan),
     ]
+    # Only a non-default corpus root is emitted, so an ordinary run's argv is byte-for-byte unchanged.
+    if corpus_root != ".":
+        argv += ["--corpus-root", corpus_root]
+    return argv
 
 
 def _dispatch_line(plan: RunPlan, run_id: str, heartbeat_interval_s: int) -> str:
@@ -257,6 +263,7 @@ def execute_run_subprocess(
     *,
     run_id: str | None = None,
     runner_name: str = "auto",
+    corpus_root: str = ".",
     max_steps: int | None = None,
     sink: RunEventSink | None = None,
     silence_timeout_s: float = 600.0,
@@ -380,7 +387,7 @@ def execute_run_subprocess(
             write_run_manifest(manifest, record_dir)
         return SupervisedRun(manifest=manifest, events=[], artifacts=[])
 
-    argv = worker_argv or _default_worker_argv(plan, runner_name)
+    argv = worker_argv or _default_worker_argv(plan, runner_name, corpus_root=corpus_root)
 
     events: list[RunEvent] = []
     events_handle: Any = None

@@ -6,7 +6,7 @@ lifecycle:
 ```
 raw data -> ingestion -> cleaning -> transformation -> annotation -> dataset construction ->
 schema validation -> provenance & licensing -> train/validation/test splits -> tokenization ->
-training planning -> environment management -> fine-tuning & (future) pretraining ->
+training planning -> environment management -> fine-tuning & from-scratch pretraining ->
 checkpointing & recovery -> evaluation -> comparison -> behavior analysis & modification ->
 model packaging -> export -> release -> reproducible evidence
 ```

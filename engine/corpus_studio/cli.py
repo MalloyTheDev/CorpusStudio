@@ -512,6 +512,13 @@ def platform_run(
         "--max-steps",
         help="Compatibility assertion only; must equal the schedule already sealed in the RunPlan.",
     ),
+    corpus_root: str = typer.Option(
+        ".",
+        "--corpus-root",
+        help="Directory a from-scratch / continued pretraining plan's RELATIVE shard locations resolve "
+        "against (default: the current directory). Absolute shard paths and non-pretraining lanes "
+        "ignore it.",
+    ),
     out_dir: Optional[Path] = typer.Option(
         None, "--out", help="Write the terminal RunManifest.json to this directory (atomic)."
     ),
@@ -555,10 +562,21 @@ def platform_run(
     becomes a real KERNEL_STALL; a crash is isolated). The RunManifest classifies the terminal state
     (succeeded / failed / cancelled) with a FailureRecord taxonomy on abnormal termination."""
     from corpus_studio.platform.contracts import RunPlan
-    from corpus_studio.platform.supervisor import EchoRunner, Runner, demo_run_plan, execute_run
+    from corpus_studio.platform.supervisor import Runner, demo_run_plan, execute_run
 
-    if runner_name not in ("auto", "echo", "cpu_toy", "training"):
-        typer.echo(f"Unknown runner '{runner_name}' (auto | echo | cpu_toy | training).", err=True)
+    if runner_name not in (
+        "auto",
+        "echo",
+        "cpu_toy",
+        "training",
+        "pretraining",
+        "pretraining_cpu_toy",
+    ):
+        typer.echo(
+            f"Unknown runner '{runner_name}' (auto | echo | cpu_toy | training | pretraining | "
+            "pretraining_cpu_toy).",
+            err=True,
+        )
         raise typer.Exit(2)
 
     if demo:
@@ -659,6 +677,10 @@ def platform_run(
             from corpus_studio.platform.subprocess_supervisor import worker_identity_argv
 
             managed_worker_argv += worker_identity_argv(plan)
+            # A non-default corpus root anchors a managed pretraining plan's relative shard locations
+            # inside the isolated interpreter; the default is left off so ordinary argv is unchanged.
+            if corpus_root != ".":
+                managed_worker_argv += ["--corpus-root", corpus_root]
         except EnvironmentManagerError as exc:
             managed_lease.close()
             typer.echo(exc.failure.model_dump_json(indent=2), err=True)
@@ -698,6 +720,7 @@ def platform_run(
                 plan,
                 run_id=run_identity,
                 runner_name=runner_name,
+                corpus_root=corpus_root,
                 max_steps=max_steps,
                 silence_timeout_s=silence_timeout,
                 preflight_timeout_s=preflight_timeout,
@@ -706,12 +729,15 @@ def platform_run(
                 telemetry=sampler,
             )
         else:
-            if runner_name == "echo":
-                runner: Runner = EchoRunner()
-            else:
-                from corpus_studio.platform.runners import TrainingRunner
+            # The SAME lane factory the subprocess worker uses, so the in-process path can't drift (it
+            # once lacked the pretraining lanes while the worker had them). A workload_verified
+            # pretraining plan gets the full-parameter runner, never the SFT/DPO adapter runner (which
+            # execute_run's runner-type gate would reject).
+            from corpus_studio.platform.runners import build_lane_runner
 
-                runner = TrainingRunner(cpu_toy=(runner_name == "cpu_toy"), max_steps=max_steps)
+            runner: Runner = build_lane_runner(
+                runner_name, max_steps=max_steps, corpus_root=corpus_root
+            )
             result = execute_run(
                 plan, runner, run_id=run_identity, out_dir=out_dir, telemetry=sampler
             )

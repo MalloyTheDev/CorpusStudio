@@ -41,10 +41,14 @@ class ExecutionConfigurationError(ValueError):
 
 
 def run_scoped_training_output(
-    config: ResolvedExecutionConfiguration,
+    config: ResolvedExecutionConfiguration | ResolvedPretrainingExecutionConfiguration,
     run_id: str,
+    *,
+    leaf: str = "adapter",
 ) -> Path:
-    """Resolve the final trainer directory from the sealed root/layout and fresh run identity."""
+    """Resolve the final trainer directory from the sealed root/layout and fresh run identity. ``leaf``
+    is the artifact kind under ``artifacts/``: "adapter" for the SFT/DPO PEFT export, "model" for a
+    full-parameter pretraining export."""
 
     if config.output_layout != "run_scoped_v1":  # pragma: no cover - literal contract defense
         raise ExecutionConfigurationError(
@@ -52,7 +56,7 @@ def run_scoped_training_output(
         )
     if not _RUNTIME_ID.fullmatch(run_id) or run_id in {".", ".."}:
         raise ExecutionConfigurationError("run_id is unsafe for run-scoped output resolution")
-    return Path(config.output_dir) / "runs" / run_id / "artifacts" / "adapter"
+    return Path(config.output_dir) / "runs" / run_id / "artifacts" / leaf
 
 
 PREFERENCE_NOT_EXECUTABLE_REASON = (
@@ -245,20 +249,21 @@ def _within(path: Path, root: Path) -> bool:
 
 
 def verify_run_scoped_output_path(
-    config: ResolvedExecutionConfiguration,
+    config: ResolvedExecutionConfiguration | ResolvedPretrainingExecutionConfiguration,
     run_id: str,
     *,
     observed_path: str | Path | None = None,
     require_exists: bool = False,
+    leaf: str = "adapter",
 ) -> Path:
     """Require the exact lexical run output and reject link-like descendants before/after training."""
 
     sealed_root = Path(config.output_dir).absolute()
-    expected = run_scoped_training_output(config, run_id).absolute()
+    expected = run_scoped_training_output(config, run_id, leaf=leaf).absolute()
     candidate = Path(observed_path).absolute() if observed_path is not None else expected
     if candidate != expected:
         raise ExecutionConfigurationError(
-            "trainer output differs from the exact sealed run-scoped output adapter path"
+            "trainer output differs from the exact sealed run-scoped output path"
         )
     try:
         expected.relative_to(sealed_root)
@@ -294,9 +299,34 @@ def verify_run_scoped_output_path(
                 )
     if require_exists and (not expected.is_dir() or _is_link_like(expected)):
         raise ExecutionConfigurationError(
-            "trainer did not produce a regular run-scoped adapter directory"
+            "trainer did not produce a regular run-scoped output directory"
         )
     return expected
+
+
+def run_scoped_pretraining_output(
+    config: ResolvedPretrainingExecutionConfiguration,
+    run_id: str,
+) -> Path:
+    """The full-parameter pretraining sibling of :func:`run_scoped_training_output` - the run-scoped
+    ``model`` export directory (never the SFT ``adapter`` leaf)."""
+
+    return run_scoped_training_output(config, run_id, leaf="model")
+
+
+def verify_run_scoped_pretraining_output_path(
+    config: ResolvedPretrainingExecutionConfiguration,
+    run_id: str,
+    *,
+    observed_path: str | Path | None = None,
+    require_exists: bool = False,
+) -> Path:
+    """Require the exact lexical run-scoped ``model`` output for a pretraining run and reject link-like
+    descendants (the pretraining analog of :func:`verify_run_scoped_output_path`)."""
+
+    return verify_run_scoped_output_path(
+        config, run_id, observed_path=observed_path, require_exists=require_exists, leaf="model"
+    )
 
 
 def _stable_file_read(
