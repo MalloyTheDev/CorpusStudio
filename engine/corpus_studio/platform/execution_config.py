@@ -78,6 +78,13 @@ PRETRAINING_NOT_EXECUTABLE_REASON = (
     "this backend.)"
 )
 
+FULL_FINETUNE_NOT_EXECUTABLE_REASON = (
+    "a full-parameter fine-tune runs on the first-party full-parameter lane, not the SFT/DPO adapter "
+    "runner: dispatch it through platform-run so required_runner_lane selects the 'full_finetune' lane. "
+    "(The same refusal fires if the 'dense_full_finetune' execution variant is not workload_verified for "
+    "this backend.)"
+)
+
 
 def required_runner_lane(plan: RunPlan) -> str:
     """Return the only runner lane allowed to consume ``plan``."""
@@ -134,6 +141,27 @@ def required_runner_lane(plan: RunPlan) -> str:
             if plan.resolved_pretraining_execution.runtime_mode == "cpu_toy"
             else "pretraining"
         )
+    if plan.resolved_full_finetune_execution is not None:
+        # Full-parameter SFT is admitted at planning; at EXECUTION it is admitted only once the
+        # dense_full_finetune variant reaches workload_verified (the full-parameter worker + full-model
+        # reload-verify + a measured run). Gate on the ladder, keyed by the full-parameter SFT shape, then
+        # route to the full-finetune lane - the adapter SFT lane never trains a full model.
+        from corpus_studio.platform.enums import TaskType  # noqa: PLC0415
+        from corpus_studio.platform.execution_variants import (  # noqa: PLC0415
+            ExecutionVariantRefused,
+            admit_task_execution_variant,
+            reference_execution_variants,
+        )
+
+        try:
+            admit_task_execution_variant(
+                TaskType.sft,
+                is_full_parameter=True,
+                declared_variants=reference_execution_variants(),
+            )
+        except ExecutionVariantRefused as exc:
+            raise ExecutionConfigurationError(FULL_FINETUNE_NOT_EXECUTABLE_REASON) from exc
+        return "full_finetune"
     if plan.backend_ref.id == "echo":
         if plan.task_type.value != "evaluation":
             raise ExecutionConfigurationError(

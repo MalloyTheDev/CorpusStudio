@@ -67,6 +67,7 @@ from corpus_studio.platform.contracts import (
     RankBinding,
     ReferenceModelBinding,
     ResolvedExecutionConfiguration,
+    ResolvedFullFinetuneExecutionConfiguration,
     ResolvedPreferenceExecutionConfiguration,
     ResolvedPretrainingExecutionConfiguration,
     RunPlan,
@@ -100,6 +101,7 @@ from corpus_studio.platform.execution_config import (
     canonical_sha256,
     capability_report_ref_for,
     execution_configuration_hash_for,
+    full_finetune_execution_configuration_hash_for,
     formatter_identity,
     huggingface_input_ref,
     preference_execution_configuration_hash_for,
@@ -1531,12 +1533,17 @@ def build_run_plan(
         )
 
     loss_impl = "liger_fused_ce" if constraints.use_liger else "cross_entropy"
-    checkpoint_impl = "adapter_only"
-    for label, value, proven in (
+    # A full fine-tune checkpoints the FULL model state; adapter runs checkpoint only the adapter.
+    checkpoint_impl = "full_state" if is_full_finetune else "adapter_only"
+    axis_checks = [
         ("optimizer", constraints.optim, proven_optimizers),
         ("loss", loss_impl, proven_losses),
-        ("checkpoint", checkpoint_impl, proven_checkpoints),
-    ):
+    ]
+    if not is_full_finetune:
+        # full_state checkpoints are not yet functionally proven for the SFT backend (the milestone wheel
+        # proves them); admitted at planning, refused at execution alongside the adapter/export reasons.
+        axis_checks.append(("checkpoint", checkpoint_impl, proven_checkpoints))
+    for label, value, proven in axis_checks:
         if value not in proven:
             raise PlannerError(f"{label} '{value}' is not functionally proven")
     expected_combination = {
@@ -1653,6 +1660,7 @@ def build_run_plan(
         not_yet_declarable = {
             f"adapter '{adapter_method}' not supported",
             f"export format '{constraints.export_format}' not supported",
+            f"checkpoint '{checkpoint_impl}' not supported",
         }
         unmet = [reason for reason in unmet if reason not in not_yet_declarable]
     if unmet:
@@ -1871,6 +1879,7 @@ def build_run_plan(
     }
     resolved_execution_field: dict[str, Any] | None = None
     resolved_preference_field: dict[str, Any] | None = None
+    resolved_full_finetune_field: dict[str, Any] | None = None
     if is_preference_dpo:
         preference_execution = _resolve_preference_execution(
             plan_id=plan_id,
@@ -1881,6 +1890,32 @@ def build_run_plan(
             project_dir=project_dir,
         )
         resolved_preference_field = preference_execution.model_dump(mode="json")
+    elif is_full_finetune:
+        # The full-model sibling seal: the shared execution sub-specs already carry the full-parameter
+        # shape (adapter.method=full_finetune, unquantized precision, full_state checkpoint, merged export);
+        # only the SFT objective + loss + data policy are added, exactly like the dense SFT branch below.
+        try:
+            full_finetune_draft = ResolvedFullFinetuneExecutionConfiguration.model_validate(
+                {
+                    **shared_fields,
+                    "configuration_hash": "0" * 64,
+                    "objective_ref": objective_ref.model_dump(mode="json"),
+                    "loss_impl": loss_impl,
+                    "data": data_policy.model_dump(mode="json"),
+                }
+            )
+        except ValidationError as exc:
+            raise PlannerError(
+                f"the resolved full-finetune configuration is invalid: {exc}"
+            ) from exc
+        full_finetune_execution = full_finetune_draft.model_copy(
+            update={
+                "configuration_hash": full_finetune_execution_configuration_hash_for(
+                    full_finetune_draft
+                )
+            }
+        )
+        resolved_full_finetune_field = full_finetune_execution.model_dump(mode="json")
     else:
         try:
             execution_draft = ResolvedExecutionConfiguration.model_validate(
@@ -1928,6 +1963,7 @@ def build_run_plan(
         "training_config_snapshot": {},
         "resolved_execution": resolved_execution_field,
         "resolved_preference_execution": resolved_preference_field,
+        "resolved_full_finetune_execution": resolved_full_finetune_field,
         "parameter_accounting_ref": (
             parameter_accounting_ref.model_dump(mode="json")
             if parameter_accounting_ref is not None
