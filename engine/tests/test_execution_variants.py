@@ -195,9 +195,10 @@ def _variant(kind: ExecutionVariantKind, support: ExecutionVariantSupport) -> Ba
 
 def test_workload_verified_variants_are_admitted_others_refused():
     reference = {v.variant_kind: v for v in reference_execution_variants()}
-    # the proven paths: dense-QLoRA-SFT and from-scratch full-parameter pretraining
+    # the proven paths: dense-QLoRA-SFT, from-scratch full-parameter pretraining, and offline-DPO preference
     admit_execution_variant(reference[ExecutionVariantKind.dense_qlora_sft])
     admit_execution_variant(reference[ExecutionVariantKind.pretraining])
+    admit_execution_variant(reference[ExecutionVariantKind.preference_dpo])
     for kind in (
         ExecutionVariantKind.dense_full_finetune,
         ExecutionVariantKind.moe,
@@ -221,10 +222,11 @@ def test_admission_refuses_an_unsupported_schema_version():
         admit_execution_variant(tampered)
 
 
-def test_reference_variants_workload_verified_are_sft_and_pretraining():
+def test_reference_variants_workload_verified_are_sft_pretraining_and_preference():
     by_kind = {v.variant_kind: v.support for v in reference_execution_variants()}
     assert by_kind[ExecutionVariantKind.dense_qlora_sft] == ExecutionVariantSupport.workload_verified
     assert by_kind[ExecutionVariantKind.pretraining] == ExecutionVariantSupport.workload_verified
+    assert by_kind[ExecutionVariantKind.preference_dpo] == ExecutionVariantSupport.workload_verified
     assert all(
         by_kind[kind] != ExecutionVariantSupport.workload_verified
         for kind in (
@@ -278,18 +280,11 @@ def test_preference_resolves_by_its_specific_objective_not_the_task():
         )
         is None
     )
-    # dpo_qlora is declared at contract_validated: admitted at that bar, refused below workload_verified.
+    # dpo_qlora is workload_verified (GPU bring-up): admitted at the default (workload_verified) bar.
     admitted = admit_task_execution_variant(
-        TaskType.preference,
-        objective_id="dpo_qlora",
-        declared_variants=declared,
-        required_support=ExecutionVariantSupport.contract_validated,
+        TaskType.preference, objective_id="dpo_qlora", declared_variants=declared
     )
     assert admitted.variant_kind == ExecutionVariantKind.preference_dpo
-    with pytest.raises(ExecutionVariantRefused, match="below the required 'workload_verified'"):
-        admit_task_execution_variant(
-            TaskType.preference, objective_id="dpo_qlora", declared_variants=declared
-        )
     # an unrecognized/unbuilt preference objective is refused as no-variant.
     with pytest.raises(ExecutionVariantRefused, match="no executable execution variant"):
         admit_task_execution_variant(

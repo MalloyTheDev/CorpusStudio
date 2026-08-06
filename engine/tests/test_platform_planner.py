@@ -422,10 +422,10 @@ def test_planner_admits_the_dense_qlora_sft_task_and_refuses_unexecutable_varian
     # a preference request must name its objective; without one it maps to no shape -> refused.
     with pytest.raises(PlannerError, match="no executable execution variant"):
         _plan(_profile(cc_major=8), _report(), task_type="preference")
-    # preference + the dpo_qlora objective maps to preference_dpo (contract_validated) -> ADMITTED at
+    # preference + the dpo_qlora objective maps to preference_dpo (workload_verified) -> ADMITTED at
     # planning: the resolver seals a ResolvedPreferenceExecutionConfiguration and the plan carries it
-    # (not the SFT resolved_execution). Execution is refused separately by the runner (DPOTrainer + wheel
-    # gated), so the plan's loss summary is the DPO loss and it binds the dpo_qlora objective.
+    # (not the SFT resolved_execution), so the plan's loss summary is the DPO loss and it binds the
+    # dpo_qlora objective. Execution now routes to the first-party PreferenceRunner lane (GPU bring-up).
     dpo_plan = _plan(_profile(cc_major=8), _report(), task_type="preference", objective_id="dpo_qlora")
     assert dpo_plan.resolved_preference_execution is not None
     assert dpo_plan.resolved_execution is None
@@ -433,9 +433,8 @@ def test_planner_admits_the_dense_qlora_sft_task_and_refuses_unexecutable_varian
     assert dpo_plan.resolved_preference_execution.objective_ref.id == "dpo_qlora"
 
 
-def test_preference_dpo_resolves_to_a_sealed_config_and_the_runner_refuses_it_at_execution():
+def test_preference_dpo_resolves_to_a_sealed_config_and_routes_to_the_preference_lane():
     from corpus_studio.platform.execution_config import preference_execution_configuration_hash_for
-    from corpus_studio.platform.runners import RunnerFailure, TrainingRunner
 
     plan = _plan(_profile(cc_major=8), _report(), task_type="preference", objective_id="dpo_qlora")
     pref = plan.resolved_preference_execution
@@ -449,20 +448,12 @@ def test_preference_dpo_resolves_to_a_sealed_config_and_the_runner_refuses_it_at
     assert pref.data.max_prompt_length < pref.data.max_length  # room for the response
     # deferred #779 finding: device_map reconciles to exactly the one sealed compute device
     assert len(pref.device_map) == 1
-    # refuse-at-execution must be REACHABLE with a TYPED reason at the actual gates, not just the innermost
-    # _resolve_config: the dispatch lane selector AND the direct runner's first resolution step both refuse
-    # a preference plan before the generic "no ResolvedExecutionConfiguration" path.
-    from corpus_studio.platform.execution_config import (
-        ExecutionConfigurationError,
-        required_runner_lane,
-    )
+    # preference_dpo is workload_verified (GPU bring-up), so the dispatch gate admits it and routes to the
+    # first-party PreferenceRunner lane - never the SFT/pretraining lane (which never runs the DPO
+    # reference / log-prob path).
+    from corpus_studio.platform.execution_config import required_runner_lane
 
-    with pytest.raises(ExecutionConfigurationError, match="not yet executable"):
-        required_runner_lane(plan)  # dispatch gate (shipping platform-run flow)
-    with pytest.raises(RunnerFailure, match="not yet executable"):
-        TrainingRunner(cpu_toy=False)._resolve_trainer(plan)  # direct runner, before _resolve_config
-    with pytest.raises(RunnerFailure, match="not yet executable"):
-        TrainingRunner(cpu_toy=False)._resolve_config(plan, "run-x")  # defense-in-depth
+    assert required_runner_lane(plan) == "preference"
 
 
 def test_preference_resolver_threads_the_dpo_knobs():

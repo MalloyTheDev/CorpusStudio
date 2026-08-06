@@ -64,9 +64,10 @@ def run_scoped_training_output(
 
 
 PREFERENCE_NOT_EXECUTABLE_REASON = (
-    "this is a sealed preference (DPO) plan - admitted at planning but not yet executable: "
-    "'preference_dpo' is contract_validated, not workload_verified. The DPOTrainer worker branch, a "
-    "workload-verified run, and the milestone wheel are the gated next step."
+    "a sealed preference (DPO) plan runs on the first-party PreferenceRunner lane, not the SFT/pretraining "
+    "runner: dispatch it through platform-run so required_runner_lane selects the 'preference' lane. (The "
+    "same refusal fires if the 'preference_dpo' execution variant is not workload_verified for this "
+    "backend.)"
 )
 
 PRETRAINING_NOT_EXECUTABLE_REASON = (
