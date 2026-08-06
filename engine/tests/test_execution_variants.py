@@ -193,12 +193,13 @@ def _variant(kind: ExecutionVariantKind, support: ExecutionVariantSupport) -> Ba
     return BackendExecutionVariant(backend_id="corpus_studio", variant_kind=kind, support=support)
 
 
-def test_only_workload_verified_dense_qlora_sft_is_admitted():
+def test_workload_verified_variants_are_admitted_others_refused():
     reference = {v.variant_kind: v for v in reference_execution_variants()}
-    admit_execution_variant(reference[ExecutionVariantKind.dense_qlora_sft])  # the proven path
+    # the proven paths: dense-QLoRA-SFT and from-scratch full-parameter pretraining
+    admit_execution_variant(reference[ExecutionVariantKind.dense_qlora_sft])
+    admit_execution_variant(reference[ExecutionVariantKind.pretraining])
     for kind in (
         ExecutionVariantKind.dense_full_finetune,
-        ExecutionVariantKind.pretraining,
         ExecutionVariantKind.moe,
     ):
         with pytest.raises(ExecutionVariantRefused, match="refused"):
@@ -220,14 +221,14 @@ def test_admission_refuses_an_unsupported_schema_version():
         admit_execution_variant(tampered)
 
 
-def test_reference_variants_only_mark_sft_workload_verified():
+def test_reference_variants_workload_verified_are_sft_and_pretraining():
     by_kind = {v.variant_kind: v.support for v in reference_execution_variants()}
     assert by_kind[ExecutionVariantKind.dense_qlora_sft] == ExecutionVariantSupport.workload_verified
+    assert by_kind[ExecutionVariantKind.pretraining] == ExecutionVariantSupport.workload_verified
     assert all(
         by_kind[kind] != ExecutionVariantSupport.workload_verified
         for kind in (
             ExecutionVariantKind.dense_full_finetune,
-            ExecutionVariantKind.pretraining,
             ExecutionVariantKind.moe,
         )
     )
@@ -248,10 +249,11 @@ def test_task_maps_to_an_execution_variant_shape_and_admits_fail_closed():
     assert admit_task_execution_variant(TaskType.sft, declared_variants=declared).variant_kind == (
         ExecutionVariantKind.dense_qlora_sft
     )
-    # pretraining -> a declared-only shape: refused below workload_verified (no fallback).
+    # pretraining -> the workload_verified full-parameter shape: admitted, returns that variant.
     assert execution_variant_kind_for_task(TaskType.pretraining) == ExecutionVariantKind.pretraining
-    with pytest.raises(ExecutionVariantRefused, match="below the required"):
-        admit_task_execution_variant(TaskType.pretraining, declared_variants=declared)
+    assert admit_task_execution_variant(
+        TaskType.pretraining, declared_variants=declared
+    ).variant_kind == ExecutionVariantKind.pretraining
     # preference WITHOUT a recognized objective -> no shape: refused (it resolves by objective, not task).
     assert execution_variant_kind_for_task(TaskType.preference) is None
     with pytest.raises(ExecutionVariantRefused, match="no executable execution variant"):
