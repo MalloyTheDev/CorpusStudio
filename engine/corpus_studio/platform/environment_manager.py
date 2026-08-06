@@ -1625,8 +1625,13 @@ print(json.dumps({
 
 
 def _capability_snapshot_script(probes: Sequence[str] | None) -> str:
+    # A recipe with no required execution probe yields probes=None. Render that as the Python literal
+    # ``None`` (run all default probes) - NOT json.dumps(None) -> "null", which is not valid Python and
+    # made the generated probe script raise ``NameError: name 'null' is not defined`` for every managed
+    # env on such a recipe (e.g. the base backend-corpus-studio recipe pretraining uses).
     return _CAPABILITY_SNAPSHOT_TEMPLATE.replace(
-        "__PROBES__", json.dumps(list(probes) if probes is not None else None, ensure_ascii=True)
+        "__PROBES__",
+        json.dumps(list(probes), ensure_ascii=True) if probes is not None else "None",
     )
 
 
@@ -5034,7 +5039,11 @@ class EnvironmentManager:
         if outcome.exit_code != 0 or outcome.timed_out or outcome.cancelled:
             return {"ok": False, "error": _read_tail(stderr_path) or "probe command failed"}
         try:
-            return _last_json_object(_read_tail(stdout_path))
+            # A JSON probe emits ONE structured object as its final stdout; read a generous tail (not the
+            # small default log-tail) so a large capability report - the base recipe's full package
+            # profile plus all default probes can exceed 32 KB on one line - is not truncated mid-object
+            # into a spurious "did not emit structured JSON". The bound still caps a runaway probe.
+            return _last_json_object(_read_tail(stdout_path, limit=8_000_000))
         except json.JSONDecodeError:
             return {"ok": False, "error": "probe did not emit structured JSON"}
 
