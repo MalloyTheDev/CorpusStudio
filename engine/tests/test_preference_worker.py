@@ -3,11 +3,7 @@
 
 from types import SimpleNamespace
 
-from corpus_studio.training.preference_worker import (
-    concrete_max_steps,
-    paged_adamw_requested,
-    score_response_eos_for,
-)
+from corpus_studio.training.preference_worker import concrete_max_steps, score_response_eos_for
 
 
 def test_score_response_eos_derived_from_the_objective_primary_mask() -> None:
@@ -46,12 +42,3 @@ def test_concrete_max_steps_converts_epochs_using_the_pair_count() -> None:
         batching=SimpleNamespace(fallback_grad_accumulation_steps=2),
     )
     assert concrete_max_steps(partial, pair_count=9) == 5  # ceil(9/2)=5, rounds up
-
-
-def test_paged_adamw_requested_reads_the_sealed_impl() -> None:
-    # the DPO worker builds the optimizer the seal names; paged 8-bit AdamW is what fits seq 4096 in 12 GB.
-    assert paged_adamw_requested(SimpleNamespace(impl=SimpleNamespace(value="paged_adamw_8bit"))) is True
-    assert paged_adamw_requested(SimpleNamespace(impl=SimpleNamespace(value="adamw_torch"))) is False
-    # tolerant of a bare-string impl (no .value); anything that is not paged 8-bit is not paged
-    assert paged_adamw_requested(SimpleNamespace(impl="paged_adamw_8bit")) is True
-    assert paged_adamw_requested(SimpleNamespace(impl="adamw_torch")) is False

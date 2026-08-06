@@ -260,6 +260,10 @@ def run_pretraining(  # pragma: no cover - torch/tokenizers integration; proven 
         set_seed,
     )
 
+    from corpus_studio.training.optimizer_config import (  # noqa: PLC0415
+        hf_training_arguments_optimizer_kwargs,
+    )
+
     _refuse_unsupported(execution)
     cpu_toy = execution.runtime_mode == "cpu_toy"
     out = Path(output_dir or execution.output_dir)
@@ -354,18 +358,9 @@ def run_pretraining(  # pragma: no cover - torch/tokenizers integration; proven 
         ),
         per_device_train_batch_size=execution.batching.micro_batch_size,
         gradient_accumulation_steps=execution.batching.fallback_grad_accumulation_steps or 1,
-        learning_rate=optimizer.learning_rate,
-        weight_decay=optimizer.weight_decay or 0.0,
-        max_grad_norm=optimizer.max_grad_norm,
-        lr_scheduler_type=(optimizer.lr_scheduler or "linear"),
-        warmup_ratio=optimizer.warmup_ratio or 0.0,
-        # Honor the FULL sealed optimizer - impl (adamw_torch vs paged_adamw_8bit) + betas + epsilon - not
-        # just the lr/decay: silently defaulting HF's optim would drop the sealed choice (the same
-        # trainer-field-filtering the SFT path avoids via optim=impl.value).
-        optim=optimizer.impl.value,
-        adam_beta1=optimizer.adam_beta1,
-        adam_beta2=optimizer.adam_beta2,
-        adam_epsilon=optimizer.adam_epsilon,
+        # The FULL sealed optimizer (impl / betas / epsilon / decay / clip / schedule) from the one shared
+        # lowering, so no field can be silently dropped (the audit's F3 drift).
+        **hf_training_arguments_optimizer_kwargs(optimizer),
         seed=execution.seed,
         data_seed=execution.data_seed,
         logging_steps=1,
