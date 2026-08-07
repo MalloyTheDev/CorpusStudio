@@ -195,16 +195,14 @@ def _variant(kind: ExecutionVariantKind, support: ExecutionVariantSupport) -> Ba
 
 def test_workload_verified_variants_are_admitted_others_refused():
     reference = {v.variant_kind: v for v in reference_execution_variants()}
-    # the proven paths: dense-QLoRA-SFT, from-scratch full-parameter pretraining, and offline-DPO preference
+    # the proven paths: dense-QLoRA-SFT, from-scratch pretraining, offline-DPO preference, full-param SFT
     admit_execution_variant(reference[ExecutionVariantKind.dense_qlora_sft])
     admit_execution_variant(reference[ExecutionVariantKind.pretraining])
     admit_execution_variant(reference[ExecutionVariantKind.preference_dpo])
-    for kind in (
-        ExecutionVariantKind.dense_full_finetune,
-        ExecutionVariantKind.moe,
-    ):
-        with pytest.raises(ExecutionVariantRefused, match="refused"):
-            admit_execution_variant(reference[kind])
+    admit_execution_variant(reference[ExecutionVariantKind.dense_full_finetune])
+    # MoE stays declared-only (no runtime), so it is refused at the workload_verified bar.
+    with pytest.raises(ExecutionVariantRefused, match="refused"):
+        admit_execution_variant(reference[ExecutionVariantKind.moe])
 
 
 def test_dense_qlora_sft_below_required_support_is_refused():
@@ -222,18 +220,14 @@ def test_admission_refuses_an_unsupported_schema_version():
         admit_execution_variant(tampered)
 
 
-def test_reference_variants_workload_verified_are_sft_pretraining_and_preference():
+def test_reference_variants_workload_verified_are_the_four_dense_paths():
     by_kind = {v.variant_kind: v.support for v in reference_execution_variants()}
     assert by_kind[ExecutionVariantKind.dense_qlora_sft] == ExecutionVariantSupport.workload_verified
     assert by_kind[ExecutionVariantKind.pretraining] == ExecutionVariantSupport.workload_verified
     assert by_kind[ExecutionVariantKind.preference_dpo] == ExecutionVariantSupport.workload_verified
-    assert all(
-        by_kind[kind] != ExecutionVariantSupport.workload_verified
-        for kind in (
-            ExecutionVariantKind.dense_full_finetune,
-            ExecutionVariantKind.moe,
-        )
-    )
+    assert by_kind[ExecutionVariantKind.dense_full_finetune] == ExecutionVariantSupport.workload_verified
+    # MoE stays declared-only (no runtime).
+    assert by_kind[ExecutionVariantKind.moe] != ExecutionVariantSupport.workload_verified
 
 
 def test_descriptor_is_not_the_sealed_worker_configuration():

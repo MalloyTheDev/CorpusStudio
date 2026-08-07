@@ -456,9 +456,8 @@ def test_preference_dpo_resolves_to_a_sealed_config_and_routes_to_the_preference
     assert required_runner_lane(plan) == "preference"
 
 
-def test_full_parameter_sft_seals_a_full_model_config_and_refuses_at_execution():
+def test_full_parameter_sft_seals_a_full_model_config_and_routes_to_the_full_finetune_lane():
     from corpus_studio.platform.execution_config import (
-        ExecutionConfigurationError,
         full_finetune_execution_configuration_hash_for,
         required_runner_lane,
     )
@@ -476,10 +475,9 @@ def test_full_parameter_sft_seals_a_full_model_config_and_refuses_at_execution()
     assert ff.checkpoint_policy.impl.value == "full_state"
     assert ff.precision.quantized_storage_format.value == "none"  # full-param is unquantized
     assert ff.objective_ref.id == "full_parameter_sft"
-    # admitted at planning even though the backend does not prove full_finetune; refused at EXECUTION until
-    # dense_full_finetune is workload_verified (the full-parameter worker + full-model evidence + a run).
-    with pytest.raises(ExecutionConfigurationError, match="full_finetune"):
-        required_runner_lane(plan)
+    # dense_full_finetune is workload_verified (the GPU bring-up), so the dispatch gate admits it and routes
+    # to the first-party full-finetune lane - never the adapter SFT lane (which never trains a full model).
+    assert required_runner_lane(plan) == "full_finetune"
 
 
 def test_a_dense_qlora_sft_plan_is_unchanged_by_the_full_finetune_path():
