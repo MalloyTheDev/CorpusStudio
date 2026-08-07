@@ -296,6 +296,20 @@ def test_restore_pins_the_exact_requested_checkpoint(tmp_path: Path) -> None:
     assert exc.value.reason == "incompatible"
 
 
+def test_materialize_hf_checkpoint_fails_closed_without_scheduler(tmp_path: Path) -> None:
+    # The hybrid HF resume cannot continue the LR schedule faithfully without scheduler.pt, so a checkpoint
+    # missing it is rejected (fail closed) rather than handed to SFTTrainer as a silently-degraded resume.
+    # verify_checkpoint_integrity runs FIRST, so a tampered/partial checkpoint never reaches materialization.
+    torch, kwargs, _ = _save(tmp_path)  # the fixture seals no lr_scheduler
+    with pytest.raises(ck.CheckpointError, match="no scheduler state"):
+        cio.materialize_hf_checkpoint(
+            torch_module=torch,
+            sealed_dir=kwargs["final_dir"],
+            hf_dir=tmp_path / "hf",
+            peft_model=None,
+        )
+
+
 def test_restore_rejects_incompatible_plan(tmp_path: Path) -> None:
     plan = demo_training_plan(plan_id="demo-ckpt")
     torch, _, _ = _save(tmp_path, plan=plan)

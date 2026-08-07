@@ -999,6 +999,7 @@ export type AdapterSafetensorsSha2561 = string;
 export type ArtifactIntegrityVerified2 = true;
 export type CompletedOptimizerSteps2 = number;
 export type OptimizerCreated2 = true;
+export type ResumedFromOptimizerStep = number;
 /**
  * @minItems 1
  */
@@ -2520,6 +2521,7 @@ export interface TrainingExecutionEvidence {
   completed_optimizer_steps: CompletedOptimizerSteps2;
   gradient_coverage: GradientCoverageEvidence;
   optimizer_created: OptimizerCreated2;
+  resumed_from_optimizer_step?: ResumedFromOptimizerStep;
   step_losses: StepLosses2;
   trainable_state: TrainableStateChangeEvidence;
 }

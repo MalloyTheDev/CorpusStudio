@@ -374,6 +374,12 @@ class TrainingRunner:
                     run_scoped_training_output(execution, ctx.run_id, leaf="checkpoints")
                 ),
             }
+        # Exact-lineage RESUME: a resumed run carries a verified CheckpointResumeRequest (from
+        # prepare_resumed_run / --resume-from); the first-party trainer re-verifies it before restoring.
+        # Threaded independently of the write cadence - a run can resume AND write new checkpoints, or
+        # resume without writing.
+        if ctx.resume is not None:
+            checkpoint_kwargs["resume"] = ctx.resume
         try:
             with watchdog:
                 result = trainer_fn(
@@ -453,6 +459,9 @@ class TrainingRunner:
                 stage=StageMarker.export,
                 remediation="preserve the failed-run evidence and repair the first-party worker",
             )
+        # Record the exact-lineage checkpoints this run sealed so the RunManifest carries them - a later
+        # resume discovers a parent checkpoint from the run record, not by scanning disk.
+        ctx.checkpoints = list(result.checkpoints)
         try:
             verify_run_scoped_output_path(
                 execution,

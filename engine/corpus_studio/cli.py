@@ -522,6 +522,13 @@ def platform_run(
     out_dir: Optional[Path] = typer.Option(
         None, "--out", help="Write the terminal RunManifest.json to this directory (atomic)."
     ),
+    resume_from: Optional[Path] = typer.Option(
+        None,
+        "--resume-from",
+        help="Resume this plan from a sealed intermediate checkpoint directory (exact-lineage). The "
+        "checkpoint is fully integrity-verified AND proven a compatible resume source for the plan "
+        "BEFORE anything is restored; an incompatible or tampered checkpoint fails closed.",
+    ),
     subprocess_mode: bool = typer.Option(
         False,
         "--subprocess",
@@ -738,8 +745,31 @@ def platform_run(
             runner: Runner = build_lane_runner(
                 runner_name, max_steps=max_steps, corpus_root=corpus_root
             )
+            resume_request = None
+            if resume_from is not None:
+                from corpus_studio.platform.checkpoint import (
+                    verify_checkpoint_integrity,
+                    verify_resumable_into,
+                )
+                from corpus_studio.platform.contracts import CheckpointResumeRequest
+
+                # Fully verify the checkpoint AND prove it a compatible resume source for THIS plan before
+                # anything is restored - exact-lineage or nothing. A resume mints this fresh run id and
+                # reads the parent checkpoint read-only.
+                resume_manifest = verify_checkpoint_integrity(str(resume_from))
+                verify_resumable_into(resume_manifest, plan)
+                resume_request = CheckpointResumeRequest(
+                    checkpoint_id=resume_manifest.checkpoint_id,
+                    checkpoint_manifest_hash=resume_manifest.checkpoint_manifest_hash,
+                    checkpoint_dir=str(resume_from),
+                )
             result = execute_run(
-                plan, runner, run_id=run_identity, out_dir=out_dir, telemetry=sampler
+                plan,
+                runner,
+                run_id=run_identity,
+                out_dir=out_dir,
+                telemetry=sampler,
+                resume=resume_request,
             )
     finally:
         managed_lease.close()
