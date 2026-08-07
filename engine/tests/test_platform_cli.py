@@ -311,6 +311,31 @@ def test_platform_plan_objective_flows_through_the_cli_for_a_preference_plan(mon
     assert plan["resolved_preference_execution"]["objective_ref"]["id"] == "dpo_qlora"
 
 
+def test_platform_plan_full_finetune_flows_through_the_cli(monkeypatch, tmp_path):
+    # Reachability: a full-parameter SFT plan is requestable from the SHIPPING CLI via --adapter-method
+    # full_finetune (+ --export-format merged_safetensors), and lowers to a sealed full-model
+    # ResolvedFullFinetuneExecutionConfiguration - NOT the adapter resolved_execution. Without the option a
+    # user could not request a full fine-tune at all (workload_verified but unreachable via the CLI).
+    _ready_host(monkeypatch)
+    result = runner.invoke(
+        app,
+        [
+            *_platform_plan_args(tmp_path),
+            "--adapter-method",
+            "full_finetune",
+            "--export-format",
+            "merged_safetensors",
+            "--json",
+        ],
+    )
+    assert result.exit_code == 0, result.stdout
+    plan = json.loads(result.stdout)["run_plan"]
+    ff = plan["resolved_full_finetune_execution"]
+    assert ff is not None and plan["resolved_execution"] is None
+    assert ff["adapter"]["method"] == "full_finetune"
+    assert ff["export_format"] == "merged_safetensors"
+
+
 def test_platform_plan_dpo_knobs_flow_to_the_sealed_preference_config(monkeypatch, tmp_path):
     # --dpo-beta / --dpo-label-smoothing / --max-prompt-length are the operator's DPO knobs; they seal
     # into the preference config instead of the resolver's fixed defaults.
