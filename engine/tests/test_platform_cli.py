@@ -336,6 +336,31 @@ def test_platform_plan_full_finetune_flows_through_the_cli(monkeypatch, tmp_path
     assert ff["export_format"] == "merged_safetensors"
 
 
+def test_platform_plan_preference_dataset_format_is_reachable_from_the_cli(monkeypatch, tmp_path):
+    # A REAL DPO plan's data is prompt/chosen/rejected pairs. --dataset-format preference now passes the
+    # conformance preflight (a first-class format) AND the preference resolver seals its own
+    # PreferenceDataPolicy - the SFT TrainingDataPolicy is NOT built for a preference plan, so 'preference'
+    # no longer breaks it. Previously the CLI refused with "unknown dataset_format 'preference'".
+    _ready_host(monkeypatch)
+    pref = tmp_path / "pref.jsonl"
+    pref.write_text(
+        json.dumps({"prompt": "Q?", "chosen": "right", "rejected": "wrong"}) + "\n", encoding="utf-8"
+    )
+    result = runner.invoke(
+        app,
+        [
+            "platform-plan", "--base-model", "m", "--model-revision", _MODEL_REVISION,
+            "--dataset", str(pref), "--task-type", "preference", "--objective", "dpo_qlora",
+            "--dataset-format", "preference", "--json",
+        ],
+    )
+    assert result.exit_code == 0, result.stdout
+    plan = json.loads(result.stdout)["run_plan"]
+    pref_ex = plan["resolved_preference_execution"]
+    assert pref_ex is not None and plan["resolved_execution"] is None
+    assert pref_ex["data"]["schema_id"] == "preference"
+
+
 def test_platform_plan_dpo_knobs_flow_to_the_sealed_preference_config(monkeypatch, tmp_path):
     # --dpo-beta / --dpo-label-smoothing / --max-prompt-length are the operator's DPO knobs; they seal
     # into the preference config instead of the resolver's fixed defaults.

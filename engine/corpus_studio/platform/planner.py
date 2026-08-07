@@ -1814,17 +1814,23 @@ def build_run_plan(
             "the backend manifest does not declare the required trainer initializer field "
             f"{trainer_interface.tokenizer_parameter!r}"
         )
-    formatter_id, formatter_hash = formatter_identity(constraints.dataset_format)
-    data_policy = TrainingDataPolicy.model_validate(
-        {
-            "dataset_format": constraints.dataset_format,
-            "formatter_id": formatter_id,
-            "formatter_sha256": formatter_hash,
-            "chat_template_sha256": constraints.chat_template_sha256,
-            "truncation_policy": "allow" if constraints.truncation_allowed else "refuse",
-            "packing": False,
-        }
-    )
+    # The shared SFT TrainingDataPolicy renders instruction/chat/trace; a preference (DPO) plan's data is a
+    # prompt/chosen/rejected pair sealed into its OWN PreferenceDataPolicy (in _resolve_preference_execution),
+    # so the SFT policy is neither representable nor used for preference. Build it only for the paths that
+    # consume it (SFT adapter + full-parameter SFT). The conformance preflight already validated the pairs.
+    data_policy: TrainingDataPolicy | None = None
+    if not is_preference_dpo:
+        formatter_id, formatter_hash = formatter_identity(constraints.dataset_format)
+        data_policy = TrainingDataPolicy.model_validate(
+            {
+                "dataset_format": constraints.dataset_format,
+                "formatter_id": formatter_id,
+                "formatter_sha256": formatter_hash,
+                "chat_template_sha256": constraints.chat_template_sha256,
+                "truncation_policy": "allow" if constraints.truncation_allowed else "refuse",
+                "packing": False,
+            }
+        )
     objective = get_objective(
         "full_parameter_sft"
         if is_full_finetune
@@ -1894,6 +1900,7 @@ def build_run_plan(
         # The full-model sibling seal: the shared execution sub-specs already carry the full-parameter
         # shape (adapter.method=full_finetune, unquantized precision, full_state checkpoint, merged export);
         # only the SFT objective + loss + data policy are added, exactly like the dense SFT branch below.
+        assert data_policy is not None  # built for every non-preference (SFT) path above
         try:
             full_finetune_draft = ResolvedFullFinetuneExecutionConfiguration.model_validate(
                 {
@@ -1917,6 +1924,7 @@ def build_run_plan(
         )
         resolved_full_finetune_field = full_finetune_execution.model_dump(mode="json")
     else:
+        assert data_policy is not None  # built for every non-preference (SFT) path above
         try:
             execution_draft = ResolvedExecutionConfiguration.model_validate(
                 {

@@ -511,6 +511,17 @@ IEEE cell) on the evidence below - offline DPO now runs end to end on this host 
   `adamw_torch` admitted at peak **5.79 GiB** and `paged_adamw_8bit` admitted at peak **5.56 GiB** (the
   pre-fix worker silently substituted a full-precision AdamW - dropping both the seal and that headroom).
   Grad clipping now honors the sealed `max_grad_norm`. Both runs were supervisor-adapter-reload-verified.
+- **Managed `platform-run --subprocess` shipping path GREEN 2026-08-07.** The DPO managed subprocess path
+  (worker spawned from the managed env -> config-consuming DPO worker -> supervisor adapter reload-verify)
+  went through the REAL production dispatch after fixing TWO CLI shipping-path bugs: (1) the dataset
+  conformance preflight rejected the `preference` format (`unknown dataset_format 'preference'`) - added a
+  first-class preference (prompt/chosen/rejected) classifier; (2) the shared SFT `TrainingDataPolicy` was
+  built with `dataset_format=preference` and rejected it (its Literal is instruction/chat/trace) - a
+  preference plan seals its OWN `PreferenceDataPolicy`, so the SFT policy is no longer built for preference.
+  A managed `--subprocess` run on the RTX 5070 (Qwen3-4B nf4 DPO, seq 1024, 12 steps) **SUCCEEDED end to
+  end**: `STATE succeeded`, `final_fit NATIVE_SAFE`, supervisor-admitted `preference_success_evidence`
+  (loss 0.6931 -> 0.1022, reward margin 0 -> 27.49, adapter reload-verified). A hash-pinned worker wheel +
+  sealed env is the reproducible-deployment follow-up.
 
 ### Full-parameter SFT `workload_verified` bring-up (PRODUCT), 2026-08-07
 
