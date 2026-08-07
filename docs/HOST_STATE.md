@@ -671,6 +671,31 @@ continue. The sealed format is the trust anchor; HF is the restore engine.
   reference). SupportLevel promotion + a pinned wheel + a full 7B/seq-4096 resume remain the sealed-deploy
   follow-up.
 
+### Reproducible managed `--subprocess` shipping via a sealed worker wheel, 2026-08-07
+
+The reproducible-deployment last mile - a fully-sealed, non-editable managed environment running a
+provenance-sealed worker wheel, with the managed `--subprocess` path routing this session's code through it -
+now works end to end on this host. (The env-create hashless-PyTorch-index blocker was already resolved by
+#808: the env-manager binds those wheels by their own computed sha256 from the configured index.)
+
+- **Fresh worker wheel (built + provenance-sealed).** `corpus-studio build-worker-wheel` from clean main HEAD
+  `7815cf3` (floor `df86db5`) -> `corpus_studio_engine-1.3.0-py3-none-any.whl`, sha256 `064971df...`, with
+  `BUILD_PROVENANCE.json` embedded in the wheel `.dist-info` RECORD (so `source_commit` lives inside the wheel
+  sha256 identity). Verified to carry this session's code: checkpoint writing + resume + the precision probes.
+  The builder enforces a clean worktree + build-from-HEAD (no arbitrary-bytes stamping) and is reproducible.
+- **Sealed env, HARDWARE_VERIFIED.** `env-plan` -> `env-create` (recipe `backend-corpus-studio-readiness-v2`,
+  `requires_worker_wheel=True`) sealed env `backend-corpus-studio-sealed-cr-v2` (lock `8a884928...`) with the
+  wheel `064971df` bound in the lock. The GPU `cuda_qlora_math_execution` probe that earned HARDWARE_VERIFIED
+  ran the SEALED WHEEL's code on the RTX 5070 - the sealed env executing this session's code is GPU-proven.
+- **Managed `--subprocess` proof.** A managed `platform-plan --environment backend-corpus-studio-sealed-cr-v2`
+  (nf4 QLoRA, Qwen2.5-0.5B-Instruct, `--checkpoint-cadence 1`) sealed with `environment_binding=managed_lock`
+  bound to the sealed env; `platform-run --subprocess` spawned the worker IN the sealed env and **succeeded,
+  NATIVE_SAFE** - the sealed wheel's CheckpointCoordinator wrote `step-1/2/3`, recorded on the RunManifest.
+  So the managed shipping path routes this session's capabilities (checkpoint writing here; precision + resume
+  ride the same wheel) reproducibly, with the env lock matching (the earlier unmanaged-plan lock mismatch is
+  gone). PRODUCT, not a sealed IEEE cell. Follow-up: a full 7B/seq-4096 resume on the sealed tier + SupportLevel
+  promotion; the readiness recipe's probes don't yet prove int8/16-bit (a recipe-probe extension).
+
 ## Verification boundary — what `HARDWARE_VERIFIED` does and does NOT prove
 
 `HARDWARE_VERIFIED` is the **Environment Manager** evidence level, not a training-run result.
