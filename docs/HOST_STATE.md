@@ -533,9 +533,22 @@ host through the first-party `FullFinetuneRunner` lane.
 - **Honesty scope.** PRODUCT workload_verified, not a sealed IEEE cell. It ran the first-party runner + the
   full supervisor admission gate, invoked directly (the authorized new-variant evidence-gathering); the
   production dispatch gate (`required_runner_lane`) refuses full_finetune until it is workload_verified,
-  exactly as here. Quality follow-ups: an fp32 master-weight / mixed-precision full-finetune precision (so
-  all tensors register a change), and the managed `platform-run --subprocess` route (a worker wheel + env),
-  exactly as for pretraining/DPO (in-process routes now).
+  exactly as here. Quality follow-up: an fp32 master-weight / mixed-precision full-finetune precision (so all
+  tensors register a change).
+- **Managed `platform-run --subprocess` shipping path GREEN on the first try 2026-08-07.** Unlike pretraining
+  (which surfaced 10 shipping-path bugs), full-finetune went through the REAL production dispatch (CLI
+  `platform-plan --adapter-method full_finetune --export-format merged_safetensors` -> `platform-run
+  --subprocess` -> worker spawned from the managed env -> `required_runner_lane` "full_finetune" ->
+  supervisor admission -> RunManifest) cleanly, because the pretraining audit's fixes were generalized (the
+  shared `build_lane_runner`, the fd-level worker-protocol binding, the RunManifest full-model admission, the
+  `_RUNNER_CHOICES` dead-lane fix). The ONE bug: the CLI omitted `--adapter-method`/`--export-format`, so
+  full-finetune was workload_verified but UNREACHABLE from the shipping CLI - fixed + reachability-tested. A
+  managed `--subprocess` run on the RTX 5070 (env `backend-corpus-studio-pretraining-hardened-v4`, editable
+  checkout install) **SUCCEEDED end to end**: `STATE succeeded`, `final_fit NATIVE_SAFE`, supervisor-admitted
+  full-model evidence, 12/12 steps, 265/290 tensors changed with 290/290 observed gradients,
+  `model.safetensors` reload-verified to the SAME sha256 as the direct bring-up (`a51dcf6f...`) - reproducible
+  through the real dispatch, not just the bypass. A hash-pinned worker wheel + a sealed (non-editable) env is
+  the reproducible-deployment follow-up.
 
 ## Verification boundary — what `HARDWARE_VERIFIED` does and does NOT prove
 

@@ -1033,6 +1033,19 @@ def platform_plan(
     lora_alpha: int = typer.Option(
         32, "--lora-alpha", min=1, help="LoRA alpha sealed into the plan (convention: 2*r)."
     ),
+    adapter_method: Optional[str] = typer.Option(
+        None,
+        "--adapter-method",
+        help="Adaptation method sealed into the plan. Default: qlora (4-bit) / lora. Pass "
+        "'full_finetune' to train ALL parameters (a full model, not an adapter) - requires "
+        "--export-format merged_safetensors.",
+    ),
+    export_format: Optional[str] = typer.Option(
+        None,
+        "--export-format",
+        help="Artifact export format: 'adapter_peft' (default, the LoRA/QLoRA adapter) or "
+        "'merged_safetensors' (a full model - required for --adapter-method full_finetune).",
+    ),
     gradient_accumulation_steps: int = typer.Option(
         8,
         "--gradient-accumulation-steps",
@@ -1318,6 +1331,8 @@ def platform_plan(
         micro_batch_size=micro_batch_size,
         lora_r=lora_r,
         lora_alpha=lora_alpha,
+        adapter_method=adapter_method,
+        export_format=export_format or "adapter_peft",
         gradient_accumulation_steps=gradient_accumulation_steps,
         truncation_allowed=allow_truncation,
         chat_template_sha256=chat_template_sha256,
