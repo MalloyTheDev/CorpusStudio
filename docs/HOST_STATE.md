@@ -676,8 +676,8 @@ continue. The sealed format is the trust anchor; HF is the restore engine.
 Checkpoint write and resume are now `workload_verified` on the **real 7B/seq-4096 workload** (the mirror of
 the from-scratch-GPT-2 in-process proofs above, at production scale). Checkpoint write and resume are a
 FEATURE of the `dense_qlora_sft` variant (already `workload_verified`), not a separate variant - there is no
-support enum to flip; this is the measured evidence that earns the `workload_verified` bar the resume plan
-(`docs/CHECKPOINT_RESUME_PLAN.md` C2) reserved for a 7B/seq-4096 run.
+support enum to flip; this is the measured evidence that earns the `workload_verified` bar that the resume
+plan (`docs/CHECKPOINT_RESUME_PLAN.md` C2) reserved for a 7B/seq-4096 run.
 
 - **The winning config, measured.** Qwen2.5-7B-Instruct QLoRA nf4 r16, **seq-4096**, flash SDPA +
   liger_fused_ce + `paged_adamw_8bit` + allocator `max_split_size:128`, gradient checkpointing, on the WBG
@@ -700,12 +700,18 @@ support enum to flip; this is the measured evidence that earns the `workload_ver
   reserved plumbing (verify once for both paths; thread resume through the dispatch, embedded only for an
   actual resume so from-scratch bytes are unchanged; the worker forwards it and re-verifies) with a
   dispatch-carries-resume test and a worker-forwards-resume **reachability** test.
-- **Honesty scope.** This 7B proof ran the merged first-party code over the sealed flash-liger-paged
-  environment's DEPS; the worker code was the repo (editable) tree, NOT the sealed wheel, because a managed
-  `--subprocess` run launched from the repo CWD shadows the wheel with repo code (no `-I`/`cwd=` isolation on
-  the worker spawn). So this is a PRODUCT `workload_verified` result for the merged CODE at 7B/seq-4096; a
-  fully-sealed-WHEEL managed resume (a fresh wheel carrying #830 + a recreated sealed env, run from a neutral
-  CWD) and the worker-CWD-isolation hardening are the deployment follow-ups.
+- **Proven both ways - repo code AND the sealed wheel.** The resume above was run twice: (1) the merged
+  repo code over the sealed env's DEPS (a managed `--subprocess` run launched from the repo CWD shadows the
+  wheel with repo code - no `-I`/`cwd=` isolation on the worker spawn), and (2) the **FULLY-SEALED** path -
+  a fresh provenance-sealed worker wheel `222b6147...` (built from clean main HEAD `b9cd5d2`, carrying #830)
+  sealed into a HARDWARE_VERIFIED env `backend-corpus-studio-sealed-flp-v3` (lock `db797ce1...`), whose
+  flash-liger-paged GPU probe ran the wheel's code, then a managed resume launched from a **NEUTRAL CWD** so
+  the worker imports the wheel (verified `.../site-packages/.../worker.py`), NOT the repo. The sealed wheel
+  resumed from step 2 (`resumed_from_optimizer_step=2`, steps `[3,4]`, step-3 loss `2.935065...` matching the
+  write run). So this is a PRODUCT `workload_verified` result for both the merged CODE and the sealed WHEEL at
+  7B/seq-4096. The one remaining follow-up is worker-CWD-isolation hardening (spawn the managed worker
+  neutral-CWD/`-I` so it uses the wheel regardless of the launch directory, rather than relying on a neutral
+  CWD by convention).
 
 ### Reproducible managed `--subprocess` shipping via a sealed worker wheel, 2026-08-07
 
@@ -729,10 +735,10 @@ now works end to end on this host. (The env-create hashless-PyTorch-index blocke
   NATIVE_SAFE** - the sealed wheel's CheckpointCoordinator wrote `step-1/2/3`, recorded on the RunManifest.
   So the managed shipping path routes this session's capabilities (checkpoint writing here; precision + resume
   ride the same wheel) reproducibly, with the env lock matching (the earlier unmanaged-plan lock mismatch is
-  gone). PRODUCT, not a sealed IEEE cell. The full 7B/seq-4096 write->resume + its `workload_verified`
-  promotion are done (the 7B section above); the remaining follow-ups are a fully-sealed-WHEEL 7B resume from
-  a neutral CWD (a fresh wheel carrying #830 + a recreated sealed env), the worker-CWD-isolation hardening,
-  and the readiness recipe's int8/16-bit probes (a recipe-probe extension).
+  gone). PRODUCT, not a sealed IEEE cell. The full 7B/seq-4096 write->resume (proven both with merged code
+  AND the sealed wheel `222b6147` on env `flp-v3`) + its `workload_verified` promotion are done (the 7B
+  section above); the remaining follow-ups are the worker-CWD-isolation hardening and the readiness recipe's
+  int8/16-bit probes (a recipe-probe extension).
 
 ## Verification boundary — what `HARDWARE_VERIFIED` does and does NOT prove
 
