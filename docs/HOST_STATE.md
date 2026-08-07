@@ -568,6 +568,35 @@ host through the first-party `FullFinetuneRunner` lane.
   through the real dispatch, not just the bypass. A hash-pinned worker wheel + a sealed (non-editable) env is
   the reproducible-deployment follow-up.
 
+### End-to-end from-scratch lifecycle chain (pretrain -> SFT -> DPO), 2026-08-07
+
+The four dense training verticals were run as **one connected chain** on this host - a clean random-init
+model taken through its whole early life, every stage dispatched through the REAL managed
+`platform-run --subprocess` path, and **each stage's saved output pinned as the next stage's base by
+content digest** (`source="local_directory"`, not a Hub revision). This is the from-scratch lifecycle
+acid test - the demonstration the training vertical was built for - run end to end for the first time.
+
+| stage | task (variant) | base | result (RTX 5070, managed subprocess) |
+|---|---|---|---|
+| 1 | pretraining (`pretraining`) | random init | succeeded, NATIVE_SAFE, 10 steps, loss **5.204 -> 3.359**, **52/52** full-model tensors observed a gradient |
+| 2 | SFT (`dense_full_finetune`) | stage-1 output dir | succeeded, NATIVE_SAFE, 10 steps, loss **5.156 -> 3.699**, **52/52** observed, reload-verified |
+| 3 | DPO (`preference_dpo`) | stage-2 output dir | succeeded, NATIVE_SAFE, 10 steps, loss 0.693 -> 0.688, reward margin **0.0 -> 0.105**, **32/32** LoRA tensors observed, adapter reload-verified |
+
+- **The model:** a 4-layer from-scratch **GPT-2** (`n_layer 4, n_head 4, n_embd 256, n_positions 512`)
+  with a **from-scratch BPE tokenizer** trained from the tiny corpus (`vocab_size 177`; special tokens
+  `<bos>/<eos>/<pad>/<unk>`). Stage 1 random-inits from config; stages 2-3 `from_pretrained` the prior
+  stage's saved directory. Content-digest pinning (`stable_directory_sha256`) is what lets one stage's
+  output be another stage's sealed input.
+- **Honesty scope.** This is a PRODUCT **integration** proof - it shows the stage *handoffs* work through
+  the real dispatch (plan -> subprocess worker -> lane -> supervisor reload-verify -> RunManifest) with
+  full gradient coverage and reload-verification at each stage. It is **not** a model-quality claim: the
+  model and vocab are toy, so the DPO reward margin is deliberately small. Not a sealed IEEE cell.
+- **It found real bugs.** Connecting the stages surfaced three integration defects at the handoffs that
+  no single-vertical run hit, all fixed on the same branch (PR #824): a from-scratch tokenizer must
+  declare an eos token (else the base is unpaddable - now refused at planning), a padless base fails
+  closed in the full-finetune worker, and DPO falls back to the raw prompt when the base tokenizer has no
+  chat template (a from-scratch pretrain output has none) instead of crashing the run.
+
 ## Verification boundary — what `HARDWARE_VERIFIED` does and does NOT prove
 
 `HARDWARE_VERIFIED` is the **Environment Manager** evidence level, not a training-run result.
