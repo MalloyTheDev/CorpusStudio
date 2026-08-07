@@ -6029,6 +6029,10 @@ class RunManifest(ContractModel):
     # Offline DPO (preference) run - a PEFT adapter over a frozen reference; mutually exclusive with the
     # SFT-adapter and full-model evidence above. Absent until the (gated) DPO worker capture lands.
     preference_success_evidence: PreferenceSuccessEvidence | None = None
+    # Full-parameter SFT run - a full model (like pretraining), NOT an adapter. It reuses the full-model
+    # PretrainingSuccessEvidence shape (the same model.safetensors + full-model export evidence); the
+    # dedicated field keeps it distinct from a pretraining run. Mutually exclusive with the families above.
+    full_finetune_success_evidence: PretrainingSuccessEvidence | None = None
     # Present only on a run that resumed from a parent checkpoint - explicit parent-run + parent-
     # checkpoint provenance for a fresh run identity (#440). Absent for an ordinary from-scratch run.
     resume_lineage: ResumeLineage | None = None
@@ -6044,13 +6048,15 @@ class RunManifest(ContractModel):
             self.training_success_evidence is not None,
             self.pretraining_success_evidence is not None,
             self.preference_success_evidence is not None,
+            self.full_finetune_success_evidence is not None,
         )
         if sum(families) > 1:
             raise ValueError(
                 "a run carries at most one success-evidence family: SFT adapter "
                 "(training_success_evidence) XOR full-model pretraining "
                 "(pretraining_success_evidence) XOR preference/DPO adapter "
-                "(preference_success_evidence)"
+                "(preference_success_evidence) XOR full-parameter SFT "
+                "(full_finetune_success_evidence)"
             )
         return self
 
@@ -6077,6 +6083,8 @@ class RunManifest(ContractModel):
             raise ValueError("only a succeeded run may carry pretraining success evidence")
         if self.state != "succeeded" and self.preference_success_evidence is not None:
             raise ValueError("only a succeeded run may carry preference success evidence")
+        if self.state != "succeeded" and self.full_finetune_success_evidence is not None:
+            raise ValueError("only a succeeded run may carry full-finetune success evidence")
         if (
             self.state != "succeeded"
             and self.final_fit is not None
@@ -6089,13 +6097,14 @@ class RunManifest(ContractModel):
             and self.training_success_evidence is None
             and self.pretraining_success_evidence is None
             and self.preference_success_evidence is None
+            and self.full_finetune_success_evidence is None
         ):
-            # A proven native fit is earned by an SFT adapter, a full-model pretraining, or a DPO adapter
-            # success - never none. The one-family XOR guard keeps them from co-existing; this keeps a
-            # proven fit from standing on no success evidence at all.
+            # A proven native fit is earned by an SFT adapter, a full-model pretraining, a DPO adapter, or a
+            # full-parameter SFT success - never none. The one-family XOR guard keeps them from co-existing;
+            # this keeps a proven fit from standing on no success evidence at all.
             raise ValueError(
                 "a proven native fit requires complete success evidence (an SFT adapter, a full-model "
-                "pretraining, or a DPO adapter run)"
+                "pretraining, a DPO adapter, or a full-parameter SFT run)"
             )
         return self
 

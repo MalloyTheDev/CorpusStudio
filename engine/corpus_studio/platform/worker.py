@@ -261,7 +261,18 @@ def run_worker(
     return 0
 
 
-_RUNNER_CHOICES = ("echo", "cpu_toy", "training", "pretraining", "pretraining_cpu_toy")
+# Must stay in sync with runners.build_lane_runner - a routable lane the parser rejects is a dead runner
+# no matter what the factory maps (the pretraining #810 dead-lane lesson). 'preference' (DPO) and
+# 'full_finetune' route through build_lane_runner, so the subprocess parser must accept them too.
+_RUNNER_CHOICES = (
+    "echo",
+    "cpu_toy",
+    "training",
+    "preference",
+    "full_finetune",
+    "pretraining",
+    "pretraining_cpu_toy",
+)
 
 
 def _build_arg_parser() -> Any:

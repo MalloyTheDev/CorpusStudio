@@ -225,6 +225,8 @@ def test_build_lane_runner_is_the_shared_factory():
     # pretraining lanes while the worker had them. max_steps is the CLI-only trainer cap; corpus_root
     # anchors a pretraining plan's relative shards.
     from corpus_studio.platform.runners import (
+        FullFinetuneRunner,
+        PreferenceRunner,
         PretrainingRunner,
         TrainingRunner,
         build_lane_runner,
@@ -235,6 +237,8 @@ def test_build_lane_runner_is_the_shared_factory():
     train = build_lane_runner("training", max_steps=7)
     assert isinstance(train, TrainingRunner) and train.cpu_toy is False and train.max_steps == 7
     assert build_lane_runner("cpu_toy").cpu_toy is True
+    assert isinstance(build_lane_runner("preference"), PreferenceRunner)
+    assert isinstance(build_lane_runner("full_finetune"), FullFinetuneRunner)
     pre = build_lane_runner("pretraining", corpus_root="/data/corpus")
     assert isinstance(pre, PretrainingRunner) and pre.cpu_toy is False
     assert pre.corpus_root == "/data/corpus"
@@ -249,7 +253,12 @@ def test_worker_arg_parser_accepts_the_pretraining_lanes():
 
     parser = _build_arg_parser()
     base = ["--backend-id", "b", "--environment-id", "e"]
-    for lane in ("echo", "cpu_toy", "training", "pretraining", "pretraining_cpu_toy"):
+    # Every lane build_lane_runner routes must be an accepted --runner choice, or it is a dead subprocess
+    # lane: preference (DPO, workload_verified) + full_finetune both route, so both must parse.
+    for lane in (
+        "echo", "cpu_toy", "training", "preference", "full_finetune",
+        "pretraining", "pretraining_cpu_toy",
+    ):
         assert parser.parse_args(["--runner", lane, *base]).runner == lane
     assert parser.parse_args(base).corpus_root == "."
     assert parser.parse_args([*base, "--corpus-root", "/data/corpus"]).corpus_root == "/data/corpus"

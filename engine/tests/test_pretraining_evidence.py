@@ -400,3 +400,33 @@ def test_preference_success_evidence_requires_a_succeeded_run() -> None:
             updated_at="2026-08-06T00:00:03+00:00",
             preference_success_evidence=_preference_success(),
         )
+
+
+def test_run_manifest_refuses_full_finetune_with_another_family() -> None:
+    # 4-way XOR: full-parameter SFT (full-model) evidence cannot co-exist with any other family. It reuses
+    # the full-model PretrainingSuccessEvidence shape but is its OWN manifest field.
+    for other, value in (
+        ("training_success_evidence", _adapter_success()),
+        ("preference_success_evidence", _preference_success()),
+    ):
+        with pytest.raises(ValidationError, match="at most one success-evidence family"):
+            RunManifest(
+                run_id="run-ff-both",
+                plan_ref=Ref(id="plan-ff-both"),
+                created_at="2026-08-06T00:00:00+00:00",
+                updated_at="2026-08-06T00:00:03+00:00",
+                state="succeeded",
+                full_finetune_success_evidence=_pretraining_success(),
+                **{other: value},
+            )
+
+
+def test_full_finetune_success_evidence_requires_a_succeeded_run() -> None:
+    with pytest.raises(ValidationError, match="only a succeeded run may carry full-finetune"):
+        RunManifest(
+            run_id="run-ff-2",
+            plan_ref=Ref(id="plan-ff-2"),
+            created_at="2026-08-06T00:00:00+00:00",
+            updated_at="2026-08-06T00:00:03+00:00",
+            full_finetune_success_evidence=_pretraining_success(),
+        )
