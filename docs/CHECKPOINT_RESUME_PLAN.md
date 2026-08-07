@@ -1,6 +1,10 @@
 # Checkpoint / Resume — Implementation Plan (#486, building on #440)
 
-**Status:** design-complete, execution-gated. Authored 2026-07-31.
+**Status:** SHIPPED + `workload_verified` at 7B/seq-4096 (2026-08-07). Authored 2026-07-31; delivered as
+WRITE #827 + exact-lineage RESUME #828 + managed-`--subprocess` resume wiring #830. Phase C (measured GPU
+resume) is complete - evidence in [`docs/HOST_STATE.md`](HOST_STATE.md) +
+`examples/wbg/runs/checkpoint-resume-7b-seq4096/`. The phased A/B/C plan below is retained as the design
+record; the old #774 branch was abandoned and re-authored on main.
 **Goal:** production checkpoint + exact resume for a first-party `platform-run` training run — a long run
 survives interruption and continues with exact lineage, or fails closed. This is Training Systems **P2**
 (production resume via `platform-run`).

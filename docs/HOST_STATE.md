@@ -668,8 +668,84 @@ continue. The sealed format is the trust anchor; HF is the restore engine.
   and the `TrainingExecutionEvidence` contract validator - all now count from `resumed_from+1`, so a
   resumed run's evidence is honest rather than falsely rejected. The guarantee is EXACT VERIFIED LINEAGE
   (our seal) + HF-standard numerical continuation (not bitwise; bitwise holds only on the hand-rolled
-  reference). SupportLevel promotion + a pinned wheel + a full 7B/seq-4096 resume remain the sealed-deploy
-  follow-up.
+  reference). The full 7B/seq-4096 write->resume and its `workload_verified` promotion are now done (the 7B
+  section below), proven both with the merged code and the sealed wheel; only worker-CWD-isolation hardening
+  remains as a deployment follow-up.
+
+### Full 7B/seq-4096 checkpoint write -> resume, and the managed `--subprocess` resume fix (#830), 2026-08-07
+
+Checkpoint write and resume are now `workload_verified` on the **real 7B/seq-4096 workload** (the mirror of
+the from-scratch-GPT-2 in-process proofs above, at production scale). Checkpoint write and resume are a
+FEATURE of the `dense_qlora_sft` variant (already `workload_verified`), not a separate variant - there is no
+support enum to flip; this is the measured evidence that earns the `workload_verified` bar that the resume
+plan (`docs/CHECKPOINT_RESUME_PLAN.md` C2) reserved for a 7B/seq-4096 run.
+
+- **The winning config, measured.** Qwen2.5-7B-Instruct QLoRA nf4 r16, **seq-4096**, flash SDPA +
+  liger_fused_ce + `paged_adamw_8bit` + allocator `max_split_size:128`, gradient checkpointing, on the WBG
+  469-row chat corpus (zero-truncation; the plan sealed `attention=sdpa`/`torch_sdpa_flash`, fit
+  `NATIVE_UNPROVEN` ~10.6 GB predicted). The from-scratch run wrote adapter checkpoints at `step-2 / step-4`
+  and MEASURED (at step 2) `torch_peak_allocated_bytes` 11,025,304,064 (~10.27 GiB) and
+  `cuda_device_used_bytes` 12,336,758,784 of a sampled `dedicated_gpu_bytes` 12,337,348,608 device total -
+  i.e. `cuda_device_free_bytes` = **589,824 (~0.56 MiB) free** (R3 fits, barely, exactly the known envelope),
+  ~23-25 s/step, ~750 tok/s.
+- **Resume, measured** (evidence preserved under `examples/wbg/runs/checkpoint-resume-7b-seq4096/`).
+  Resuming from the `step-2` checkpoint (manifest hash `3db56855...`, `complete:true`, integrity-verified AND
+  proven a compatible resume source BEFORE any restore) on the same plan (plan_hash `27ac06df...`) reports
+  `resumed_from_optimizer_step=2` and trains ONLY the absolute steps `[3, 4]`. What the losses prove, exactly:
+  the resumed step-3 loss `2.935065` is IDENTICAL to the source run's step 3 - but a step's loss is the
+  forward pass BEFORE that step's optimizer update, so this proves the **model weights (incl. the step-2
+  update baked into the adapter), the data batch, and the RNG** were restored, NOT the optimizer moments. The
+  optimizer-continuation signal is the step-4 loss (the first forward AFTER a resumed update): source
+  `2.847071` vs resumed `2.847229`, agreeing to **~1.6e-4** - EXACT VERIFIED LINEAGE + HF-standard,
+  **non-bitwise** continuation (the residual is consistent with QLoRA + flash + bf16 CUDA nondeterminism;
+  bitwise holds only on the hand-rolled reference). Source run `run-019fde18-...`, resumed run
+  `run-019fde1c-...`, sealed env lock `db797ce1...`, wheel `222b6147...`.
+- **Interruption scope (honest).** The consumed checkpoint came from a source run that COMPLETED (steps 1-4),
+  not a `SIGKILL` mid-run. Because `step-2` is written atomically (`complete:true` + manifest hash) and fully
+  integrity-verified before any restore, it is byte-equivalent to the checkpoint an interrupted run would
+  leave, and the fresh-process resume is the same operation either way; a completed source additionally
+  supplies the ground-truth steps 3/4 for the comparison above (a killed source could not). A literal
+  kill-then-resume adds only write-atomicity-under-`SIGKILL` coverage and is an optional follow-up.
+- **A real unreachable-control bug, found by running it, fixed (#830).** The resume above went through the
+  managed `--subprocess` dispatch - which, before #830, **silently ignored `--resume-from`**. #828 wired
+  resume only into the in-process `execute_run`; `execute_run_subprocess` had no resume parameter,
+  `_dispatch_line` never populated the (reserved) `RunDispatchBody.resume`, and the worker never forwarded
+  `parsed.resume`. Because a managed-environment plan is REQUIRED to run `--subprocess`, resume was
+  unreachable for exactly the sealed-env path production uses: a resume was accepted, then ran from scratch
+  (`resumed_from_optimizer_step=0`, every step). Clean A/B on this 7B run: before #830 the identical command
+  gave `resumed_from=0` / steps `[1,2,3,4]`; after, `resumed_from=2` / steps `[3,4]`. The fix completes the
+  reserved plumbing (verify once for both paths; thread resume through the dispatch, embedded only for an
+  actual resume so from-scratch bytes are unchanged; the worker forwards it and re-verifies) with a
+  dispatch-carries-resume test and a worker-forwards-resume **reachability** test.
+- **Proven both ways - repo code AND the sealed wheel.** The resume above was run twice: (1) the merged
+  repo code over the sealed env's DEPS (a managed `--subprocess` run launched from the repo CWD shadows the
+  wheel with repo code - no `-I`/`cwd=` isolation on the worker spawn), and (2) the **FULLY-SEALED** path -
+  a fresh provenance-sealed worker wheel `222b6147...` (built from clean main HEAD `b9cd5d2`, carrying #830)
+  sealed into a HARDWARE_VERIFIED env `backend-corpus-studio-sealed-flp-v3` (lock `db797ce1...`), whose
+  flash-liger-paged GPU probe ran the wheel's code, then a managed resume launched from a **NEUTRAL CWD** so
+  the worker imports the wheel (verified `.../site-packages/.../worker.py`), NOT the repo. The sealed wheel
+  resumed from step 2 (`resumed_from_optimizer_step=2`, steps `[3,4]`, step-3 loss `2.935065...` matching the
+  write run). So this is a PRODUCT `workload_verified` result for both the merged CODE and the sealed WHEEL at
+  7B/seq-4096.
+- **Known resume-hardening follow-ups (surfaced by the code review of this evidence; the proof above is
+  sound - real training verified by the measured continuation - but these strengthen the resume
+  *guarantees* and are the next slice, some needing a new worker wheel):**
+  - **Worker-identity binding (H1).** The sealed checkpoint binds `plan_hash` + `environment_lock_hash` but
+    leaves `worker_wheel_sha256` null, and the hybrid restore does not verify worker-only identities - so
+    the exact-lineage check does not confirm the resuming worker BYTES (with the CWD-shadow above, a
+    different checkout could continue a managed checkpoint while plan/env hashes still pass). The runner
+    should seal `worker_wheel_sha256` for the managed/sealed tier and verify it before restoring.
+  - **Resume lineage on the terminal record.** A resumed `RunManifest` reports
+    `resumed_from_optimizer_step` but leaves `resume_lineage` null, so the terminal record cannot itself
+    name the parent run / checkpoint id / checkpoint hash it continued; construct it from the verified
+    checkpoint when producing the manifest.
+  - **Post-restore baseline for the change gate.** The honesty-core canonical-adapter-change gate captures
+    `before_sha256` BEFORE `trainer.train(resume_from_checkpoint=...)` performs the HF restore, so the
+    before->after delta includes the restore; a resumed interval that performed no real update could still
+    pass. Capture the baseline AFTER restoration (before the first resumed update), or add a separate
+    resumed-interval delta proof.
+  - **Worker-CWD isolation.** Spawn the managed worker neutral-CWD/`-I` so it uses the wheel regardless of
+    the launch directory, rather than relying on a neutral CWD by convention.
 
 ### Reproducible managed `--subprocess` shipping via a sealed worker wheel, 2026-08-07
 
@@ -693,8 +769,10 @@ now works end to end on this host. (The env-create hashless-PyTorch-index blocke
   NATIVE_SAFE** - the sealed wheel's CheckpointCoordinator wrote `step-1/2/3`, recorded on the RunManifest.
   So the managed shipping path routes this session's capabilities (checkpoint writing here; precision + resume
   ride the same wheel) reproducibly, with the env lock matching (the earlier unmanaged-plan lock mismatch is
-  gone). PRODUCT, not a sealed IEEE cell. Follow-up: a full 7B/seq-4096 resume on the sealed tier + SupportLevel
-  promotion; the readiness recipe's probes don't yet prove int8/16-bit (a recipe-probe extension).
+  gone). PRODUCT, not a sealed IEEE cell. The full 7B/seq-4096 write->resume (proven both with merged code
+  AND the sealed wheel `222b6147` on env `flp-v3`) + its `workload_verified` promotion are done (the 7B
+  section above); the remaining follow-ups are the worker-CWD-isolation hardening and the readiness recipe's
+  int8/16-bit probes (a recipe-probe extension).
 
 ## Verification boundary — what `HARDWARE_VERIFIED` does and does NOT prove
 

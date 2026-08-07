@@ -16,9 +16,11 @@ loss 2.28->0.17, 290/290 tensors with observed gradients, `model.safetensors` re
 GiB) through `FullFinetuneRunner` + the supervisor admission gate. A PRODUCT claim, not a sealed IEEE cell.
 Deployment follow-up (as for pretraining/DPO): the managed `platform-run --subprocess` route (a worker wheel
 + env). Quality follow-up: fp32 master-weight / mixed-precision full-finetune (so all tensors register a
-change - 265/290 changed under bf16, the rest sub-precision). **Still open + retained-human: #774**
-(checkpoint/resume + 4/8/16/32-bit precision - done + GPU-validated but 32 commits behind main / 17
-conflicts; needs a rebase then its v10 wheel/GPU gate). Nothing this arc changes the sealed IEEE ladder.
+change - 265/290 changed under bf16, the rest sub-precision). **#774 SUPERSEDED:** its checkpoint/resume +
+precision work was re-authored fresh on main and SHIPPED (WRITE #827, exact-lineage RESUME #828,
+managed-`--subprocess` resume wiring #830, precision #825/#826), all `workload_verified` (checkpoint/resume
+at 7B/seq-4096); the stale 32-commits-behind #774 branch was abandoned. Nothing this arc changes the sealed
+IEEE ladder.
 
 **Last updated:** 2026-08-06 - **offline DPO (preference) is now `workload_verified`** - the full first-party
 execution path is built, GPU-proven, and promoted. This session: (1) the pretraining managed
@@ -39,9 +41,9 @@ PRODUCT claim, not a sealed IEEE cell; see HOST_STATE.md). The bring-up caught +
 (the `all-linear` LoRA sentinel must be lowered to PEFT's string form). Gate green (2776 passed, 88.41% cov),
 doclint clean. **#781 is the retained-human GPU/wheel merge gate** (it carries worker-execution code). **The
 managed `platform-run --subprocess` DPO route (a DPO worker wheel + sealed env) is the remaining deployment
-follow-up, exactly as for pretraining (in-process routes now).** Also still open + retained-human: **#774**
-checkpoint/resume Phase B (v9->v10 wheel + a measured GPU resume). Nothing this session changes the sealed
-IEEE ladder.
+follow-up, exactly as for pretraining (in-process routes now).** Checkpoint/resume is now SHIPPED (#827
+write, #828 resume, #830 managed-`--subprocess` wiring), `workload_verified` at 7B/seq-4096 - superseding the
+abandoned #774 branch. Nothing this session changes the sealed IEEE ladder.
 
 **Last updated:** 2026-08-04 - the **offline DPO / preference-optimization vertical (S1 + S2)** is built
 out, and the **hardened DPO worker is GPU-validated**. Merged to `main` this session: **S1** fail-closed
@@ -69,8 +71,8 @@ hardware; it does NOT flip `preference_dpo` to `workload_verified`. **Remaining 
 promotion (retained-human GPU/wheel):** a config->args worker adapter (sealed `ResolvedPreferenceExecution
 Configuration` -> `run_dpo_training` kwargs, wired into the runner) + build/pin the DPO worker wheel + a
 sealed `platform-run` at seq 4096 + promote `preference_dpo` -> `workload_verified` in
-`reference_execution_variants()`. Also still open + retained-human: **#774** checkpoint/resume Phase B
-(v9->v10 wheel + a measured GPU resume). Nothing this session changes the sealed IEEE ladder.
+`reference_execution_variants()`. Checkpoint/resume is now SHIPPED (#827/#828/#830), `workload_verified`
+at 7B/seq-4096 - superseding the abandoned #774 branch. Nothing this session changes the sealed IEEE ladder.
 
 **Last updated:** 2026-07-31 - a broad **control-plane hardening sweep** landed on top of the 2026-07-30
 v9 state: an enforced assurance-tier boundary (standard / verified / sealed_research), a fail-closed
