@@ -5760,12 +5760,17 @@ class TrainingExecutionEvidence(ContractModel):
     gradient_coverage: GradientCoverageEvidence
     optimizer_created: Literal[True]
     completed_optimizer_steps: int = Field(ge=1)
+    # A resumed run's HF global_step CONTINUES from the restored checkpoint, so its per-step evidence
+    # covers the ABSOLUTE steps [resumed_from+1 .. completed], not [1 .. completed]. 0 = a fresh run.
+    resumed_from_optimizer_step: int = Field(default=0, ge=0)
     step_losses: list[OptimizerStepLossEvidence] = Field(min_length=1)
 
     @model_validator(mode="after")
     def _one_loss_per_completed_step(self) -> TrainingExecutionEvidence:
         observed_steps = [item.optimizer_step for item in self.step_losses]
-        expected_steps = list(range(1, self.completed_optimizer_steps + 1))
+        expected_steps = list(
+            range(self.resumed_from_optimizer_step + 1, self.completed_optimizer_steps + 1)
+        )
         if observed_steps != expected_steps:
             raise ValueError(
                 "step_losses must contain exactly one ordered finite loss for every completed step"

@@ -2471,6 +2471,76 @@ def test_training_execution_tracker_binds_optimizer_steps_and_finite_losses():
     assert [item.optimizer_step for item in evidence.step_losses] == [1, 2]
 
 
+def _resume_tracker(torch, adapter_parameter):  # noqa: ANN001
+    optimizer = type(
+        "Optimizer",
+        (),
+        {
+            "param_groups": [{"params": [adapter_parameter]}],
+            "state": {},
+            "step": lambda self: None,
+            "zero_grad": lambda self: None,
+        },
+    )()
+    gradients = GradientObservationTracker(["adapter.a"])
+    gradients.eligible_parameter_ids = {"adapter.a": id(adapter_parameter)}
+    gradients.observe("adapter.a")
+    tracker = TrainingExecutionTracker(
+        config=_sealed_config(max_steps=4),
+        torch_module=torch,
+        gradients=gradients,
+        progress_callback=lambda step, total, loss: None,
+        stage_callback=lambda stage, message: None,
+    )
+    return tracker, optimizer
+
+
+def test_training_execution_tracker_is_resume_aware():
+    # A resumed run's HF global_step CONTINUES from the restored checkpoint: the first observed step is
+    # resumed_from+1 (3, not 1), finalize expects the [resumed_from+1 .. schedule] range, and the sealed
+    # evidence records resumed_from + the ABSOLUTE steps trained.
+    torch = _FakeTorch()
+    adapter_parameter = _ByteTensor(b"before")
+    tracker, optimizer = _resume_tracker(torch, adapter_parameter)
+    tracker.resumed_from_step = 2  # HF continues its global_step from the restored step 2
+    tracker.on_train_begin(optimizer)
+    tracker.on_step_end(3, optimizer)  # the FIRST observed step is 3, not 1
+    tracker.on_log(3, 4, {"loss": 0.4})
+    tracker.on_step_end(4, optimizer)
+    tracker.on_log(4, 4, {"loss": 0.3})
+    model = _trainable_model([("adapter.a", adapter_parameter)])
+    before = capture_trainable_state(model, torch)
+    before_export = capture_adapter_export_state(
+        {"adapter.lora_A.weight": adapter_parameter}, torch, stage=StageMarker.adapter_attached
+    )
+    adapter_parameter.payload = b"after!"
+    after_export = capture_adapter_export_state(
+        {"adapter.lora_A.weight": adapter_parameter}, torch, stage=StageMarker.optimizer_step
+    )
+    evidence = tracker.finalize(
+        steps=4,
+        before=before,
+        before_export=before_export,
+        after_export=after_export,
+        adapter_config_semantic_sha256="f" * 64,
+        model=model,
+    )
+    assert evidence.resumed_from_optimizer_step == 2
+    assert [item.optimizer_step for item in evidence.step_losses] == [3, 4]
+
+
+def test_training_execution_tracker_rejects_a_resumed_step_gap():
+    # Even resumed, steps must be CONTIGUOUS from resumed_from+1: observing step 4 first (skipping 3) after
+    # resuming from 2 is a real sequence deviation, not a resume artifact - fail closed.
+    torch = _FakeTorch()
+    adapter_parameter = _ByteTensor(b"before")
+    tracker, optimizer = _resume_tracker(torch, adapter_parameter)
+    tracker.resumed_from_step = 2
+    tracker.on_train_begin(optimizer)
+    with pytest.raises(TrainingEvidenceError, match="sequence deviation: expected 3, observed 4"):
+        tracker.on_step_end(4, optimizer)
+
+
 def test_training_execution_finalize_rejects_train_time_parameter_replacement():
     torch = _FakeTorch()
     original = _ByteTensor(b"before")

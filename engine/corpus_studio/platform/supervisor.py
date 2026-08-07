@@ -31,6 +31,7 @@ from typing import Any, Literal, Protocol
 from corpus_studio.platform.artifacts import build_artifact_manifest, write_artifact_manifest
 from corpus_studio.platform.common import HashRef, MemoryMetrics, Ref, new_uuid7_id
 from corpus_studio.platform.contracts import (
+    CheckpointResumeRequest,
     ArtifactManifest,
     EventMetrics,
     FailureRecord,
@@ -178,6 +179,7 @@ class RunContext:
         sink: RunEventSink,
         cancel: CancelToken,
         clock: Callable[[], str] = _now_iso,
+        resume: CheckpointResumeRequest | None = None,
     ) -> None:
         self.plan = plan
         self.run_id = run_id
@@ -185,6 +187,11 @@ class RunContext:
         self._cancel = cancel
         self._clock = clock
         self._seq = 0
+        # A checkpoint RESUME request (exact-lineage) the runner threads to the trainer, or None for a
+        # fresh run. The trainer verifies it (integrity + request pin) before restoring anything.
+        self.resume = resume
+        # The intermediate checkpoints the run produced (recorded on the RunManifest for discovery/resume).
+        self.checkpoints: list[str] = []
         # A runner may set the MEASURED fit (from the watchdog's observed peak) — the post-run
         # reconciliation of the calibrator's *predicted* fit. The supervisor records it on the manifest.
         self.final_fit: FitClassification | None = None
@@ -767,6 +774,7 @@ def execute_run(
     clock: Callable[[], str] = _now_iso,
     telemetry: TelemetryControl | None = None,
     warmup_steps: int = 2,
+    resume: CheckpointResumeRequest | None = None,
 ) -> SupervisedRun:
     """Execute ``plan`` through ``runner``, collecting the ``RunEvent`` stream and returning the
     terminal :class:`RunManifest`. Terminal classification is total: :class:`RunCancelled` →
@@ -831,7 +839,7 @@ def execute_run(
                 if label not in sink_errors:
                     sink_errors.append(label)
 
-    ctx = RunContext(plan, rid, _collect, cancel, clock)
+    ctx = RunContext(plan, rid, _collect, cancel, clock, resume=resume)
     started = clock()
     plan_ref = Ref(id=plan.plan_id, hash=HashRef(value=plan.plan_hash))
 
@@ -1051,6 +1059,7 @@ def execute_run(
             else plan.export.output_dir
         ),
         artifact_ids=artifact_ids,
+        checkpoints=ctx.checkpoints,  # the exact-lineage intermediate checkpoints this run sealed
         failure=failure,
         final_fit=ctx.final_fit,  # the MEASURED fit, when a runner captured one (via the watchdog)
         training_success_evidence=(

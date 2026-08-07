@@ -37,6 +37,7 @@ from corpus_studio.importers.jsonl_importer import read_jsonl, read_jsonl_bytes
 from corpus_studio.platform.contracts import (
     AdapterExportStateEvidence,
     CheckpointBoundIdentities,
+    CheckpointResumeRequest,
     GradientCoverageEvidence,
     OptimizerStepLossEvidence,
     TrainableStateChangeEvidence,
@@ -1986,6 +1987,10 @@ class TrainingExecutionTracker:
         self.optimizer_parameter_ids: tuple[int, ...] = ()
         self.completed_steps: list[int] = []
         self.losses: dict[int, float] = {}
+        # A resumed run's HF global_step continues from the restored checkpoint, so its per-step evidence
+        # covers [resumed_from+1 .. schedule], NOT [1 .. schedule]. run_training sets this to the
+        # resumed-from optimizer step so finalize expects the right (post-resume) contiguous range.
+        self.resumed_from_step: int = 0
 
     def _bound_optimizer_parameter_ids(
         self,
@@ -2078,7 +2083,9 @@ class TrainingExecutionTracker:
                 taxonomy=FailureTaxonomy.OPTIMIZER_FAILURE,
                 stage=StageMarker.optimizer_step,
             )
-        expected = len(self.completed_steps) + 1
+        # A resumed run's HF global_step continues from the restored checkpoint, so the FIRST observed
+        # step is resumed_from+1 (0 for a fresh run), and each subsequent step is contiguous from there.
+        expected = self.resumed_from_step + len(self.completed_steps) + 1
         if step != expected:
             raise TrainingEvidenceError(
                 f"optimizer-step sequence deviation: expected {expected}, observed {step}",
@@ -2139,7 +2146,7 @@ class TrainingExecutionTracker:
                 taxonomy=FailureTaxonomy.OPTIMIZER_FAILURE,
                 stage=StageMarker.optimizer_created,
             )
-        expected = list(range(1, steps + 1))
+        expected = list(range(self.resumed_from_step + 1, steps + 1))
         if self.completed_steps != expected:
             raise TrainingEvidenceError(
                 "completed optimizer-step evidence does not match trainer global_step",
@@ -2175,6 +2182,7 @@ class TrainingExecutionTracker:
             gradient_coverage=self.gradients.evidence(),
             optimizer_created=True,
             completed_optimizer_steps=steps,
+            resumed_from_optimizer_step=self.resumed_from_step,
             step_losses=[
                 OptimizerStepLossEvidence(optimizer_step=step, loss=self.losses[step])
                 for step in expected
@@ -3450,6 +3458,7 @@ def run_training(  # pragma: no cover - optional training-stack integration
     checkpoint_bound: CheckpointBoundIdentities | None = None,
     source_run_id: str | None = None,
     checkpoints_root: str | None = None,
+    resume: CheckpointResumeRequest | None = None,
 ) -> TrainResult:
     """Run the training. Lazy-imports the heavy stack; verified via the CPU toy path (a real GPU QLoRA
     can only be user-smoke-tested). Raises :class:`TrainerError` if the runtime can't run the request.
@@ -3863,6 +3872,15 @@ def run_training(  # pragma: no cover - optional training-stack integration
             live_model = kwargs.get("model", model)
             if optimizer is None:
                 return
+            # Seal HF's own TrainerState so a hybrid resume can round-trip it into the HF-layout
+            # checkpoint (dataclasses.asdict matches HF's save_to_json; best-effort - a capture fault
+            # must not stop the checkpoint).
+            try:
+                import dataclasses  # noqa: PLC0415
+
+                hf_trainer_state: dict[str, Any] | None = dataclasses.asdict(state)
+            except Exception:  # noqa: BLE001
+                hf_trainer_state = None
             try:
                 checkpoint_coordinator.maybe_checkpoint(
                     global_optimizer_step=int(state.global_step),
@@ -3871,9 +3889,11 @@ def run_training(  # pragma: no cover - optional training-stack integration
                     adapter_state=get_peft_model_state_dict(live_model),
                     optimizer=optimizer,
                     lr_scheduler=kwargs.get("lr_scheduler"),
-                    rng_state=capture_rng_state(torch),
+                    # include_numpy: HF's resume _load_rng_state requires a 'numpy' rng key.
+                    rng_state=capture_rng_state(torch, include_numpy=True),
                     sampler_state={"consumed_optimizer_steps": int(state.global_step)},
                     consumed_microsteps=int(state.global_step) * config.gradient_accumulation_steps,
+                    trainer_state=hf_trainer_state,
                 )
             except Exception as exc:  # noqa: BLE001 - a checkpoint write must never break training.
                 print(
@@ -3960,6 +3980,53 @@ def run_training(  # pragma: no cover - optional training-stack integration
         if execution_tracker is not None
         else None
     )
+    # Hybrid RESUME (#440/#486): verify OUR sealed checkpoint (integrity + the exact pinned identity),
+    # then materialize an HF-layout checkpoint from the sealed files and let SFTTrainer's proven resume
+    # (optimizer / scheduler / RNG / data-cursor skip / step count) consume it. Verify-before-materialize:
+    # a tampered / incompatible checkpoint fails closed and is never deserialized.
+    resume_from_checkpoint: str | None = None
+    if resume is not None:
+        from corpus_studio.platform.checkpoint import (  # noqa: PLC0415
+            verify_checkpoint_integrity,
+            verify_matches_request,
+        )
+        from corpus_studio.training.checkpoint_io import (  # noqa: PLC0415
+            materialize_hf_checkpoint,
+        )
+
+        resume_manifest = verify_checkpoint_integrity(resume.checkpoint_dir)
+        verify_matches_request(resume_manifest, resume)
+        if execution_tracker is not None:
+            # A resumed run's evidence counts from the resumed-from optimizer step: HF continues its
+            # global_step from the restored checkpoint, so the tracker's step-sequence + loss-coverage
+            # checks must expect [resumed_from+1 .. schedule], not [1 .. schedule].
+            execution_tracker.resumed_from_step = resume_manifest.state.global_optimizer_step
+        # A per-resume-unique translation dir: config.output_dir is already run-scoped, but a fixed name
+        # could still collide with a partial left by a crashed prior attempt under the same run scope, so
+        # isolate each attempt (uuid) - a tampered/incomplete one is rmtree'd on failure below.
+        from uuid import uuid4  # noqa: PLC0415
+
+        materialized_resume_dir = (
+            Path(config.output_dir).parent / f"_resume_hf_{uuid4().hex}"
+        )
+        try:
+            resume_from_checkpoint = str(
+                materialize_hf_checkpoint(
+                    torch_module=torch,
+                    sealed_dir=resume.checkpoint_dir,
+                    hf_dir=materialized_resume_dir,
+                    peft_model=evidence_model,
+                )
+            )
+        except Exception:
+            # materialize_hf_checkpoint may create _resume_hf and copy the (large) optimizer state before
+            # rejecting an incomplete checkpoint (e.g. a missing scheduler). Do not leave that partial
+            # translation behind on the persistent run dir.
+            import shutil  # noqa: PLC0415
+
+            shutil.rmtree(materialized_resume_dir, ignore_errors=True)
+            raise
+
     # Training frameworks print metrics/tqdm to STDOUT — and transformers can log to stdout during
     # SAVE too — so redirect the whole train+save block to stderr. Only the CLI's final JSON echo then
     # writes to stdout, keeping it the pure JSON result the desktop/WBG parses. Progress reaches stderr.
@@ -3967,7 +4034,7 @@ def run_training(  # pragma: no cover - optional training-stack integration
         torch,
         config,
     ):
-        train_output = trainer.train()
+        train_output = trainer.train(resume_from_checkpoint=resume_from_checkpoint)
 
         steps = int(getattr(trainer.state, "global_step", 0) or 0)
         verify_completed_step_count(config, steps)

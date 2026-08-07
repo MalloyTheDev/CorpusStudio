@@ -643,11 +643,33 @@ the training loop.
   step-3` - the cadence fires exactly. Each checkpoint is a COMPLETE sealed set under the run-scoped
   `.../artifacts/checkpoints/step-*`: `CheckpointManifest.json` + `adapter_state.pt` + `optimizer.pt` +
   `scheduler.pt` + `rng.pt` + `sampler.pt`.
-- **Honesty scope.** This is checkpoint WRITING only. Consuming a checkpoint to RESUME (rebuild the plan,
-  `restore_checkpoint` + optimizer injection, verify continuation) is the next slice, and it - plus
-  recording the written checkpoints on the RunManifest and the SupportLevel promotion - is where the
-  measured resume-continuation evidence belongs. `run_training` is `# pragma: no cover` (proven by a run);
-  the coordinator, the threading, and the policy sealing are unit-tested.
+- **Honesty scope.** This is checkpoint WRITING. Consuming a checkpoint to RESUME is the follow-on slice
+  below (now also proven). `run_training` is `# pragma: no cover` (proven by a run); the coordinator, the
+  threading, and the policy sealing are unit-tested.
+
+### Exact-lineage checkpoint RESUME on the adapter SFT lane, 2026-08-07
+
+Consuming a sealed checkpoint to CONTINUE a run now works end to end on this host (the mirror of writing,
+above). `platform-run <plan> --resume-from <checkpoint-dir>` fully integrity-verifies the checkpoint AND
+proves it a compatible resume source for the plan (exact-lineage or nothing) BEFORE anything is restored,
+then the first-party trainer materializes an HF `resume_from_checkpoint` layout from the sealed files
+(`materialize_hf_checkpoint`: optimizer / scheduler / RNG->HF / adapter safetensors+config / TrainerState)
+and lets SFTTrainer's own proven resume (optimizer / scheduler / RNG / data-cursor skip / step count)
+continue. The sealed format is the trust anchor; HF is the restore engine.
+
+- **GPU proof (RTX 5070, in-process, 16-bit LoRA on a from-scratch GPT-2):** a write run (cadence 1, 4
+  steps) sealed `step-1..4`; `--resume-from step-2` on the SAME plan **succeeded, NATIVE_SAFE**, with the
+  HF global_step continuing from 2 - the resumed run trained exactly the two remaining steps and its sealed
+  evidence records `resumed_from_optimizer_step=2` + step_losses for the ABSOLUTE steps `[3, 4]`. The write
+  run's RunManifest recorded all 4 checkpoints (a resume discovers a parent from the record, not by
+  scanning disk).
+- **The honesty core is resume-aware.** Running it surfaced THREE step-sequence checks that assumed a run
+  starts at step 1 - the tracker's `on_step_end` sequence check, the tracker's `finalize` coverage check,
+  and the `TrainingExecutionEvidence` contract validator - all now count from `resumed_from+1`, so a
+  resumed run's evidence is honest rather than falsely rejected. The guarantee is EXACT VERIFIED LINEAGE
+  (our seal) + HF-standard numerical continuation (not bitwise; bitwise holds only on the hand-rolled
+  reference). SupportLevel promotion + a pinned wheel + a full 7B/seq-4096 resume remain the sealed-deploy
+  follow-up.
 
 ## Verification boundary — what `HARDWARE_VERIFIED` does and does NOT prove
 
