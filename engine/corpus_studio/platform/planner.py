@@ -95,6 +95,7 @@ from corpus_studio.platform.enums import (
     Optimizer,
     PhysicalStateKind,
     PlacementRole,
+    QuantizationMode,
     TaskType,
 )
 from corpus_studio.platform.execution_config import (
@@ -157,6 +158,12 @@ class PlannerConstraints:
     objective_id: str | None = None
     dataset_format: str = "instruction"
     adapter_method: str | None = None  # None → auto: qlora when quantized, else lora
+    # Explicit precision/quantization override (nf4 | int8 | fp4 | none); None → auto-select the proven
+    # default (nf4 when bitsandbytes + a passing nf4 probe, else none). A selected quantized mode must be
+    # BOTH runnable (bitsandbytes present) AND proven by a capability probe on this host - else the planner
+    # fails closed, so an unproven mode can never be sealed into a plan. 'none' (16-/32-bit on an
+    # unquantized base) needs no quantization proof, only a proven precision.
+    quantization: str | None = None
     lora_r: int = 16
     lora_alpha: int = 32
     lora_dropout: float = 0.05
@@ -1421,6 +1428,9 @@ def build_run_plan(
         )
     _require_enum(constraints.export_format, ExportFormat, "export_format")
     _require_enum(constraints.optim, Optimizer, "optimizer")
+    if constraints.quantization is not None:
+        # A typo fails closed here with the known set, before the proven/bitsandbytes gate below.
+        _require_enum(constraints.quantization, QuantizationMode, "quantization")
     _require_enum(constraints.allocator_policy, AllocatorPolicy, "allocator_policy")
     _validate_allocator_constraints(constraints)
     _require_enum(
@@ -1493,15 +1503,40 @@ def build_run_plan(
             precision = "fp32"
         else:
             raise PlannerError("no functionally proven training precision is available")
-        quantization = (
+        if is_full_finetune:
             # Full-parameter fine-tuning trains all weights, so they must stay in a trainable dtype - never
-            # 4-bit frozen. Force 'none' regardless of what the backend proves for nf4.
-            "none"
-            if is_full_finetune
-            else "nf4"
-            if capabilities.bitsandbytes_ok and "nf4" in proven_quantization
-            else "none"
-        )
+            # 4-bit frozen. Force 'none' and reject any quantized override rather than silently ignore it.
+            if constraints.quantization not in (None, "none"):
+                raise PlannerError(
+                    f"full-parameter fine-tuning cannot be quantized; drop --quantization "
+                    f"'{constraints.quantization}' (it trains all weights in a full-precision dtype)."
+                )
+            quantization = "none"
+        elif constraints.quantization is not None:
+            # An explicit precision/quantization override. Honor it ONLY when honestly runnable here:
+            # 'none' (16-/32-bit on an unquantized base) needs no quantization proof; any quantized mode
+            # needs bitsandbytes AND a passing capability probe on this host. An unproven mode fails closed
+            # instead of sealing a plan that would break at execution ("declared" is not "proven").
+            requested = constraints.quantization
+            if requested != "none":
+                if not capabilities.bitsandbytes_ok:
+                    raise PlannerError(
+                        f"quantization '{requested}' needs bitsandbytes, which is not available in this "
+                        "environment; run 'corpus-studio train-check' to see what is missing."
+                    )
+                if requested not in proven_quantization:
+                    proven_list = ", ".join(sorted(proven_quantization)) or "none"
+                    raise PlannerError(
+                        f"quantization '{requested}' is not proven on this host - a capability probe must "
+                        f"pass for it before it can be planned (proven quantized modes: {proven_list})."
+                    )
+            quantization = requested
+        else:
+            quantization = (
+                "nf4"
+                if capabilities.bitsandbytes_ok and "nf4" in proven_quantization
+                else "none"
+            )
         attention_backend, attention_policy = _resolve_attention(
             constraints.attention_backend,
             cc_major,

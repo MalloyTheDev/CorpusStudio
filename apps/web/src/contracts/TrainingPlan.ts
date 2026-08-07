@@ -67,6 +67,7 @@ export type OutputDir = string;
 export type PreferenceBeta = number;
 export type PreferenceLabelSmoothing = number;
 export type PreferenceMaxPromptLength = number | null;
+export type Quantization = string | null;
 export type Seed = number;
 export type SequenceLen = number;
 export type SourceCheckpointRefId = string | null;
@@ -181,6 +182,7 @@ export interface TrainingPlanParameters {
   preference_beta?: PreferenceBeta;
   preference_label_smoothing?: PreferenceLabelSmoothing;
   preference_max_prompt_length?: PreferenceMaxPromptLength;
+  quantization?: Quantization;
   seed?: Seed;
   sequence_len?: SequenceLen;
   source_checkpoint_ref_id?: SourceCheckpointRefId;

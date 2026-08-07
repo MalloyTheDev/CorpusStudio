@@ -6789,6 +6789,9 @@ class TrainingPlanParameters(ContractModel):
     objective_id: str | None = None
     dataset_format: str = "instruction"
     adapter_method: str | None = None
+    # Explicit precision/quantization override (nf4 | int8 | fp4 | none); None -> auto (see
+    # PlannerConstraints). Mirrors PlannerConstraints field-for-field so the resolver copies it verbatim.
+    quantization: str | None = None
     lora_r: int = 16
     lora_alpha: int = 32
     lora_dropout: float = 0.05
