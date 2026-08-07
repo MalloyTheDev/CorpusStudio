@@ -785,7 +785,7 @@ def test_build_kwargs_disables_intermediate_checkpoints_by_default():
     assert "save_total_limit" not in kwargs
 
 
-def test_legacy_step_checkpoint_config_parses_but_cannot_execute():
+def test_step_checkpoint_config_builds_hf_free_kwargs_and_needs_bound_identities():
     cfg = TrainRunConfig(
         base_model="m",
         dataset_path="d",
@@ -793,22 +793,25 @@ def test_legacy_step_checkpoint_config_parses_but_cannot_execute():
         save_steps=200,
         save_total_limit=1,
     )
-    # The in-process SFTTrainer body stays checkpoint-free; exact-lineage checkpointing runs through
-    # corpus_studio.training.checkpoint_io, so the SFTTrainer guard refuses an intermediate save here.
-    with pytest.raises(TrainerError, match="checkpoint_io"):
-        build_training_kwargs(cfg)
-    # The execution guard runs before dataset access or any heavy training-stack import.
-    with pytest.raises(TrainerError, match="checkpoint_io"):
+    # The SFTConfig is ALWAYS HF-checkpoint-free (save_strategy="no"); the CheckpointCoordinator owns
+    # exact-lineage writing, so HF and the coordinator never double-write.
+    assert build_training_kwargs(cfg)["save_strategy"] == "no"
+    # A checkpoint-enabled run cannot execute without the runner's sealed bound identities + checkpoints
+    # root - an unreachable control would silently drop the checkpoints the sealed policy requires.
+    with pytest.raises(TrainerError, match="sealed checkpoint identities"):
         run_training(cfg)
 
 
-def test_checkpoint_execution_guard_rejects_unvalidated_model_copy():
+def test_incoherent_save_policy_is_refused_at_execution():
+    # save_steps set with save_strategy="no" (bypassing TrainRunConfig validation via model_copy) is an
+    # incoherent policy: resolve_checkpoint_execution_policy refuses it before any training-stack import.
     config = TrainRunConfig(base_model="m", dataset_path="d").model_copy(
         update={"save_steps": 1}
     )
-    with pytest.raises(TrainerError, match="checkpoint_io"):
-        build_training_kwargs(config)
-    with pytest.raises(TrainerError, match="checkpoint_io"):
+    # build_training_kwargs builds an HF-free SFTConfig regardless (it ignores save_steps), so the refusal
+    # lives at execution, where the sealed policy is resolved.
+    assert build_training_kwargs(config)["save_strategy"] == "no"
+    with pytest.raises(TrainerError, match="disabled checkpointing"):
         run_training(config)
 
 

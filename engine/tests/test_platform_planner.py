@@ -907,13 +907,32 @@ def test_resolved_execution_rejects_a_no_truncation_config_that_permits_truncati
         type(execution).model_validate(body)
 
 
-@pytest.mark.parametrize(
-    "checkpoint_overrides",
-    [{"checkpoint_steps": 50}, {"checkpoint_keep_last": 3}],
-)
-def test_planner_refuses_checkpoint_requests_without_resume_lineage(checkpoint_overrides):
-    with pytest.raises(PlannerError, match="resume compatibility and lineage"):
-        _plan(_profile(cc_major=8), _report(), **checkpoint_overrides)
+def test_planner_seals_a_checkpoint_cadence_on_the_adapter_lane():
+    # An adapter SFT plan with --checkpoint-cadence now SEALS an enabled checkpoint policy (the
+    # CheckpointCoordinator writes it); save_strategy is sealed "steps" to signal the cadence, while HF's
+    # own saver stays off in the trainer.
+    plan = _plan(_profile(cc_major=8), _report(), checkpoint_steps=50, checkpoint_keep_last=3)
+    ex = plan.resolved_execution
+    assert ex is not None
+    assert ex.checkpoint_policy.cadence_optimizer_steps == 50
+    assert ex.checkpoint_policy.keep_last == 3
+    assert ex.save_strategy == "steps"
+
+
+def test_planner_refuses_keep_last_without_a_cadence():
+    with pytest.raises(PlannerError, match="requires --checkpoint-cadence"):
+        _plan(_profile(cc_major=8), _report(), checkpoint_keep_last=3)
+
+
+def test_planner_refuses_a_checkpoint_cadence_on_the_full_parameter_lane():
+    # The full-parameter worker does not write checkpoints yet, so the planner refuses a cadence there
+    # rather than seal a plan its runner would reject.
+    with pytest.raises(PlannerError, match="cannot write intermediate checkpoints"):
+        _plan(
+            _profile(cc_major=8), _report(), task_type="sft",
+            adapter_method="full_finetune", export_format="merged_safetensors",
+            checkpoint_steps=50,
+        )
 
 
 def test_invalid_optim_is_rejected():

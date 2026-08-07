@@ -488,6 +488,12 @@ class CheckpointCoordinator:
     def last_manifest(self) -> CheckpointManifest | None:
         return self._last
 
+    @property
+    def written_checkpoints(self) -> list[str]:
+        """The directories of the checkpoints this coordinator wrote (after ``keep_last`` pruning), in
+        write order - the exact set the run should record on its manifest."""
+        return [str(path) for path in self._written]
+
     def is_due(self, global_optimizer_step: int) -> bool:
         return self._cadence is not None and global_optimizer_step % self._cadence == 0
 

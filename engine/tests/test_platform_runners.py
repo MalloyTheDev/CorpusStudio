@@ -803,15 +803,47 @@ def test_max_steps_override_is_refused_without_calling_the_trainer(monkeypatch):
     assert "config" not in capture
 
 
-def test_training_runner_refuses_legacy_sealed_step_checkpoint_plan(monkeypatch):
-    called = []
+def _capturing_run_training(monkeypatch, captured):
+    """A fake ``run_training`` that records the runner's kwargs (to assert checkpoint threading) and returns
+    a valid two-step TrainResult so the run succeeds. Mirrors the successful-run mock: strictly-increasing
+    monotonic time for the watchdog, the optimizer-created stage, and per-step token/progress evidence."""
+    import itertools
+
+    ticks = itertools.count()
+    monkeypatch.setattr("time.monotonic", lambda: next(ticks) * 0.5)
+
+    def _fake(config, *, progress_callback=None, stage_callback=None, token_callback=None, **kwargs):
+        captured.update(kwargs)
+        if stage_callback is not None:
+            stage_callback("optimizer_created", "observed the real optimizer")
+        losses = {1: 1.0, 2: 0.5}
+        for step in range(1, 3):
+            if token_callback is not None:
+                token_callback(step, 100 * step, 40 * step, 1)
+            if progress_callback is not None:
+                progress_callback(step, 2, losses[step])
+        adapter_path = _write_fake_adapter(config.output_dir)
+        return TrainResult(
+            output_dir=config.output_dir,
+            adapter_path=adapter_path,
+            base_model=config.base_model,
+            cpu_toy=config.cpu_toy,
+            steps=2,
+            final_loss=losses[2],
+            checkpoints=[],
+            execution_evidence=_execution_evidence(2, losses),
+        )
+
+    return _fake
+
+
+def test_training_runner_threads_checkpoint_identities_for_a_cadence_plan(monkeypatch):
+    captured: dict = {}
     monkeypatch.setattr(
-        "corpus_studio.training.trainer.run_training",
-        lambda *_args, **_kwargs: called.append(True),
+        "corpus_studio.training.trainer.run_training", _capturing_run_training(monkeypatch, captured)
     )
     plan = demo_training_plan()
     execution_body = plan.resolved_execution.model_dump(mode="json")
-    execution_body["configuration_hash"] = "0" * 64
     execution_body["save_strategy"] = "steps"
     execution_body["checkpoint_policy"]["cadence_optimizer_steps"] = 1
     execution_body["checkpoint_policy"]["keep_last"] = 1
@@ -825,44 +857,24 @@ def test_training_runner_refuses_legacy_sealed_step_checkpoint_plan(monkeypatch)
 
     result = execute_run(_reseal(body), TrainingRunner(cpu_toy=True), clock=_CLOCK)
 
-    assert result.manifest.state == "failed"
-    assert result.manifest.failure is not None
-    assert result.manifest.failure.taxonomy == FailureTaxonomy.UNSUPPORTED_CONFIGURATION
-    assert result.manifest.failure.stage == StageMarker.process_start
-    assert "resume compatibility" in result.manifest.failure.message
-    assert called == []
+    # The lifted guard ADMITS an enabled cadence, and the runner hands run_training the sealed bound
+    # identities + a run-scoped checkpoints root so the CheckpointCoordinator can write exact-lineage ckpts.
+    assert result.manifest.state == "succeeded"
+    assert captured.get("checkpoint_bound") is not None
+    assert captured.get("source_run_id") is not None
+    assert captured.get("checkpoints_root") is not None
 
 
-def test_training_runner_rejects_unvalidated_disabled_policy_fields(monkeypatch):
-    called = []
+def test_training_runner_threads_no_checkpoint_identities_for_a_checkpoint_free_plan(monkeypatch):
+    captured: dict = {}
     monkeypatch.setattr(
-        "corpus_studio.training.trainer.run_training",
-        lambda *_args, **_kwargs: called.append(True),
+        "corpus_studio.training.trainer.run_training", _capturing_run_training(monkeypatch, captured)
     )
-    plan = demo_training_plan()
-    execution = plan.resolved_execution
-    assert execution is not None
-    policy = execution.checkpoint_policy.model_copy(update={"keep_last": 1})
-    execution = execution.model_copy(
-        update={"checkpoint_policy": policy, "configuration_hash": "0" * 64}
-    )
-    execution = execution.model_copy(
-        update={"configuration_hash": execution_configuration_hash_for(execution)}
-    )
-    tampered = plan.model_copy(
-        update={"checkpoint_policy": policy, "resolved_execution": execution}
-    )
-    tampered = tampered.model_copy(
-        update={"plan_hash": compute_plan_hash(run_plan_hash_payload(tampered))}
-    )
-
-    result = execute_run(tampered, TrainingRunner(cpu_toy=True), clock=_CLOCK)
-
-    assert result.manifest.state == "failed"
-    assert result.manifest.failure is not None
-    assert result.manifest.failure.taxonomy == FailureTaxonomy.UNSUPPORTED_CONFIGURATION
-    assert "resume compatibility" in result.manifest.failure.message
-    assert called == []
+    result = execute_run(demo_training_plan(), TrainingRunner(cpu_toy=True), clock=_CLOCK)
+    # A checkpoint-free plan threads NOTHING - byte-identical to before checkpoints existed.
+    assert result.manifest.state == "succeeded"
+    assert "checkpoint_bound" not in captured
+    assert "checkpoints_root" not in captured
 
 
 @pytest.mark.parametrize(
