@@ -160,6 +160,7 @@ def run_worker(
             raise WorkerProtocolError("run_dispatch selected the wrong body contract")
         plan = parsed.plan
         run_id = parsed.run_id
+        resume = parsed.resume
         from corpus_studio.platform.planner import verify_run_plan_hash  # noqa: PLC0415
 
         if not verify_run_plan_hash(plan):
@@ -239,6 +240,7 @@ def run_worker(
         sink=lambda event: _send(
             "event", event, correlation_id=correlation_id, out=stream
         ),
+        resume=resume,
     )
     manifest = result.manifest
     outcome = (

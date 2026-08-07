@@ -720,6 +720,26 @@ def platform_run(
         sampler.start()
 
     try:
+        # Fully verify the checkpoint AND prove it a compatible resume source for THIS plan before
+        # anything is dispatched - exact-lineage or nothing, identically on the in-process and the
+        # subprocess (managed) paths. A resume mints this fresh run id and reads the parent checkpoint
+        # read-only; the worker independently re-verifies the restored bytes against the sealed
+        # manifest hash before continuing (defense in depth).
+        resume_request = None
+        if resume_from is not None:
+            from corpus_studio.platform.checkpoint import (
+                verify_checkpoint_integrity,
+                verify_resumable_into,
+            )
+            from corpus_studio.platform.contracts import CheckpointResumeRequest
+
+            resume_manifest = verify_checkpoint_integrity(str(resume_from))
+            verify_resumable_into(resume_manifest, plan)
+            resume_request = CheckpointResumeRequest(
+                checkpoint_id=resume_manifest.checkpoint_id,
+                checkpoint_manifest_hash=resume_manifest.checkpoint_manifest_hash,
+                checkpoint_dir=str(resume_from),
+            )
         if subprocess_mode:
             from corpus_studio.platform.subprocess_supervisor import execute_run_subprocess
 
@@ -734,6 +754,7 @@ def platform_run(
                 out_dir=out_dir,
                 worker_argv=managed_worker_argv,
                 telemetry=sampler,
+                resume=resume_request,
             )
         else:
             # The SAME lane factory the subprocess worker uses, so the in-process path can't drift (it
@@ -745,24 +766,6 @@ def platform_run(
             runner: Runner = build_lane_runner(
                 runner_name, max_steps=max_steps, corpus_root=corpus_root
             )
-            resume_request = None
-            if resume_from is not None:
-                from corpus_studio.platform.checkpoint import (
-                    verify_checkpoint_integrity,
-                    verify_resumable_into,
-                )
-                from corpus_studio.platform.contracts import CheckpointResumeRequest
-
-                # Fully verify the checkpoint AND prove it a compatible resume source for THIS plan before
-                # anything is restored - exact-lineage or nothing. A resume mints this fresh run id and
-                # reads the parent checkpoint read-only.
-                resume_manifest = verify_checkpoint_integrity(str(resume_from))
-                verify_resumable_into(resume_manifest, plan)
-                resume_request = CheckpointResumeRequest(
-                    checkpoint_id=resume_manifest.checkpoint_id,
-                    checkpoint_manifest_hash=resume_manifest.checkpoint_manifest_hash,
-                    checkpoint_dir=str(resume_from),
-                )
             result = execute_run(
                 plan,
                 runner,

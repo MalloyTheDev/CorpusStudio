@@ -62,6 +62,71 @@ def test_worker_streams_accepted_events_and_terminal():
         assert m["correlation_id"] == "c-run-1"
 
 
+def test_dispatch_carries_resume_only_when_resuming():
+    """The run_dispatch line embeds the resume instruction only for an actual resume; an ordinary
+    from-scratch dispatch is byte-for-byte unchanged, so a worker that never consumes resume receives
+    an identical line and the resume path stays opt-in rather than a silent default."""
+    from corpus_studio.platform.contracts import CheckpointResumeRequest
+
+    plain = json.loads(_dispatch_line(_PLAN, "run-1", 30))
+    assert "resume" not in plain["body"]
+    # The new parameter must not perturb the from-scratch dispatch bytes (default vs explicit None).
+    assert _dispatch_line(_PLAN, "run-1", 30) == _dispatch_line(_PLAN, "run-1", 30, None)
+
+    req = CheckpointResumeRequest(
+        checkpoint_id="run-1-ckpt-step-00000002",
+        checkpoint_manifest_hash="a" * 64,
+        checkpoint_dir="/checkpoints/step-00000002",
+    )
+    resuming = json.loads(_dispatch_line(_PLAN, "run-1", 30, req))
+    assert resuming["body"]["resume"]["checkpoint_dir"] == "/checkpoints/step-00000002"
+    assert resuming["body"]["resume"]["checkpoint_manifest_hash"] == "a" * 64
+
+
+def test_worker_forwards_resume_from_dispatch_to_execute_run(monkeypatch):
+    """Reachability: a resume carried by the dispatch reaches ``execute_run`` - the managed
+    --subprocess path is wired end to end, not just the in-process one. Before this wiring the
+    subprocess worker silently ignored resume and re-ran from scratch."""
+    import corpus_studio.platform.supervisor as supervisor_mod
+    from corpus_studio.platform.contracts import CheckpointResumeRequest
+
+    real_execute_run = supervisor_mod.execute_run
+    captured: dict = {}
+
+    def _spy(plan, runner, **kwargs):
+        captured["resume"] = kwargs.get("resume")
+        return real_execute_run(plan, runner, **kwargs)
+
+    monkeypatch.setattr(supervisor_mod, "execute_run", _spy)
+
+    req = CheckpointResumeRequest(
+        checkpoint_id="run-1-ckpt-step-00000002",
+        checkpoint_manifest_hash="b" * 64,
+        checkpoint_dir="/checkpoints/step-00000002",
+    )
+    out = io.StringIO()
+    rc = run_worker(
+        _dispatch_line(_PLAN, "run-1", 30, req),
+        runner_name="echo",
+        backend_id=_PLAN.backend_ref.id,
+        environment_ref=_PLAN.environment_ref,
+        out=out,
+    )
+    assert rc == 0
+    assert captured["resume"] is not None
+    assert captured["resume"].checkpoint_dir == "/checkpoints/step-00000002"
+    # And the from-scratch dispatch forwards resume=None (no accidental resume on ordinary runs).
+    captured.clear()
+    run_worker(
+        _dispatch_line(_PLAN, "run-1", 30),
+        runner_name="echo",
+        backend_id=_PLAN.backend_ref.id,
+        environment_ref=_PLAN.environment_ref,
+        out=io.StringIO(),
+    )
+    assert captured["resume"] is None
+
+
 def test_worker_forwards_run_events_in_order():
     _rc, *messages = _worker_out("echo")
     metrics = [m["body"] for m in messages if m["type"] == "event" and m["body"]["event_type"] == "metric"]
