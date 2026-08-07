@@ -107,6 +107,14 @@ def run_full_finetune(  # pragma: no cover - torch/transformers integration; pro
     tokenizer = AutoTokenizer.from_pretrained(base_model)
     if tokenizer.pad_token_id is None:
         tokenizer.pad_token = tokenizer.eos_token
+    if tokenizer.pad_token_id is None:
+        # A base whose tokenizer has neither pad nor eos cannot pad batches - fail closed with a clear
+        # reason rather than a cryptic 'NoneType' int error deep in the fixed-length row builder. This
+        # guards a malformed base (e.g. a from-scratch tokenizer that declared no eos token).
+        raise FullFinetuneError(
+            "the base model's tokenizer defines no pad or eos token, so training batches cannot be "
+            "padded; the base is unusable (a from-scratch tokenizer must declare an eos token)"
+        )
 
     # --- data: the sealed SFT rows, formatted + tokenized to fixed length (whole-sequence loss, per above) ---
     rows = list(read_jsonl(Path(execution.inputs.dataset.location)))

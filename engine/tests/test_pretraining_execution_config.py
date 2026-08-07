@@ -299,6 +299,21 @@ def test_train_tokenizer_requires_algorithm_and_special_tokens():
         TokenizerSourceSpec(mode="train", algorithm="bpe", vocab_size=32000)
 
 
+def test_train_tokenizer_requires_an_eos_token_for_a_usable_base():
+    # A from-scratch tokenizer without an eos produces a base model that cannot be fine-tuned (the pretrain
+    # -> SFT/DPO handoff crashes on a padless tokenizer). Fail closed at planning with a clear reason.
+    with pytest.raises(ValueError, match="end-of-sequence token"):
+        TokenizerSourceSpec(mode="train", algorithm="bpe", vocab_size=1024, special_tokens=["<unk>"])
+    # </s> is accepted as the eos spelling; a full BOS/EOS/PAD/UNK set is fine.
+    assert TokenizerSourceSpec(
+        mode="train", algorithm="bpe", vocab_size=1024, special_tokens=["</s>", "<pad>"]
+    ).special_tokens == ["</s>", "<pad>"]
+    assert TokenizerSourceSpec(
+        mode="train", algorithm="bpe", vocab_size=1024,
+        special_tokens=["<bos>", "<eos>", "<pad>", "<unk>"],
+    ).special_tokens == ["<bos>", "<eos>", "<pad>", "<unk>"]
+
+
 def test_import_tokenizer_requires_a_content_digest():
     with pytest.raises(ValueError, match="pinned tokenizer_content_sha256"):
         TokenizerSourceSpec(mode="import")
