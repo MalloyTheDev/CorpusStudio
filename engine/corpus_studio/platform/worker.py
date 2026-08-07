@@ -294,9 +294,6 @@ def _build_arg_parser() -> Any:
     # Anchors a pretraining plan's relative shard locations against a corpus directory (the process CWD
     # by default). Absolute shard paths ignore it; the other lanes ignore it entirely.
     parser.add_argument("--corpus-root", default=".")
-    # The executing worker's sealed wheel sha256 (from the managed environment lock, passed by the
-    # control plane). Bound into any intermediate checkpoint so a resume verifies the worker BYTES.
-    parser.add_argument("--worker-wheel-sha256", default=None)
     return parser
 
 
@@ -351,7 +348,10 @@ def main(out: TextIO | None = None) -> None:
             backend_id=args.backend_id,
             environment_ref=environment_ref,
             corpus_root=args.corpus_root,
-            worker_wheel_sha256=args.worker_wheel_sha256,
+            # The sealed wheel sha256 arrives via an env var (set by the control plane), NOT an argv
+            # option, so a pre-hardening worker whose arg parser lacks it is never broken - it just
+            # does not read the variable. Bound into any checkpoint + verified on resume.
+            worker_wheel_sha256=os.environ.get("CORPUS_STUDIO_WORKER_WHEEL_SHA256"),
             out=out,
         )
     )

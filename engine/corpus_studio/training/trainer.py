@@ -4022,6 +4022,17 @@ def run_training(  # pragma: no cover - optional training-stack integration
         # hybrid path does not call restore_checkpoint (HF owns the restore), so this is the one place
         # the worker-identity gate fires on resume.
         sealed_wheel = resume_manifest.bound.worker_wheel_sha256
+        managed_checkpoint = resume_manifest.bound.environment_lock_hash is not None
+        if managed_checkpoint and (sealed_wheel is None or worker_wheel_sha256 is None):
+            # A managed checkpoint that does not carry BOTH worker identities cannot be proven exact
+            # lineage down to the worker bytes: a pre-hardening checkpoint may have run repo-shadowed
+            # source. Fail closed rather than admit it as exact lineage. (The two-sided check below
+            # then guards a present-but-mismatched pair.)
+            raise TrainerError(
+                "a managed checkpoint resume requires both the checkpoint's bound worker wheel and the "
+                "resuming worker's wheel identity, but one is absent; the worker bytes cannot be verified "
+                "as exact lineage"
+            )
         if (
             sealed_wheel is not None
             and worker_wheel_sha256 is not None

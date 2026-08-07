@@ -622,6 +622,7 @@ def platform_run(
             raise typer.Exit(2) from exc
 
     managed_worker_argv = None
+    managed_worker_wheel_sha256: Optional[str] = None
     telemetry_identity_overlay = None
     managed_lease = contextlib.ExitStack()
     managed_environment = (
@@ -692,14 +693,15 @@ def platform_run(
             # Bind the executing worker wheel sha256 (from the sealed environment lock) so an
             # intermediate checkpoint records the exact worker BYTES it was produced by and a resume
             # verifies them - exact lineage down to the wheel, not only the plan + environment lock.
-            worker_wheel_sha256 = (
+            # Delivered via an ENVIRONMENT VARIABLE (below), not an argv option, so a pre-hardening
+            # pinned worker wheel (whose arg parser has no such option) is not broken by an upgraded
+            # control plane - it simply ignores the unknown variable.
+            managed_worker_wheel_sha256 = (
                 lock.worker_artifact.content_hash.value
                 if lock.worker_artifact is not None
                 and lock.worker_artifact.content_hash is not None
                 else None
             )
-            if worker_wheel_sha256 is not None:
-                managed_worker_argv += ["--worker-wheel-sha256", worker_wheel_sha256]
             # A non-default corpus root anchors a managed pretraining plan's relative shard locations
             # inside the isolated interpreter; the default is left off so ordinary argv is unchanged.
             if corpus_root != ".":
@@ -771,6 +773,7 @@ def platform_run(
                 worker_argv=managed_worker_argv,
                 telemetry=sampler,
                 resume=resume_request,
+                worker_wheel_sha256=managed_worker_wheel_sha256,
             )
         else:
             # The SAME lane factory the subprocess worker uses, so the in-process path can't drift (it

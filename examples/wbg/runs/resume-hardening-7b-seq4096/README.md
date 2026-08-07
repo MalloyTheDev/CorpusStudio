@@ -21,9 +21,11 @@ wheel, not repo-shadowed code).
 
 ## What each item's evidence shows
 
-- **F1 - worker-identity binding.** The step-2 `CheckpointManifest.bound.worker_wheel_sha256` =
-  `1af5a079ff451dba6a4cfaaba1b352fee01d121e0c75eeaf8db8ebffac6cc628` - the exact sealed wheel the run
-  executed (previously null). The hybrid restore verifies it.
+- **F1 - worker-identity binding (WRITE side).** The step-2 `CheckpointManifest.bound.worker_wheel_sha256`
+  = `1af5a079ff451dba6a4cfaaba1b352fee01d121e0c75eeaf8db8ebffac6cc628` - the exact sealed wheel the run
+  executed (previously null). NOTE: this wheel (`1af5a079`, source `2c9b698`) proves only the write-side
+  binding; the restore-side verification gate was added later (`d15b8e8`) and is validated in the re-proof
+  section below (wheel `80515175` / env `flp-v7`).
 - **F2 - resume lineage.** The resumed `RunManifest.resume_lineage` =
   `{parent_run_id: run-019fde66..., parent_checkpoint_id: ...-ckpt-step-00000002,
   parent_checkpoint_hash: 1d6351e6..., resumed_from_global_step: 2}` (previously null).

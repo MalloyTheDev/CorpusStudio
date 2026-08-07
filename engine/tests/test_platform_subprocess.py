@@ -64,8 +64,9 @@ def test_worker_streams_accepted_events_and_terminal():
 
 def test_worker_env_strips_import_shadowing_vars(monkeypatch):
     """The worker child never inherits PYTHONPATH/PYTHONHOME, so an inherited path cannot shadow the
-    sealed wheel with another checkout (together with -P in the argv). Other vars are preserved."""
-    from corpus_studio.platform.subprocess_supervisor import _worker_env
+    sealed wheel with another checkout (together with -P in the argv). Other vars are preserved. The
+    managed worker wheel sha is delivered via an env var (a channel a pre-hardening worker ignores)."""
+    from corpus_studio.platform.subprocess_supervisor import WORKER_WHEEL_SHA256_ENV, _worker_env
 
     monkeypatch.setenv("PYTHONPATH", "/tmp/other-checkout/engine")
     monkeypatch.setenv("PYTHONHOME", "/tmp/other-home")
@@ -74,6 +75,8 @@ def test_worker_env_strips_import_shadowing_vars(monkeypatch):
     assert "PYTHONPATH" not in env
     assert "PYTHONHOME" not in env
     assert env.get("CUDA_VISIBLE_DEVICES") == "0"
+    assert WORKER_WHEEL_SHA256_ENV not in env
+    assert _worker_env("a" * 64)[WORKER_WHEEL_SHA256_ENV] == "a" * 64
 
 
 def test_dispatch_carries_resume_only_when_resuming():
