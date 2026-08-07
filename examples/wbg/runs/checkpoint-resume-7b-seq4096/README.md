@@ -60,3 +60,18 @@ interrupted run would leave, and the resume (a fresh worker process) is the same
 a completed source additionally yields the **ground-truth** steps 3/4 for the continuation comparison above,
 which a killed source could not. A literal kill-then-resume adds only write-atomicity-under-`SIGKILL`
 coverage and is noted as an optional follow-up.
+
+## Known resume-hardening follow-ups (from the review of this evidence)
+
+The proof above is sound (real training, verified by the measured continuation), but the review of these
+manifests surfaced guarantee-hardening gaps that are the next slice (see `docs/HOST_STATE.md`):
+
+- **Worker-identity binding (H1):** the checkpoint's `worker_wheel_sha256` is null (only `plan_hash` +
+  `environment_lock_hash` are bound) and the restore does not verify worker-only identities - so exact
+  lineage does not confirm the resuming worker BYTES. Seal + verify it for the managed/sealed tier.
+- **Resume lineage:** the resumed `RunManifest.resume_lineage` is null despite `resumed_from_optimizer_step=2`;
+  populate the parent run / checkpoint id / checkpoint hash from the verified checkpoint.
+- **Post-restore baseline:** `before_sha256` is captured before the HF restore, so the canonical-adapter-change
+  gate could be satisfied by the restore alone; capture it after restoration or add a resumed-interval delta.
+- **Worker-CWD isolation:** spawn the managed worker neutral-CWD/`-I` so it uses the wheel regardless of the
+  launch directory.

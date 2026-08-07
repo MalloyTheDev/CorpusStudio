@@ -726,9 +726,26 @@ plan (`docs/CHECKPOINT_RESUME_PLAN.md` C2) reserved for a 7B/seq-4096 run.
   the worker imports the wheel (verified `.../site-packages/.../worker.py`), NOT the repo. The sealed wheel
   resumed from step 2 (`resumed_from_optimizer_step=2`, steps `[3,4]`, step-3 loss `2.935065...` matching the
   write run). So this is a PRODUCT `workload_verified` result for both the merged CODE and the sealed WHEEL at
-  7B/seq-4096. The one remaining follow-up is worker-CWD-isolation hardening (spawn the managed worker
-  neutral-CWD/`-I` so it uses the wheel regardless of the launch directory, rather than relying on a neutral
-  CWD by convention).
+  7B/seq-4096.
+- **Known resume-hardening follow-ups (surfaced by the code review of this evidence; the proof above is
+  sound - real training verified by the measured continuation - but these strengthen the resume
+  *guarantees* and are the next slice, some needing a new worker wheel):**
+  - **Worker-identity binding (H1).** The sealed checkpoint binds `plan_hash` + `environment_lock_hash` but
+    leaves `worker_wheel_sha256` null, and the hybrid restore does not verify worker-only identities - so
+    the exact-lineage check does not confirm the resuming worker BYTES (with the CWD-shadow above, a
+    different checkout could continue a managed checkpoint while plan/env hashes still pass). The runner
+    should seal `worker_wheel_sha256` for the managed/sealed tier and verify it before restoring.
+  - **Resume lineage on the terminal record.** A resumed `RunManifest` reports
+    `resumed_from_optimizer_step` but leaves `resume_lineage` null, so the terminal record cannot itself
+    name the parent run / checkpoint id / checkpoint hash it continued; construct it from the verified
+    checkpoint when producing the manifest.
+  - **Post-restore baseline for the change gate.** The honesty-core canonical-adapter-change gate captures
+    `before_sha256` BEFORE `trainer.train(resume_from_checkpoint=...)` performs the HF restore, so the
+    before->after delta includes the restore; a resumed interval that performed no real update could still
+    pass. Capture the baseline AFTER restoration (before the first resumed update), or add a separate
+    resumed-interval delta proof.
+  - **Worker-CWD isolation.** Spawn the managed worker neutral-CWD/`-I` so it uses the wheel regardless of
+    the launch directory, rather than relying on a neutral CWD by convention.
 
 ### Reproducible managed `--subprocess` shipping via a sealed worker wheel, 2026-08-07
 
