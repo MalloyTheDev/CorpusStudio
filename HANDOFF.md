@@ -1,5 +1,25 @@
 # CorpusStudio — Session Handoff
 
+**Last updated:** 2026-08-07 - **full-parameter SFT (`dense_full_finetune`) is now `workload_verified`** -
+built across a clean 4-slice vertical + GPU-proven + promoted, plus an S0 hardening slice that the audit
+motivated. This arc: (1) **S0 shared-optimizer lowering** (#815) - `training/optimizer_config.py`
+(`hf_training_arguments_optimizer_kwargs` + `build_torch_optimizer`) kills the F1/F3 drift class the DPO
+pre-merge audit found (the same sealed-optimizer-drop bug hit BOTH the DPO and pretraining workers); DPO +
+pretraining refactored onto it. (2) **dense_full_finetune** - **1a** the `ResolvedFullFinetuneExecutionConfiguration`
+full-model config family (#816), **1b** the resolver seal + `required_runner_lane` refuse (#817, fixing the
+latent mis-seal where `full_parameter_sft` lowered silently to QLoRA), **2** the `run_full_finetune` worker
+reusing the pretraining full-model machinery (#818), **3** the `FullFinetuneRunner` + supervisor full-model
+reload-verify + `RunManifest.full_finetune_success_evidence` + routing (#819, which ALSO fixed a latent DPO
+subprocess dead-lane - `preference` was missing from the worker `_RUNNER_CHOICES`). (3) the
+**workload_verified promotion**: a measured GPU bring-up (Qwen2.5-0.5B-Instruct, bf16, seq 512, 12 steps,
+loss 2.28->0.17, 290/290 tensors with observed gradients, `model.safetensors` reload-verified, peak 5.01
+GiB) through `FullFinetuneRunner` + the supervisor admission gate. A PRODUCT claim, not a sealed IEEE cell.
+Deployment follow-up (as for pretraining/DPO): the managed `platform-run --subprocess` route (a worker wheel
++ env). Quality follow-up: fp32 master-weight / mixed-precision full-finetune (so all tensors register a
+change - 265/290 changed under bf16, the rest sub-precision). **Still open + retained-human: #774**
+(checkpoint/resume + 4/8/16/32-bit precision - done + GPU-validated but 32 commits behind main / 17
+conflicts; needs a rebase then its v10 wheel/GPU gate). Nothing this arc changes the sealed IEEE ladder.
+
 **Last updated:** 2026-08-06 - **offline DPO (preference) is now `workload_verified`** - the full first-party
 execution path is built, GPU-proven, and promoted. This session: (1) the pretraining managed
 `platform-run --subprocess` shipping path went GPU-green after fixing 10 bugs (#810/#811/#812; see

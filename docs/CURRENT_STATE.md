@@ -3,11 +3,15 @@
 Single source of truth for what Corpus Studio actually does today. When another
 doc disagrees with this file, this file wins (and the other doc should be fixed).
 
-Last reconciled: 2026-08-06 — **offline DPO (preference) is workload_verified** (the first-party
-`PreferenceRunner` lane trains a QLoRA adapter over a frozen reference model end to end - a Qwen3-4B DPO GPU
-bring-up with supervisor-admitted evidence, adapter reload-verify) and, earlier this pass, **from-scratch
-pretraining is workload_verified** (the `PretrainingRunner` lane, a 124M GPT-2 GPU bring-up, a milestone
-wheel + sealed env) and **`create-model`** shipped (compose / base-on-a-family; #789/#791/#792); this pass
+Last reconciled: 2026-08-07 — **full-parameter SFT (dense_full_finetune) is workload_verified** (the
+first-party `FullFinetuneRunner` lane trains ALL model parameters end to end - a Qwen2.5-0.5B GPU bring-up
+with supervisor-admitted full-model evidence + reload-verify; built across a clean 4-slice vertical
+#816/#817/#818/#819 + the S0 shared-optimizer hardening #815). Prior this arc: **offline DPO (preference) is
+workload_verified** (the first-party `PreferenceRunner` lane trains a QLoRA adapter over a frozen reference
+model end to end - a Qwen3-4B DPO GPU bring-up with supervisor-admitted evidence, adapter reload-verify) and
+**from-scratch pretraining is workload_verified** (the `PretrainingRunner` lane, a 124M GPT-2 GPU bring-up, a
+milestone wheel + sealed env) and **`create-model`** shipped (compose / base-on-a-family; #789/#791/#792);
+this pass
 also HARDENED the production `platform-run` execute_run + managed-subprocess path for pretraining
 (RunManifest pretraining-fit admission, the subprocess runner lane, epoch-scheduled training, single-file
 large-model saves, run-scoped output) - see the entries below. The offline **DPO / preference planning**
@@ -400,6 +404,18 @@ per-item error isolation, and off-thread document opens.
   504/504 LoRA tensors changed with observed gradients, peak 5.79 GiB; see [`HOST_STATE.md`](HOST_STATE.md)).
   A PRODUCT claim, not a sealed IEEE cell. The managed `platform-run --subprocess` route (a DPO worker
   wheel + sealed env) is the deployment follow-up, exactly as for pretraining (in-process routes now).
+- **Full-parameter SFT (`dense_full_finetune`, `workload_verified`, EXECUTABLE)**: `platform-plan
+  --task-type sft --adapter-method full_finetune --export-format merged_safetensors` seals a full-MODEL
+  `ResolvedFullFinetuneExecutionConfiguration` (its own byte-locked seal, sibling to the adapter SFT config)
+  - all parameters trainable, unquantized, full-state checkpoints, merged full-model export, the
+  `full_parameter_sft` objective. `platform-run` routes it to the first-party `FullFinetuneRunner` - NOT the
+  adapter SFT lane. The worker (`run_full_finetune`) reuses the pretraining full-model machinery (from a real
+  base via `from_pretrained` + an SFT dataset), and the supervisor INDEPENDENTLY reload-verifies the saved
+  `model.safetensors` before admitting `RunManifest.full_finetune_success_evidence`. Promoted to
+  `workload_verified` by a measured GPU bring-up (Qwen2.5-0.5B-Instruct, bf16, seq 512, 12 steps, loss
+  2.28->0.17, 290/290 tensors with observed gradients, peak 5.01 GiB; see [`HOST_STATE.md`](HOST_STATE.md)).
+  This also FIXED a latent mis-seal (`full_parameter_sft` previously lowered silently to QLoRA). A PRODUCT
+  claim, not a sealed IEEE cell; the managed subprocess wheel route is the deployment follow-up.
 - **Identity-bound backend worker protocol 2.0**: every newly generated RunPlan hash-pins the exact
   static BackendManifest. A subprocess worker must send `hello` first with that manifest and its exact
   environment/lock ref; only then can the core dispatch. The parent enforces protocol/direction/body,

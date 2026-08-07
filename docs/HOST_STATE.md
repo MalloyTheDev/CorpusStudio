@@ -512,6 +512,31 @@ IEEE cell) on the evidence below - offline DPO now runs end to end on this host 
   pre-fix worker silently substituted a full-precision AdamW - dropping both the seal and that headroom).
   Grad clipping now honors the sealed `max_grad_norm`. Both runs were supervisor-adapter-reload-verified.
 
+### Full-parameter SFT `workload_verified` bring-up (PRODUCT), 2026-08-07
+
+The **dense_full_finetune** execution variant is promoted to `workload_verified` (a PRODUCT claim, NOT a
+sealed IEEE cell) on the evidence below - full-parameter supervised fine-tuning now runs end to end on this
+host through the first-party `FullFinetuneRunner` lane.
+
+- **Sealed bring-up run:** full-parameter SFT of **Qwen2.5-0.5B-Instruct** (bf16, ALL parameters trainable -
+  no adapter, no 4-bit) on the RTX 5070 at **seq 512, 12 steps, peak 5.01 GiB / 12** through the first-party
+  `FullFinetuneRunner` + the supervisor's independent full-model reload-verify
+  (`validate_full_finetune_success_evidence`, reusing the pretraining `_reload_verify_full_model`):
+  **supervisor-admitted full-model success evidence** - optimizer created, one finite loss per step
+  (**2.28 -> 0.17**), **all 290/290 trainable tensors observed a materialized gradient** (the honesty
+  invariant: a real optimizer stepped the complete inventory), **265/290 changed** (the remaining 25 are
+  sub-bf16-precision fine-tune updates that do not register a byte change - honest evidence, not a defect),
+  and `model.safetensors` reload-verified to reproduce the trained export state.
+- **Worker:** `run_full_finetune` reuses the pretraining worker's full-model machinery verbatim (gradient
+  hooks, execution tracker, single-file save, success-evidence build); it differs only by `from_pretrained`
+  (a real base) + an SFT text dataset. Whole-sequence loss (matches the current first-party SFT trainer).
+- **Honesty scope.** PRODUCT workload_verified, not a sealed IEEE cell. It ran the first-party runner + the
+  full supervisor admission gate, invoked directly (the authorized new-variant evidence-gathering); the
+  production dispatch gate (`required_runner_lane`) refuses full_finetune until it is workload_verified,
+  exactly as here. Quality follow-ups: an fp32 master-weight / mixed-precision full-finetune precision (so
+  all tensors register a change), and the managed `platform-run --subprocess` route (a worker wheel + env),
+  exactly as for pretraining/DPO (in-process routes now).
+
 ## Verification boundary — what `HARDWARE_VERIFIED` does and does NOT prove
 
 `HARDWARE_VERIFIED` is the **Environment Manager** evidence level, not a training-run result.

@@ -110,7 +110,15 @@ def reference_execution_variants() -> tuple[BackendExecutionVariant, ...]:
         BackendExecutionVariant(
             backend_id="corpus_studio",
             variant_kind=ExecutionVariantKind.dense_full_finetune,
-            support=ExecutionVariantSupport.contract_validated,
+            # workload_verified: full-parameter SFT of Qwen2.5-0.5B-Instruct (bf16, all params trainable, seq
+            # 512, 12 steps) on the RTX 5070, through the first-party FullFinetuneRunner + the supervisor's
+            # independent full-model reload-verify - supervisor-admitted full-model success evidence
+            # (optimizer + 12 loss/steps 2.28 -> 0.17 + 290/290 trainable tensors observed a materialized
+            # gradient + 265/290 changed [the rest are sub-bf16-precision fine-tune updates] +
+            # model.safetensors reproduced from bytes; peak 5.01 GiB). A PRODUCT claim, not a sealed IEEE
+            # cell. The managed platform-run --subprocess route (a worker wheel + env) is the deployment
+            # follow-up, as for pretraining/DPO. See docs/HOST_STATE.md.
+            support=ExecutionVariantSupport.workload_verified,
         ),
         BackendExecutionVariant(
             backend_id="corpus_studio",
