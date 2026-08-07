@@ -953,7 +953,7 @@ def _build_catalog() -> tuple[TrainingObjective, ...]:
             adaptations=["qlora"],
             update=_adapter_update(),
             capability="adapter_qlora",
-            quantizations=["int4", "nf4"],
+            quantizations=["int4", "int8", "nf4"],
         ),
         _causal_sft(
             objective_id="other_peft",

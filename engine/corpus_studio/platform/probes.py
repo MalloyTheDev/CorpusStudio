@@ -497,6 +497,245 @@ def _probe_cpu_lora_execution(
         return ProbeOutcome(_TX.FAIL, f"CPU LoRA execution tuple failed: {exc}")
 
 
+def _cuda_lora_probe_config() -> Any:  # pragma: no cover - optional training-stack integration
+    """A slightly larger tiny Llama for the CUDA precision-ladder execution probes: big enough that
+    bitsandbytes int8 (LLM.int8()) engages its real quantized kernel rather than a tiny-dim fallback,
+    while staying trivially fast. Only the execution TUPLE the probe demonstrates matters, not the size."""
+    from transformers import LlamaConfig  # noqa: PLC0415
+
+    return LlamaConfig(
+        vocab_size=128,
+        hidden_size=64,
+        intermediate_size=128,
+        num_hidden_layers=1,
+        num_attention_heads=4,
+        num_key_value_heads=4,
+        max_position_embeddings=32,
+        pad_token_id=0,
+        bos_token_id=1,
+        eos_token_id=2,
+    )
+
+
+def _probe_cuda_bf16_lora_math_execution(
+    profile: EnvironmentProfile,
+) -> ProbeOutcome:  # pragma: no cover - requires a real CUDA worker environment
+    """Prove the complete 16-bit tuple: an UNQUANTIZED bf16 base + a LoRA adapter (no bitsandbytes),
+    forward/backward under math SDPA, an AdamW update, and an adapter save/reload. This is the '16-bit
+    run' - quantization 'none' on a base kept in a trainable dtype - the precision selector needs
+    demonstrated before the planner will seal a ``--quantization none`` plan."""
+
+    del profile  # host refusal is decided by the managed environment recipe/OS, not this body
+    try:
+        import tempfile  # noqa: PLC0415
+        from pathlib import Path  # noqa: PLC0415
+
+        import torch  # noqa: PLC0415
+        from peft import LoraConfig, PeftModel, get_peft_model  # noqa: PLC0415
+        from torch.nn.attention import SDPBackend, sdpa_kernel  # noqa: PLC0415
+        from transformers import LlamaForCausalLM  # noqa: PLC0415
+    except Exception as exc:  # noqa: BLE001
+        return ProbeOutcome(_TX.ENVIRONMENT_FAILURE, f"CUDA bf16 LoRA probe unavailable: {exc}")
+    if not torch.cuda.is_available():
+        return ProbeOutcome(_TX.UNSUPPORTED_CONFIGURATION, "no CUDA GPU for the bf16 LoRA tuple probe")
+    try:
+        torch.manual_seed(0)
+        config = _cuda_lora_probe_config()
+        config._attn_implementation = "sdpa"
+        model = LlamaForCausalLM(config).to(device="cuda", dtype=torch.bfloat16)
+        model = get_peft_model(
+            model,
+            LoraConfig(
+                r=2, lora_alpha=4, lora_dropout=0.0, bias="none",
+                task_type="CAUSAL_LM", target_modules="all-linear",
+            ),
+        )
+        trainable = [p for p in model.parameters() if p.requires_grad]
+        # PEFT keeps LoRA master weights in FP32 even on a bf16 base - the trainable-dtype policy the
+        # first-party trainer also enforces; a deviation means the 16-bit path is not honestly realized.
+        if not trainable or any(p.dtype != torch.float32 for p in trainable):
+            return ProbeOutcome(
+                _TX.UNSUPPORTED_CONFIGURATION, "bf16-base LoRA did not keep FP32 master weights"
+            )
+        optimizer = torch.optim.AdamW(trainable, lr=1e-3)
+        before = trainable[0].detach().clone()
+        input_ids = torch.randint(3, 128, (2, 8), dtype=torch.long, device="cuda")
+        with sdpa_kernel(SDPBackend.MATH), torch.autocast("cuda", dtype=torch.bfloat16):
+            output = model(input_ids=input_ids, labels=input_ids)
+        output.loss.backward()
+        if not any(p.grad is not None for p in trainable):
+            return ProbeOutcome(_TX.NUMERICAL_FAILURE, "bf16-base LoRA produced no gradients")
+        optimizer.step()
+        if not bool(torch.isfinite(output.loss).item()) or torch.equal(before, trainable[0]):
+            return ProbeOutcome(
+                _TX.NUMERICAL_FAILURE, "bf16-base LoRA math-SDPA step was non-finite or made no update"
+            )
+        with tempfile.TemporaryDirectory() as tmp:
+            model.save_pretrained(tmp, safe_serialization=True)
+            if not (Path(tmp) / "adapter_model.safetensors").is_file():
+                return ProbeOutcome(_TX.CHECKPOINT_FAILURE, "bf16-base adapter safetensors not written")
+            fresh_config = _cuda_lora_probe_config()
+            fresh_config._attn_implementation = "sdpa"
+            fresh = LlamaForCausalLM(fresh_config).to(device="cuda", dtype=torch.bfloat16)
+            reloaded = PeftModel.from_pretrained(fresh, tmp)
+            with torch.no_grad(), sdpa_kernel(SDPBackend.MATH), torch.autocast(
+                "cuda", dtype=torch.bfloat16
+            ):
+                reload_loss = reloaded(input_ids=input_ids, labels=input_ids).loss
+        if not bool(torch.isfinite(reload_loss).item()):
+            return ProbeOutcome(_TX.CHECKPOINT_FAILURE, "reloaded bf16-base LoRA adapter was non-finite")
+        combination = _combination(
+            runtime_mode="training",
+            device="cuda",
+            precision="bf16",
+            quantization="none",
+            adapter_method="lora",
+            attention_impl="math",
+            attention_kernel="torch_sdpa_math",
+            probe="cuda_bf16_lora_math_execution",
+        )
+        return ProbeOutcome(
+            _TX.PASS,
+            "BF16 unquantized LoRA math-SDPA backward, AdamW update, and adapter reload passed on CUDA",
+            measured={"loss": float(output.loss.detach().item())},
+            proves={
+                "precision": ["bf16"],
+                "quantization": ["none"],
+                "attention": ["math", "sdpa"],
+                "attention_kernel": ["torch_sdpa_math"],
+                "adapter": ["lora"],
+                "loss": ["cross_entropy"],
+                "optimizer": ["adamw_torch"],
+                "checkpoint": ["adapter_only"],
+            },
+            execution_combinations=[combination],
+        )
+    except Exception as exc:  # noqa: BLE001
+        return ProbeOutcome(_TX.FAIL, f"CUDA bf16 LoRA execution tuple failed: {exc}")
+
+
+def _probe_cuda_int8_qlora_math_execution(
+    profile: EnvironmentProfile,
+) -> ProbeOutcome:  # pragma: no cover - requires a real CUDA worker environment
+    """Prove the complete 8-bit tuple: an int8 (bitsandbytes LLM.int8()) frozen base + a QLoRA adapter,
+    forward/backward under math SDPA, an AdamW update, and an adapter save/reload. This is the '8-bit
+    run' the precision selector needs demonstrated before the planner will seal a ``--quantization int8``
+    plan - int8 is DECLARED by the backend but must be PROVEN on this host first."""
+
+    del profile
+    try:
+        import tempfile  # noqa: PLC0415
+        from pathlib import Path  # noqa: PLC0415
+
+        import torch  # noqa: PLC0415
+        from bitsandbytes.nn import Linear8bitLt  # noqa: PLC0415
+        from peft import (  # noqa: PLC0415
+            LoraConfig,
+            PeftModel,
+            get_peft_model,
+            prepare_model_for_kbit_training,
+        )
+        from torch.nn.attention import SDPBackend, sdpa_kernel  # noqa: PLC0415
+        from transformers import AutoModelForCausalLM, BitsAndBytesConfig, LlamaForCausalLM  # noqa: PLC0415
+    except Exception as exc:  # noqa: BLE001
+        return ProbeOutcome(_TX.ENVIRONMENT_FAILURE, f"CUDA int8 QLoRA probe unavailable: {exc}")
+    if not torch.cuda.is_available():
+        return ProbeOutcome(_TX.UNSUPPORTED_CONFIGURATION, "no CUDA GPU for the int8 QLoRA tuple probe")
+    try:
+        torch.manual_seed(0)
+        with tempfile.TemporaryDirectory() as root:
+            base_dir = Path(root) / "base"
+            base_config = _cuda_lora_probe_config()
+            base_config._attn_implementation = "sdpa"
+            LlamaForCausalLM(base_config).save_pretrained(base_dir, safe_serialization=True)
+            # int8 (LLM.int8()) cannot be built from-config in place - load the saved base frozen in 8-bit.
+            base = AutoModelForCausalLM.from_pretrained(
+                base_dir,
+                use_safetensors=True,
+                trust_remote_code=False,
+                quantization_config=BitsAndBytesConfig(load_in_8bit=True),
+                attn_implementation="sdpa",
+                device_map={"": "cuda:0"},
+            )
+            if not any(isinstance(module, Linear8bitLt) for module in base.modules()):
+                return ProbeOutcome(
+                    _TX.UNSUPPORTED_CONFIGURATION, "int8 load produced no Linear8bitLt modules"
+                )
+            model = prepare_model_for_kbit_training(base, use_gradient_checkpointing=False)
+            model = get_peft_model(
+                model,
+                LoraConfig(
+                    r=2, lora_alpha=4, lora_dropout=0.0, bias="none",
+                    task_type="CAUSAL_LM", target_modules="all-linear",
+                ),
+            )
+            trainable = [p for p in model.parameters() if p.requires_grad]
+            if not trainable or any(p.dtype != torch.float32 for p in trainable):
+                return ProbeOutcome(
+                    _TX.UNSUPPORTED_CONFIGURATION, "int8-base QLoRA did not keep FP32 master weights"
+                )
+            optimizer = torch.optim.AdamW(trainable, lr=1e-3)
+            before = trainable[0].detach().clone()
+            input_ids = torch.randint(3, 128, (2, 8), dtype=torch.long, device="cuda")
+            with sdpa_kernel(SDPBackend.MATH), torch.autocast("cuda", dtype=torch.bfloat16):
+                output = model(input_ids=input_ids, labels=input_ids)
+            output.loss.backward()
+            if not any(p.grad is not None for p in trainable):
+                return ProbeOutcome(_TX.NUMERICAL_FAILURE, "int8-base QLoRA produced no gradients")
+            optimizer.step()
+            if not bool(torch.isfinite(output.loss).item()) or torch.equal(before, trainable[0]):
+                return ProbeOutcome(
+                    _TX.NUMERICAL_FAILURE, "int8-base QLoRA math-SDPA step was non-finite or made no update"
+                )
+            adapter_dir = Path(root) / "adapter"
+            model.save_pretrained(adapter_dir, safe_serialization=True)
+            if not (adapter_dir / "adapter_model.safetensors").is_file():
+                return ProbeOutcome(_TX.CHECKPOINT_FAILURE, "int8-base adapter safetensors not written")
+            fresh = AutoModelForCausalLM.from_pretrained(
+                base_dir,
+                use_safetensors=True,
+                trust_remote_code=False,
+                quantization_config=BitsAndBytesConfig(load_in_8bit=True),
+                attn_implementation="sdpa",
+                device_map={"": "cuda:0"},
+            )
+            reloaded = PeftModel.from_pretrained(fresh, adapter_dir)
+            with torch.no_grad(), sdpa_kernel(SDPBackend.MATH), torch.autocast(
+                "cuda", dtype=torch.bfloat16
+            ):
+                reload_loss = reloaded(input_ids=input_ids, labels=input_ids).loss
+        if not bool(torch.isfinite(reload_loss).item()):
+            return ProbeOutcome(_TX.CHECKPOINT_FAILURE, "reloaded int8-base QLoRA adapter was non-finite")
+        combination = _combination(
+            runtime_mode="training",
+            device="cuda",
+            precision="bf16",
+            quantization="int8",
+            adapter_method="qlora",
+            attention_impl="math",
+            attention_kernel="torch_sdpa_math",
+            probe="cuda_int8_qlora_math_execution",
+        )
+        return ProbeOutcome(
+            _TX.PASS,
+            "int8 (LLM.int8()) QLoRA math-SDPA backward, AdamW update, and adapter reload passed on CUDA",
+            measured={"loss": float(output.loss.detach().item())},
+            proves={
+                "precision": ["bf16"],
+                "quantization": ["int8"],
+                "attention": ["math", "sdpa"],
+                "attention_kernel": ["torch_sdpa_math"],
+                "adapter": ["qlora"],
+                "loss": ["cross_entropy"],
+                "optimizer": ["adamw_torch"],
+                "checkpoint": ["adapter_only"],
+            },
+            execution_combinations=[combination],
+        )
+    except Exception as exc:  # noqa: BLE001
+        return ProbeOutcome(_TX.FAIL, f"CUDA int8 QLoRA execution tuple failed: {exc}")
+
+
 def _probe_cuda_qlora_math_execution(
     profile: EnvironmentProfile,
 ) -> ProbeOutcome:  # pragma: no cover - requires a real CUDA worker environment
@@ -1347,6 +1586,8 @@ BUILTIN_PROBES: dict[str, ProbeFn] = {
     "trainer_contract": _probe_trainer_contract,
     "checkpoint_reload": _probe_checkpoint_reload,
     "cpu_lora_execution": _probe_cpu_lora_execution,
+    "cuda_bf16_lora_math_execution": _probe_cuda_bf16_lora_math_execution,
+    "cuda_int8_qlora_math_execution": _probe_cuda_int8_qlora_math_execution,
     "cuda_qlora_math_execution": _probe_cuda_qlora_math_execution,
     "cuda_qlora_sdpa_flash_execution": _probe_cuda_qlora_sdpa_flash_execution,
     "cuda_qlora_liger_execution": _probe_cuda_qlora_liger_execution,

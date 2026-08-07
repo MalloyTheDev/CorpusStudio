@@ -1554,7 +1554,10 @@ def build_run_plan(
             ),
         )
 
-    adapter_method = constraints.adapter_method or ("qlora" if quantization == "nf4" else "lora")
+    # qlora = a LoRA adapter over a QUANTIZED frozen base, for ANY quant type (nf4/fp4/int8) - not just
+    # nf4. An unquantized base ('none') gets a plain lora adapter. (nf4 is unchanged; this only sharpens
+    # the newly-selectable int8/fp4 so their adapter reads 'qlora', matching the int8 execution probe.)
+    adapter_method = constraints.adapter_method or ("lora" if quantization == "none" else "qlora")
     _require_enum(adapter_method, AdapterMethod, "adapter_method")
     # full_finetune is admitted at PLANNING even though the backend cannot yet prove it (the full-parameter
     # worker + wheel are the gated milestone); it is refused at EXECUTION by required_runner_lane. Every

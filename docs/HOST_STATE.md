@@ -597,6 +597,36 @@ acid test - the demonstration the training vertical was built for - run end to e
   closed in the full-finetune worker, and DPO falls back to the raw prompt when the base tokenizer has no
   chat template (a from-scratch pretrain output has none) instead of crashing the run.
 
+### Native 8-bit + 16-bit precision ladder runs end to end, 2026-08-07
+
+The first-party adapter trainer's precision ladder (widened from nf4-only in the #825 worker slice) is now
+**selectable and RUNNABLE** for **8-bit (int8/QLoRA)** and **16-bit (bf16/LoRA on an unquantized base)** on
+this host - not just nf4. Two new bounded GPU capability probes demonstrate the complete execution tuples
+the planner's exact-tuple gate requires, so `platform-plan --quantization {int8,none}` seals a runnable plan
+instead of failing closed:
+
+- **Probes (RTX 5070, PASS):** `cuda_bf16_lora_math_execution` proves `bf16/none/lora/math/torch_sdpa_math`
+  (16-bit); `cuda_int8_qlora_math_execution` proves `bf16/int8/qlora/math/torch_sdpa_math` (8-bit,
+  bitsandbytes LLM.int8()). Each runs a real forward/backward + AdamW step + adapter save/reload and emits
+  its exact tuple + proven quantization axis. They run FRESH at plan time (the unmanaged `platform-plan`
+  path calls `run_capability_probes`), so the editable install picks them up with no env recreate.
+- **End to end (in-process, both succeeded, NATIVE_SAFE):** `platform-plan --quantization none` ->
+  `platform-run` trained a 16-bit LoRA adapter; `platform-plan --quantization int8` -> `platform-run`
+  trained an 8-bit QLoRA adapter. Both sealed the resolved tuple, passed the objective + execution-config
+  admission, and reload-verified.
+- **Two integration fixes running it surfaced.** (1) The planner labelled a quantized-base + LoRA plan
+  `lora` for any non-nf4 quant; it now reads `qlora` for ANY quantized base (nf4 unchanged), matching the
+  int8 probe's tuple. (2) The `qlora` training objective declared only `int4/nf4`, so int8 sealed at
+  planning but was refused at execution ("sealed quantization does not match the objective"); it now admits
+  `int4/int8/nf4`. That changes the qlora objective hash, but no committed seal/golden breaks and sealed
+  IEEE cells reproduce against their PINNED wheel (objective frozen at seal time), so nf4 cells are
+  unaffected (they still seal nf4 - the `Literal["nf4"]` contract is unchanged).
+- **Honesty scope.** PRODUCT, not a sealed IEEE cell. Validated on the **in-process** platform-run path;
+  routing these modes through the **managed `--subprocess`** path additionally needs the two probe names
+  added to the training recipe's `capability_probes` + a managed re-probe (a documented follow-up, the same
+  managed-shipping-path step the other verticals carry). fp4 + int4 remain declared-but-unprobed (fail
+  closed until a probe proves them).
+
 ## Verification boundary — what `HARDWARE_VERIFIED` does and does NOT prove
 
 `HARDWARE_VERIFIED` is the **Environment Manager** evidence level, not a training-run result.

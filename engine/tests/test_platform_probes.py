@@ -392,3 +392,19 @@ def test_builtin_probes_degrade_cleanly_without_torch():
     for name in torch_probes:
         assert outcomes[name] == FailureTaxonomy.ENVIRONMENT_FAILURE
     assert "torch" not in sys.modules
+
+
+def test_precision_ladder_probes_are_registered_and_degrade_cleanly():
+    # The int8 + 16-bit(none) execution-tuple probes MUST be in the registry (else the precision selector
+    # can never prove those modes and every int8/none plan fails closed forever), and must degrade
+    # cleanly - ENVIRONMENT_FAILURE, never a crash - in the torch-absent CI venv like the other CUDA probes.
+    from corpus_studio.platform.probes import BUILTIN_PROBES
+
+    ladder = {"cuda_bf16_lora_math_execution", "cuda_int8_qlora_math_execution"}
+    assert ladder <= set(BUILTIN_PROBES), "precision-ladder GPU probes dropped from the registry"
+    profile = P.build_environment_profile()
+    report = run_capability_probes(profile)
+    outcomes = {r.probe: r.outcome for r in report.probe_results}
+    for name in ladder:
+        assert outcomes[name] == FailureTaxonomy.ENVIRONMENT_FAILURE
+    assert "torch" not in sys.modules
