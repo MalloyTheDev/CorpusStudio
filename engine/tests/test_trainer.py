@@ -915,6 +915,8 @@ def test_format_preference_pair_renders_the_pair_and_fails_closed():
         format_preference_pair({"prompt": "p", "chosen": "", "rejected": "r"})
 
     class _Tok:
+        chat_template = "{{ messages }}"  # a non-empty template - templating is applied
+
         def apply_chat_template(self, messages, tokenize=False, add_generation_prompt=False):
             assert messages == [{"role": "user", "content": "hi"}]
             assert not tokenize and add_generation_prompt
@@ -922,6 +924,23 @@ def test_format_preference_pair_renders_the_pair_and_fails_closed():
 
     templated = format_preference_pair({"prompt": "hi", "chosen": "c", "rejected": "r"}, _Tok())
     assert templated["prompt"] == "<user>hi<gen>" and templated["chosen"] == "c"
+
+
+def test_format_preference_pair_without_a_chat_template_uses_the_raw_prompt():
+    """A base model whose tokenizer defines NO chat template (e.g. a from-scratch pretrain output fed
+    through SFT then DPO) must fall back to the raw prompt - the ``apply_chat_template`` method always
+    exists on a fast tokenizer, so the real signal is a non-empty ``chat_template``. Guards the SFT->DPO
+    chain handoff against 'chat_template is not set' crashing the whole preference run."""
+    from corpus_studio.training.trainer import format_preference_pair
+
+    class _NoTemplateTok:
+        chat_template = None  # a from-scratch/base tokenizer has none
+
+        def apply_chat_template(self, *args, **kwargs):  # pragma: no cover - must NOT be reached
+            raise AssertionError("apply_chat_template must not run when chat_template is None")
+
+    out = format_preference_pair({"prompt": "hi", "chosen": "c", "rejected": "r"}, _NoTemplateTok())
+    assert out == {"prompt": "hi", "chosen": "c", "rejected": "r"}  # raw prompt, no crash
 
 
 # ---- arg mapping -------------------------------------------------------------

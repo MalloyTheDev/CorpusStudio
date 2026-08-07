@@ -2255,7 +2255,12 @@ def format_preference_pair(row: dict, tokenizer: Any | None = None) -> dict[str,
         raise TrainerError(
             "a preference row requires non-empty 'prompt', 'chosen', and 'rejected' fields"
         )
-    if tokenizer is not None and hasattr(tokenizer, "apply_chat_template"):
+    # Wrap the prompt with the model's chat template ONLY when the tokenizer actually defines one. The
+    # apply_chat_template METHOD always exists on a fast tokenizer, so the real signal is a non-empty
+    # chat_template. A base model whose tokenizer has none (e.g. a from-scratch pretrain output fed through
+    # SFT) legitimately gets the RAW prompt - the chat template is an instruction/chat-model convenience,
+    # not a DPO requirement - instead of crashing on "chat_template is not set".
+    if tokenizer is not None and getattr(tokenizer, "chat_template", None):
         try:
             prompt = str(
                 tokenizer.apply_chat_template(

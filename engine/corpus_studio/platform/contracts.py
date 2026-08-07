@@ -4424,6 +4424,12 @@ class TokenizerSourceSpec(ContractModel):
                 raise ValueError(
                     "a trained tokenizer must declare its special tokens (e.g. BOS/EOS/PAD/UNK)"
                 )
+            if not ({"<eos>", "</s>"} & set(self.special_tokens)):
+                raise ValueError(
+                    "a trained tokenizer must declare an end-of-sequence token ('<eos>' or '</s>'): the "
+                    "model needs it as a sequence boundary and downstream SFT/DPO stages need it as the pad "
+                    "fallback, so a tokenizer without one produces a base model that cannot be fine-tuned"
+                )
             if len(set(self.special_tokens)) != len(self.special_tokens):
                 raise ValueError("special tokens must be unique")
             if self.tokenizer_content_sha256 is not None or self.tokenizer_location is not None:
