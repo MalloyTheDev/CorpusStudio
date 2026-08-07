@@ -68,7 +68,10 @@ def _report(
     missing=(),
     physical=False,
     backend_id="corpus_studio",
+    extra_combinations=(),
 ):
+    # extra_combinations: (quantization, adapter_method) pairs to ALSO prove as complete bf16/math
+    # training tuples - lets a test prove the int8/none precision-ladder combos the GPU probes demonstrate.
     from corpus_studio.platform.backends import get_backend
 
     backend = get_backend(backend_id)
@@ -158,6 +161,30 @@ def _report(
                 execution_combinations=[exact],
             )
         )
+    extra_combos = [
+        ExecutionCapabilityCombination.model_validate(
+            {
+                "runtime_mode": "training", "device": "cuda", "precision": "bf16",
+                "quantization": quant, "adapter_method": adapter,
+                "attention_impl": "math", "attention_kernel": "torch_sdpa_math",
+                "optimizer": "adamw_torch", "loss_impl": "cross_entropy",
+                "checkpoint_impl": "adapter_only", "export_format": "adapter_peft",
+                "execution_contract_version": "1.0.0", "probe": "synthetic_precision_ladder",
+            }
+        )
+        for quant, adapter in extra_combinations
+    ]
+    if extra_combos:
+        probe_results.append(
+            ProbeResult(
+                probe="synthetic_precision_ladder",
+                outcome="PASS",
+                # Mirror how the real int8/none probes emit proves={"quantization": [...]}, so the report's
+                # effective quantization_modes equals the passing probe evidence (a CapabilityReport invariant).
+                proves={"quantization": sorted({quant for quant, _ in extra_combinations})},
+                execution_combinations=extra_combos,
+            )
+        )
     actual_readiness = (
         "ready"
         if exact is not None and exact.runtime_mode == "training"
@@ -167,15 +194,20 @@ def _report(
     )
     eff = EffectiveCapabilities(
         precision_modes=precision_values,
-        quantization_modes=["nf4"] if bnb else [],
+        quantization_modes=sorted(
+            set((["nf4"] if bnb else []) + [quant for quant, _ in extra_combinations])
+        ),
         attention_impls=attention_values,
         attention_kernels=kernel_values,
         adapter_methods=adapter_values,
         optimizers=optimizer_values,
         loss_impls=loss_values,
         checkpoint_impls=["adapter_only"],
-        execution_contract_versions=["1.0.0"] if exact is not None else [],
-        execution_combinations=[exact] if exact is not None else [],
+        execution_contract_versions=["1.0.0"] if exact is not None or extra_combos else [],
+        execution_combinations=sorted(
+            (([exact] if exact is not None else []) + extra_combos),
+            key=lambda item: item.canonical_key(),
+        ),
         trainer_fields=trainer_backend.trainer_fields,
         trainer_init_fields=trainer_backend.trainer_init_fields,
         placement_tiers=["gpu"] if physical else [],
@@ -955,6 +987,27 @@ def test_full_finetune_rejects_a_quantized_override():
             adapter_method="full_finetune", export_format="merged_safetensors",
             quantization="nf4",
         )
+
+
+def test_none_override_is_honored_when_its_16bit_combo_is_proven():
+    # Once a probe demonstrates the bf16/none/lora tuple (what the cuda_bf16_lora_math_execution GPU probe
+    # proves), --quantization none seals a 16-bit LoRA plan on an unquantized base.
+    plan = _plan(
+        _profile(cc_major=8), _report(extra_combinations=(("none", "lora"),)), quantization="none"
+    )
+    assert plan.quantization.value == "none"
+    assert plan.adapter.method.value == "lora"
+
+
+def test_int8_override_is_honored_and_reads_as_qlora_when_proven():
+    # Once a probe demonstrates the bf16/int8/qlora tuple (what cuda_int8_qlora_math_execution proves),
+    # --quantization int8 seals - and the adapter resolves to qlora (a LoRA over a QUANTIZED base is
+    # qlora for ANY quant type, not only nf4), matching the int8 execution probe's combination.
+    plan = _plan(
+        _profile(cc_major=8), _report(extra_combinations=(("int8", "qlora"),)), quantization="int8"
+    )
+    assert plan.quantization.value == "int8"
+    assert plan.adapter.method.value == "qlora"
 
 
 def test_explicit_unproven_attention_override_is_refused():

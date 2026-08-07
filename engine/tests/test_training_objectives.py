@@ -394,6 +394,7 @@ def test_qlora_static_backend_is_only_declared_compatible():
     assert report.overall_status == ObjectiveCompatibilityStatus.declared_compatible
     assert [item.value for item in objective.backend_requirement.quantization_modes] == [
         "int4",
+        "int8",
         "nf4",
     ]
     no_four_bit = check_objective_compatibility(
