@@ -51,3 +51,16 @@ resume, robust lineage). Re-proven on wheel **`80515175...`** (source `d15b8e8`)
 So the **worker-identity gate is active on resume** (the resuming wheel `80515175` matched the
 checkpoint's bound wheel, so the resume proceeded - a mismatch fails closed), the worker ran the sealed
 wheel under `-P` + a PYTHONPATH-stripped env, and the lineage was recorded from the verified checkpoint.
+
+## Second re-proof - backward-compat (env-var delivery) + fail-closed on absent identity
+
+A further review round moved the worker wheel sha from a new argv option (which a pre-hardening pinned
+worker's arg parser would reject, breaking managed runs on older sealed envs) to an **env var** an older
+worker ignores, and made a managed resume **fail closed** when either worker identity is absent. Re-proven
+on wheel **`69d94b61...`** (source `1e399a3`) sealed into env **`backend-corpus-studio-sealed-flp-v8`**:
+
+- write `run-019fde9f-4329-7d9e-b9a5-54f59248146d` bound `worker_wheel_sha256 = 69d94b61...` - i.e. F1 is
+  delivered by env var and still recorded in the checkpoint;
+- resume (`--resume-from step-2`) **succeeded** (`resumed_from=2`, steps `[3,4]`, lineage recorded) - the
+  managed-checkpoint fail-closed guard did NOT break a valid resume (both worker identities present +
+  matched).
