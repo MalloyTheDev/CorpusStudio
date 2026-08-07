@@ -129,6 +129,7 @@ def run_worker(
     backend_id: str,
     environment_ref: Ref,
     corpus_root: str = ".",
+    worker_wheel_sha256: str | None = None,
     out: Any = None,
 ) -> int:
     """Execute one dispatched run and stream it back. ``dispatch_line`` is the raw ``run_dispatch``
@@ -241,6 +242,7 @@ def run_worker(
             "event", event, correlation_id=correlation_id, out=stream
         ),
         resume=resume,
+        worker_wheel_sha256=worker_wheel_sha256,
     )
     manifest = result.manifest
     outcome = (
@@ -292,6 +294,9 @@ def _build_arg_parser() -> Any:
     # Anchors a pretraining plan's relative shard locations against a corpus directory (the process CWD
     # by default). Absolute shard paths ignore it; the other lanes ignore it entirely.
     parser.add_argument("--corpus-root", default=".")
+    # The executing worker's sealed wheel sha256 (from the managed environment lock, passed by the
+    # control plane). Bound into any intermediate checkpoint so a resume verifies the worker BYTES.
+    parser.add_argument("--worker-wheel-sha256", default=None)
     return parser
 
 
@@ -346,6 +351,7 @@ def main(out: TextIO | None = None) -> None:
             backend_id=args.backend_id,
             environment_ref=environment_ref,
             corpus_root=args.corpus_root,
+            worker_wheel_sha256=args.worker_wheel_sha256,
             out=out,
         )
     )

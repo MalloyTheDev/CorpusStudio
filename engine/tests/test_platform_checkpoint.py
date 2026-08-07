@@ -79,6 +79,15 @@ def test_checkpoint_import_is_torch_free() -> None:
         assert heavy not in sys.modules, f"checkpoint pulled {heavy}"
 
 
+def test_bound_identities_bind_the_worker_wheel_when_provided() -> None:
+    """The managed/sealed tier binds the executing worker wheel sha256 so a checkpoint records the
+    exact worker BYTES (verified on restore); an unmanaged source leaves it null."""
+    plan = demo_training_plan(plan_id="demo-ckpt")
+    bound = ck.bound_identities_from_plan(plan, worker_wheel_sha256="a" * 64)
+    assert bound.worker_wheel_sha256 == "a" * 64
+    assert ck.bound_identities_from_plan(plan).worker_wheel_sha256 is None
+
+
 # --------------------------------------------------------------------------------------------------
 # Contract validators
 # --------------------------------------------------------------------------------------------------

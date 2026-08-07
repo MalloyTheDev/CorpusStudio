@@ -68,11 +68,16 @@ def verify_checkpoint_manifest_hash(manifest: CheckpointManifest) -> bool:
 # --------------------------------------------------------------------------------------------------
 # Deriving the bound identities from a RunPlan (one derivation, used by seal + resumable-into)
 # --------------------------------------------------------------------------------------------------
-def bound_identities_from_plan(plan: RunPlan) -> CheckpointBoundIdentities:
-    """The plan-derivable identity subset a checkpoint must bind. Worker-only fields (worker wheel,
-    formatter/chat-template bytes) are left null here and populated by the worker at seal time; the
-    admission below compares only what the plan can derive, and the worker re-verifies the rest when
-    it restores the bytes."""
+def bound_identities_from_plan(
+    plan: RunPlan, *, worker_wheel_sha256: str | None = None
+) -> CheckpointBoundIdentities:
+    """The plan-derivable identity subset a checkpoint must bind. Worker-only fields (formatter/
+    chat-template bytes) are left null here and populated by the worker at seal time; the admission
+    below compares only what the plan can derive, and the worker re-verifies the rest when it restores
+    the bytes. ``worker_wheel_sha256`` is the executing worker's sealed wheel content hash (from the
+    managed environment lock, threaded in by the worker) - set for the managed/sealed tier so a
+    checkpoint records the exact worker BYTES it was produced by and a resume verifies them; null for an
+    unmanaged (profile-snapshot) run, which has no pinned wheel."""
 
     execution = plan.resolved_execution
     if execution is None:
@@ -89,7 +94,7 @@ def bound_identities_from_plan(plan: RunPlan) -> CheckpointBoundIdentities:
         execution_configuration_hash=execution.configuration_hash,
         backend_ref=execution.backend_ref,
         environment_lock_hash=environment_lock_hash,
-        worker_wheel_sha256=None,
+        worker_wheel_sha256=worker_wheel_sha256,
         model_ref=execution.inputs.model.ref,
         tokenizer_ref=execution.inputs.tokenizer.ref,
         dataset_ref=execution.inputs.dataset.ref,

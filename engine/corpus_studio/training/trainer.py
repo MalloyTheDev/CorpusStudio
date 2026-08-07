@@ -3785,6 +3785,14 @@ def run_training(  # pragma: no cover - optional training-stack integration
     # no token evidence (null downstream) - it can never fail or alter training.
     token_accumulator = _TokenAccumulator() if token_callback is not None else None
 
+    # For a RESUMED run the honesty-core adapter-change gate must measure the delta over the RESUMED
+    # interval, NOT the checkpoint restore. HF restores the parent state at the start of train(), so a
+    # baseline captured before train() would let the restore alone satisfy before != after (a resumed
+    # interval that performed no real update could pass). We capture the trainable/export baseline in
+    # on_train_begin - which fires AFTER the restore, before the first resumed update - and use it in
+    # place of the pre-train baseline at finalize below.
+    post_restore_baseline: dict[str, Any] = {}
+
     class _ProgressCallback(TrainerCallback):  # type: ignore[misc]
         def on_train_begin(self, args: Any, state: Any, control: Any, **kwargs: Any) -> None:
             optimizer = kwargs.get("optimizer")
@@ -3792,6 +3800,17 @@ def run_training(  # pragma: no cover - optional training-stack integration
                 execution_tracker.on_train_begin(optimizer)
             elif optimizer is not None:
                 _stage("optimizer_created", "observed the optimizer at on_train_begin")
+            if resume is not None and execution_tracker is not None and not post_restore_baseline:
+                restored_model = kwargs.get("model")
+                if restored_model is not None:
+                    post_restore_baseline["trainable"] = capture_trainable_state(
+                        restored_model, torch, stage=StageMarker.adapter_attached
+                    )
+                    post_restore_baseline["export"] = capture_adapter_export_state(
+                        get_peft_model_state_dict(restored_model),
+                        torch,
+                        stage=StageMarker.adapter_attached,
+                    )
 
         def on_step_begin(self, args: Any, state: Any, control: Any, **kwargs: Any) -> None:
             # Mark the forward/backward COMPUTE region of this optimizer step. Without it the live stage
@@ -4054,10 +4073,26 @@ def run_training(  # pragma: no cover - optional training-stack integration
                 torch,
                 stage=StageMarker.optimizer_step,
             )
+            # A resumed run measures the adapter-change gate over the RESUMED interval: use the
+            # post-restore baseline captured in on_train_begin, never the pre-train (pre-restore) one,
+            # so the checkpoint restore cannot by itself satisfy the change gate. Fail closed if the
+            # baseline is missing rather than silently falling back to the pre-restore state.
+            resumed_before_trainable = before_trainable_state
+            resumed_before_export = before_export_state
+            if resume is not None:
+                if "trainable" not in post_restore_baseline or "export" not in post_restore_baseline:
+                    raise TrainingEvidenceError(
+                        "a resumed run did not capture a post-restore adapter baseline; the "
+                        "canonical-adapter-change gate must measure the resumed interval, not the restore",
+                        taxonomy=FailureTaxonomy.UPDATE_FAILURE,
+                        stage=StageMarker.adapter_attached,
+                    )
+                resumed_before_trainable = post_restore_baseline["trainable"]
+                resumed_before_export = post_restore_baseline["export"]
             execution_evidence = execution_tracker.finalize(
                 steps=steps,
-                before=before_trainable_state,
-                before_export=before_export_state,
+                before=resumed_before_trainable,
+                before_export=resumed_before_export,
                 after_export=after_export_state,
                 adapter_config_semantic_sha256=expected_saved_adapter_config_sha256(
                     trained_model,

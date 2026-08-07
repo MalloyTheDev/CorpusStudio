@@ -112,6 +112,10 @@ def _default_worker_argv(
 ) -> list[str]:
     argv = [
         sys.executable,
+        # -P (PYTHONSAFEPATH): keep the launch CWD off sys.path so the worker imports corpus_studio from
+        # its installed location (sealed wheel / editable install), never a shadowing repo checkout in
+        # the current directory. See the managed argv builder in cli.py for the same rationale.
+        "-P",
         "-m",
         "corpus_studio.platform.worker",
         "--runner",

@@ -368,7 +368,9 @@ class TrainingRunner:
             )
 
             checkpoint_kwargs = {
-                "checkpoint_bound": bound_identities_from_plan(ctx.plan),
+                "checkpoint_bound": bound_identities_from_plan(
+                    ctx.plan, worker_wheel_sha256=ctx.worker_wheel_sha256
+                ),
                 "source_run_id": ctx.run_id,
                 "checkpoints_root": str(
                     run_scoped_training_output(execution, ctx.run_id, leaf="checkpoints")

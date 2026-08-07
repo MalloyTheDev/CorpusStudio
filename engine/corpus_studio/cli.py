@@ -676,6 +676,11 @@ def platform_run(
                 )
             managed_worker_argv = [
                 descriptor.python_executable,
+                # -P (PYTHONSAFEPATH): never prepend the launch CWD to sys.path, so the worker imports
+                # corpus_studio from the SEALED environment's site-packages (the pinned wheel), never a
+                # repository checkout that happens to be the current directory. Without this, a managed
+                # run launched from a repo CWD silently shadows the sealed wheel with local source.
+                "-P",
                 "-m",
                 "corpus_studio.platform.worker",
                 "--runner",
@@ -684,6 +689,17 @@ def platform_run(
             from corpus_studio.platform.subprocess_supervisor import worker_identity_argv
 
             managed_worker_argv += worker_identity_argv(plan)
+            # Bind the executing worker wheel sha256 (from the sealed environment lock) so an
+            # intermediate checkpoint records the exact worker BYTES it was produced by and a resume
+            # verifies them - exact lineage down to the wheel, not only the plan + environment lock.
+            worker_wheel_sha256 = (
+                lock.worker_artifact.content_hash.value
+                if lock.worker_artifact is not None
+                and lock.worker_artifact.content_hash is not None
+                else None
+            )
+            if worker_wheel_sha256 is not None:
+                managed_worker_argv += ["--worker-wheel-sha256", worker_wheel_sha256]
             # A non-default corpus root anchors a managed pretraining plan's relative shard locations
             # inside the isolated interpreter; the default is left off so ordinary argv is unchanged.
             if corpus_root != ".":
