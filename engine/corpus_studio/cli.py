@@ -1046,6 +1046,14 @@ def platform_plan(
         help="Artifact export format: 'adapter_peft' (default, the LoRA/QLoRA adapter) or "
         "'merged_safetensors' (a full model - required for --adapter-method full_finetune).",
     ),
+    quantization: Optional[str] = typer.Option(
+        None,
+        "--quantization",
+        help="Precision/quantization of the frozen base: 'nf4'/'fp4' (4-bit) or 'int8' (8-bit) for a "
+        "quantized base, or 'none' (16-/32-bit on an unquantized base). Default: auto (nf4 when a GPU "
+        "with bitsandbytes proves it, else none). A quantized mode must be proven on this host or the "
+        "plan fails closed.",
+    ),
     gradient_accumulation_steps: int = typer.Option(
         8,
         "--gradient-accumulation-steps",
@@ -1332,6 +1340,7 @@ def platform_plan(
         lora_r=lora_r,
         lora_alpha=lora_alpha,
         adapter_method=adapter_method,
+        quantization=quantization,
         export_format=export_format or "adapter_peft",
         gradient_accumulation_steps=gradient_accumulation_steps,
         truncation_allowed=allow_truncation,

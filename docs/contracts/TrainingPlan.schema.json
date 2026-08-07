@@ -607,6 +607,18 @@
           "default": null,
           "title": "Preference Max Prompt Length"
         },
+        "quantization": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Quantization"
+        },
         "seed": {
           "default": 42,
           "title": "Seed",

@@ -21,7 +21,7 @@ from corpus_studio.platform.trace_records import (
     imported_trace_producer,
 )
 from corpus_studio.training.traces import Trace
-from corpus_studio.training.environment import TrainingRuntimeReport
+from corpus_studio.training.environment import GpuInfo, TrainingRuntimeReport
 from corpus_studio.platform.enums import StageMarker
 from corpus_studio.training.quantization import find_linear4bit_modules
 from corpus_studio.training.trainer import (
@@ -1211,6 +1211,42 @@ def test_model_load_kwargs_pin_quantization_dtype_revision_and_device_map():
     assert kwargs["quantization_config"].kwargs["bnb_4bit_compute_dtype"] is torch.float16
 
 
+def test_model_load_kwargs_support_4bit_8bit_and_reject_unimplemented_quantization():
+    class FakeBitsAndBytesConfig:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+    torch = _FakeTorch()
+    # 8-bit selects bitsandbytes LLM.int8() (load_in_8bit) - no 4-bit-only params.
+    int8 = build_model_load_kwargs(
+        _sealed_config(quantization_mode="int8"), torch, quantize=True,
+        bitsandbytes_config_cls=FakeBitsAndBytesConfig)
+    assert int8["quantization_config"].kwargs == {"load_in_8bit": True}
+    # 4-bit fp4 is also accepted (load_in_4bit + the fp4 quant type).
+    fp4 = build_model_load_kwargs(
+        _sealed_config(dequantization_dtype="bf16", quantization_mode="fp4"), torch, quantize=True,
+        bitsandbytes_config_cls=FakeBitsAndBytesConfig)
+    assert fp4["quantization_config"].kwargs["load_in_4bit"] is True
+    assert fp4["quantization_config"].kwargs["bnb_4bit_quant_type"] == "fp4"
+    # an unimplemented quantized weight format fails closed (never a silent wrong load).
+    with pytest.raises(TrainerError, match="4-bit .*8-bit"):
+        build_model_load_kwargs(
+            _sealed_config(quantization_mode="gptq"), torch, quantize=True,
+            bitsandbytes_config_cls=FakeBitsAndBytesConfig)
+
+
+def test_model_load_kwargs_unquantized_selects_the_weight_storage_dtype():
+    torch = _FakeTorch()
+    # 16-bit: an unquantized base loads in bf16; 32-bit loads in fp32 (selectable - VRAM is the only
+    # limiter, not the harness).
+    bf16 = build_model_load_kwargs(
+        _sealed_config(quantization_mode="none", weight_storage_dtype="bf16"), torch, quantize=False)
+    assert bf16["torch_dtype"] is torch.bfloat16
+    fp32 = build_model_load_kwargs(
+        _sealed_config(quantization_mode="none", weight_storage_dtype="fp32"), torch, quantize=False)
+    assert fp32["torch_dtype"] is torch.float32
+
+
 def test_model_load_kwargs_refuse_implicit_auto_placement():
     cfg = _sealed_config(device_map={"": "auto"})
     with pytest.raises(TrainerError, match="explicit non-auto device map"):
@@ -1874,8 +1910,10 @@ def test_cpu_toy_kwargs_force_cpu(tmp_path):
 # ---- run-plan resolution -----------------------------------------------------
 
 
-def _report(ready: bool, cpu_toy_ready: bool) -> TrainingRuntimeReport:
-    return TrainingRuntimeReport(ready=ready, cpu_toy_ready=cpu_toy_ready)
+def _report(ready: bool, cpu_toy_ready: bool, gpu_available: bool = False) -> TrainingRuntimeReport:
+    return TrainingRuntimeReport(
+        ready=ready, cpu_toy_ready=cpu_toy_ready, gpu=GpuInfo(available=gpu_available)
+    )
 
 
 def test_cpu_toy_plan_requires_cpu_toy_ready():
@@ -1892,6 +1930,21 @@ def test_real_plan_requires_full_ready():
     assert plan == {"device": "cuda", "quantize": True}
     with pytest.raises(TrainerError):
         resolve_run_plan(cfg, _report(ready=False, cpu_toy_ready=True))
+
+
+def test_unquantized_plan_needs_a_gpu_but_not_bitsandbytes():
+    # 16-/32-bit LoRA (quantization_mode="none") trains on an unquantized base: quantization is
+    # precision-driven, so it needs a GPU + the core deps but NOT bitsandbytes. report.ready is False
+    # here (bnb absent) yet the plan still resolves - the quantized 'ready' set must not gate it.
+    cfg = _cfg(cpu_toy=False, quantization_mode="none", weight_storage_dtype="bf16")
+    plan = resolve_run_plan(cfg, _report(ready=False, cpu_toy_ready=True, gpu_available=True))
+    assert plan == {"device": "cuda", "quantize": False}
+    # No GPU -> refuse (fail closed).
+    with pytest.raises(TrainerError):
+        resolve_run_plan(cfg, _report(ready=False, cpu_toy_ready=True, gpu_available=False))
+    # Missing the core [train] deps -> refuse even with a GPU.
+    with pytest.raises(TrainerError):
+        resolve_run_plan(cfg, _report(ready=False, cpu_toy_ready=False, gpu_available=True))
 
 
 def test_resolved_execution_maps_without_reintroducing_trainer_defaults():

@@ -921,6 +921,42 @@ def test_no_bitsandbytes_gives_no_quant_and_lora():
     assert plan.adapter.method.value == "lora"
 
 
+def test_none_override_fails_closed_until_its_exact_combo_is_proven():
+    # 'none' (16-bit on an unquantized base) needs no quantization proof, but the plan's COMPLETE tuple
+    # (bf16, none, lora, ...) must still be demonstrated by a bounded probe. On a host that only proved the
+    # nf4/qlora combo, a none override fails closed at the execution-tuple gate - the selector is reachable,
+    # but honestly gated on a probe (exactly like int8), never sealing an un-demonstrated tuple.
+    with pytest.raises(PlannerError, match="complete requested execution tuple"):
+        _plan(_profile(cc_major=8), _report(), quantization="none")
+
+
+def test_explicit_nf4_quantization_is_honored_when_proven():
+    plan = _plan(_profile(cc_major=8), _report(), quantization="nf4")
+    assert plan.quantization.value == "nf4"
+    assert plan.adapter.method.value == "qlora"
+
+
+def test_unproven_quantization_override_fails_closed():
+    # int8 is DECLARED by the backend but NOT proven by the probe (only nf4 is): selecting it must fail
+    # closed with a clear reason, never seal a plan that would break at execution ("declared" != "proven").
+    with pytest.raises(PlannerError, match="not proven"):
+        _plan(_profile(cc_major=8), _report(), quantization="int8")
+
+
+def test_quantized_override_without_bitsandbytes_fails_closed():
+    with pytest.raises(PlannerError, match="bitsandbytes"):
+        _plan(_profile(cc_major=8), _report(bnb=False), quantization="nf4")
+
+
+def test_full_finetune_rejects_a_quantized_override():
+    with pytest.raises(PlannerError, match="cannot be quantized"):
+        _plan(
+            _profile(cc_major=8), _report(), task_type="sft",
+            adapter_method="full_finetune", export_format="merged_safetensors",
+            quantization="nf4",
+        )
+
+
 def test_explicit_unproven_attention_override_is_refused():
     with pytest.raises(PlannerError, match="not functionally proven"):
         _plan(_profile(cc_major=8), _report(), attention_backend="flash_attention_2")
