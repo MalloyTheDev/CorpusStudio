@@ -669,8 +669,9 @@ continue. The sealed format is the trust anchor; HF is the restore engine.
   resumed run's evidence is honest rather than falsely rejected. The guarantee is EXACT VERIFIED LINEAGE
   (our seal) + HF-standard numerical continuation (not bitwise; bitwise holds only on the hand-rolled
   reference). The full 7B/seq-4096 write->resume and its `workload_verified` promotion are now done (the 7B
-  section below), proven both with the merged code and the sealed wheel; only worker-CWD-isolation hardening
-  remains as a deployment follow-up.
+  section below), proven both with the merged code and the sealed wheel; the resume-guarantee hardening
+  (worker-identity binding, resume lineage, post-restore gate, CWD isolation) is also done + GPU-validated
+  (#832, the 7B section below).
 
 ### Full 7B/seq-4096 checkpoint write -> resume, and the managed `--subprocess` resume fix (#830), 2026-08-07
 
@@ -727,25 +728,24 @@ plan (`docs/CHECKPOINT_RESUME_PLAN.md` C2) reserved for a 7B/seq-4096 run.
   resumed from step 2 (`resumed_from_optimizer_step=2`, steps `[3,4]`, step-3 loss `2.935065...` matching the
   write run). So this is a PRODUCT `workload_verified` result for both the merged CODE and the sealed WHEEL at
   7B/seq-4096.
-- **Known resume-hardening follow-ups (surfaced by the code review of this evidence; the proof above is
-  sound - real training verified by the measured continuation - but these strengthen the resume
-  *guarantees* and are the next slice, some needing a new worker wheel):**
-  - **Worker-identity binding (H1).** The sealed checkpoint binds `plan_hash` + `environment_lock_hash` but
-    leaves `worker_wheel_sha256` null, and the hybrid restore does not verify worker-only identities - so
-    the exact-lineage check does not confirm the resuming worker BYTES (with the CWD-shadow above, a
-    different checkout could continue a managed checkpoint while plan/env hashes still pass). The runner
-    should seal `worker_wheel_sha256` for the managed/sealed tier and verify it before restoring.
-  - **Resume lineage on the terminal record.** A resumed `RunManifest` reports
-    `resumed_from_optimizer_step` but leaves `resume_lineage` null, so the terminal record cannot itself
-    name the parent run / checkpoint id / checkpoint hash it continued; construct it from the verified
-    checkpoint when producing the manifest.
-  - **Post-restore baseline for the change gate.** The honesty-core canonical-adapter-change gate captures
-    `before_sha256` BEFORE `trainer.train(resume_from_checkpoint=...)` performs the HF restore, so the
-    before->after delta includes the restore; a resumed interval that performed no real update could still
-    pass. Capture the baseline AFTER restoration (before the first resumed update), or add a separate
-    resumed-interval delta proof.
-  - **Worker-CWD isolation.** Spawn the managed worker neutral-CWD/`-I` so it uses the wheel regardless of
-    the launch directory, rather than relying on a neutral CWD by convention.
+- **Resume-guarantee hardening - DONE + GPU-validated (#832).** The code review of this evidence surfaced
+  four guarantee gaps (the proof above was already sound - real training, measured continuation - but these
+  strengthen the *guarantees*). All four are now implemented and validated on the real 7B/seq-4096 workload
+  through the fully-sealed managed `--subprocess` path (a hardening worker wheel `1af5a079...` sealed into
+  env `backend-corpus-studio-sealed-flp-v5`, lock `aa9dac62...`, run from a neutral CWD; evidence preserved
+  under `examples/wbg/runs/resume-hardening-7b-seq4096/`):
+  - **Worker-identity binding (H1).** The runner now seals the executing worker wheel sha256 (from the
+    environment lock) into the checkpoint, and the hybrid restore verifies it. Validated: the step-2
+    checkpoint bound `worker_wheel_sha256 = 1af5a079...` (previously null).
+  - **Resume lineage on the terminal record.** A resumed `RunManifest` now records `resume_lineage`
+    (parent run id + checkpoint id + hash + resumed-from step), read from the named checkpoint. Validated:
+    the resumed manifest recorded `parent_run_id=run-019fde66...`, `resumed_from_global_step=2`.
+  - **Post-restore baseline for the change gate.** The honesty-core canonical-adapter-change gate now
+    captures its baseline in `on_train_begin` (AFTER the HF restore, before the first resumed update),
+    fail-closed - so the restore alone can no longer satisfy it. Validated: the resume succeeded with the
+    post-restore gate active (`resumed_from_optimizer_step=2`, steps `[3,4]`).
+  - **Worker-CWD isolation.** The managed/subprocess worker is spawned with `-P` (PYTHONSAFEPATH) so it
+    imports the sealed wheel regardless of the launch directory, never a repo checkout in the CWD.
 
 ### Reproducible managed `--subprocess` shipping via a sealed worker wheel, 2026-08-07
 
@@ -771,7 +771,8 @@ now works end to end on this host. (The env-create hashless-PyTorch-index blocke
   ride the same wheel) reproducibly, with the env lock matching (the earlier unmanaged-plan lock mismatch is
   gone). PRODUCT, not a sealed IEEE cell. The full 7B/seq-4096 write->resume (proven both with merged code
   AND the sealed wheel `222b6147` on env `flp-v3`) + its `workload_verified` promotion are done (the 7B
-  section above); the remaining follow-ups are the worker-CWD-isolation hardening and the readiness recipe's
+  section above); the resume-guarantee hardening (worker-identity binding, resume lineage, post-restore
+  gate, CWD isolation) is done + GPU-validated (#832). The remaining follow-up is the readiness recipe's
   int8/16-bit probes (a recipe-probe extension).
 
 ## Verification boundary — what `HARDWARE_VERIFIED` does and does NOT prove
