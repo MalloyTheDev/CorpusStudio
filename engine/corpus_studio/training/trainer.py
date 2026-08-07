@@ -36,6 +36,7 @@ from pydantic import BaseModel, Field, model_validator
 from corpus_studio.importers.jsonl_importer import read_jsonl, read_jsonl_bytes
 from corpus_studio.platform.contracts import (
     AdapterExportStateEvidence,
+    CheckpointBoundIdentities,
     GradientCoverageEvidence,
     OptimizerStepLossEvidence,
     TrainableStateChangeEvidence,
@@ -306,23 +307,6 @@ class TrainResult(BaseModel):
     final_loss: float | None = None
     checkpoints: list[str] = Field(default_factory=list)
     execution_evidence: TrainingExecutionEvidence | None = None
-
-
-def _require_checkpoint_free_execution(config: TrainRunConfig) -> None:
-    """Refuse every intermediate-checkpoint spelling on the in-process SFTTrainer path, including
-    unvalidated model copies. The SFTTrainer body stays checkpoint-free; exact-lineage checkpoint
-    writing/resume runs through :mod:`corpus_studio.training.checkpoint_io` (the reviewed engine proven
-    by the real-torch fresh-process equivalence test), which a long run binds on first authorization."""
-
-    if (
-        config.save_strategy != "no"
-        or config.save_steps is not None
-        or config.save_total_limit is not None
-    ):
-        raise TrainerError(
-            "intermediate checkpoints on the SFTTrainer path are unsupported; exact-lineage "
-            "checkpointing runs through corpus_studio.training.checkpoint_io"
-        )
 
 
 @dataclass(frozen=True)
@@ -2339,8 +2323,9 @@ def expected_saved_adapter_config_sha256(model: Any, config: TrainRunConfig) -> 
 
 
 def build_training_kwargs(config: TrainRunConfig) -> dict[str, Any]:
-    """TRL ``SFTConfig`` kwargs from the run config, including the exact sealed save policy."""
-    _require_checkpoint_free_execution(config)
+    """TRL ``SFTConfig`` kwargs from the run config. The SFTConfig is ALWAYS HF-checkpoint-free
+    (``save_strategy="no"``): exact-lineage intermediate checkpointing is owned by the
+    CheckpointCoordinator in ``run_training``, never HF's own saver, so the two never double-write."""
     kwargs: dict[str, Any] = {
         "output_dir": config.output_dir,
         "per_device_train_batch_size": config.micro_batch_size,
@@ -2358,7 +2343,7 @@ def build_training_kwargs(config: TrainRunConfig) -> dict[str, Any]:
         "logging_strategy": config.logging_strategy,
         "logging_steps": config.logging_steps,
         "logging_nan_inf_filter": config.logging_nan_inf_filter,
-        "save_strategy": config.save_strategy,
+        "save_strategy": "no",  # HF-checkpoint-free; the CheckpointCoordinator owns exact-lineage writing.
         "report_to": config.report_to,
         "dataset_text_field": config.dataset_text_field,
         "disable_tqdm": config.disable_tqdm,
@@ -3462,6 +3447,9 @@ def run_training(  # pragma: no cover - optional training-stack integration
     progress_callback: ProgressCallback | None = None,
     stage_callback: StageCallback | None = None,
     token_callback: TokenCallback | None = None,
+    checkpoint_bound: CheckpointBoundIdentities | None = None,
+    source_run_id: str | None = None,
+    checkpoints_root: str | None = None,
 ) -> TrainResult:
     """Run the training. Lazy-imports the heavy stack; verified via the CPU toy path (a real GPU QLoRA
     can only be user-smoke-tested). Raises :class:`TrainerError` if the runtime can't run the request.
@@ -3475,7 +3463,17 @@ def run_training(  # pragma: no cover - optional training-stack integration
         if stage_callback is not None:
             stage_callback(name, message)
 
-    _require_checkpoint_free_execution(config)
+    checkpoint_policy = resolve_checkpoint_execution_policy(config)
+    if checkpoint_policy.enabled and (
+        checkpoint_bound is None or source_run_id is None or checkpoints_root is None
+    ):
+        # An unreachable control is not a control: a checkpoint-enabled run MUST have received the sealed
+        # bound identities + a source run id + a checkpoints root from the runner. Fail closed rather than
+        # silently run without writing the exact-lineage checkpoints the sealed policy requires.
+        raise TrainerError(
+            "a checkpoint-enabled run requires sealed checkpoint identities, a source run id, and a "
+            "checkpoints root; none may be derived inside the trainer"
+        )
 
     dataset_progress_bucket = 0
 
@@ -3827,6 +3825,66 @@ def run_training(  # pragma: no cover - optional training-stack integration
                 loss = float(logs["loss"])
                 progress_callback(step, total, loss)
 
+    # Exact-lineage checkpoint WRITING (#440/#486): when the sealed policy enables checkpointing, an
+    # on-step-end hook drives the reviewed CheckpointCoordinator - a sealed checkpoint every
+    # `cadence_optimizer_steps`, pruned to `keep_last`. A disabled policy attaches no callback, so a
+    # short run stays byte-identical to a no-checkpoint run. (Consuming a checkpoint to RESUME is a
+    # separate slice; this writes the checkpoints a `training-run-resume-prepare` can then admit.)
+    checkpoint_coordinator = None
+    if checkpoint_policy.enabled:
+        from datetime import datetime, timezone  # noqa: PLC0415
+
+        from corpus_studio.training.checkpoint_io import (  # noqa: PLC0415
+            CheckpointCoordinator,
+            capture_rng_state,
+        )
+
+        # All three were proven present at entry when the policy is enabled (fail-closed guard above).
+        assert checkpoint_bound is not None and source_run_id is not None and checkpoints_root is not None
+        checkpoint_coordinator = CheckpointCoordinator(
+            torch_module=torch,
+            checkpoints_root=checkpoints_root,
+            source_run_id=source_run_id,
+            bound=checkpoint_bound,
+            clock=lambda: datetime.now(timezone.utc).isoformat(),
+            cadence_optimizer_steps=checkpoint_policy.cadence_optimizer_steps,
+            keep_last=checkpoint_policy.keep_last,
+        )
+
+    class _CheckpointCallback(TrainerCallback):  # type: ignore[misc]
+        """Writes a sealed exact-lineage checkpoint at the policy cadence. Observation-only w.r.t.
+        training: a checkpoint-write fault degrades to no checkpoint (logged to stderr) rather than
+        raising into the loop, so it can never alter the trajectory."""
+
+        def on_step_end(self, args: Any, state: Any, control: Any, **kwargs: Any) -> None:
+            if checkpoint_coordinator is None:
+                return
+            optimizer = kwargs.get("optimizer")
+            live_model = kwargs.get("model", model)
+            if optimizer is None:
+                return
+            try:
+                checkpoint_coordinator.maybe_checkpoint(
+                    global_optimizer_step=int(state.global_step),
+                    epoch=float(getattr(state, "epoch", 0.0) or 0.0),
+                    gradient_accumulation_steps=config.gradient_accumulation_steps,
+                    adapter_state=get_peft_model_state_dict(live_model),
+                    optimizer=optimizer,
+                    lr_scheduler=kwargs.get("lr_scheduler"),
+                    rng_state=capture_rng_state(torch),
+                    sampler_state={"consumed_optimizer_steps": int(state.global_step)},
+                    consumed_microsteps=int(state.global_step) * config.gradient_accumulation_steps,
+                )
+            except Exception as exc:  # noqa: BLE001 - a checkpoint write must never break training.
+                print(
+                    f"[WARNING] checkpoint write at step {int(state.global_step)} failed: {exc}",
+                    file=sys.stderr,
+                )
+
+    callbacks: list[Any] = [_ProgressCallback()]
+    if checkpoint_coordinator is not None:
+        callbacks.append(_CheckpointCallback())
+
     # The tokenizer arg was renamed `tokenizer` -> `processing_class`; pass it under whichever exists.
     import inspect  # noqa: PLC0415
 
@@ -3834,7 +3892,7 @@ def run_training(  # pragma: no cover - optional training-stack integration
         "model": model,
         "args": sft_config,
         "train_dataset": dataset,
-        "callbacks": [_ProgressCallback()],
+        "callbacks": callbacks,
     }
     trainer_params = inspect.signature(SFTTrainer.__init__).parameters
     if config.execution_configuration_hash is not None:
@@ -3946,7 +4004,13 @@ def run_training(  # pragma: no cover - optional training-stack integration
         try:
             trainer.save_model(str(output_dir))  # saves the LoRA adapter
             tokenizer.save_pretrained(str(output_dir))
-            checkpoints = _list_checkpoints(output_dir)
+            # The CheckpointCoordinator (not HF's saver) owns exact-lineage writing, so record ITS written
+            # step-* directories; _list_checkpoints only ever sees HF's checkpoint-* dirs, which stay empty.
+            checkpoints = (
+                checkpoint_coordinator.written_checkpoints
+                if checkpoint_coordinator is not None
+                else _list_checkpoints(output_dir)
+            )
         except Exception as exc:  # noqa: BLE001 - normalize framework/filesystem export failures.
             raise TrainingEvidenceError(
                 f"final adapter serialization failed: {exc}",

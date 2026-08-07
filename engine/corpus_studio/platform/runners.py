@@ -350,6 +350,30 @@ class TrainingRunner:
             last_stage = marker
             ctx.emit_stage(marker, message)
 
+        # Exact-lineage checkpoint WRITING (#440/#486): when the sealed policy enables a cadence, hand the
+        # SFT trainer the plan-derived bound identities + a run-scoped checkpoints root so the reviewed
+        # CheckpointCoordinator seals a checkpoint every cadence. A checkpoint-free policy passes nothing,
+        # so a short run is byte-identical to before. (Only an enabled policy - an adapter-SFT-lane concept
+        # today - reaches this; run_training fails closed if the identities/root are missing.)
+        checkpoint_kwargs: dict[str, Any] = {}
+        if (
+            execution is not None
+            and execution.checkpoint_policy.cadence_optimizer_steps is not None
+        ):
+            from corpus_studio.platform.checkpoint import (  # noqa: PLC0415
+                bound_identities_from_plan,
+            )
+            from corpus_studio.platform.execution_config import (  # noqa: PLC0415
+                run_scoped_training_output,
+            )
+
+            checkpoint_kwargs = {
+                "checkpoint_bound": bound_identities_from_plan(ctx.plan),
+                "source_run_id": ctx.run_id,
+                "checkpoints_root": str(
+                    run_scoped_training_output(execution, ctx.run_id, leaf="checkpoints")
+                ),
+            }
         try:
             with watchdog:
                 result = trainer_fn(
@@ -357,6 +381,7 @@ class TrainingRunner:
                     progress_callback=_progress,
                     stage_callback=_stage,
                     token_callback=_token_counts,
+                    **checkpoint_kwargs,
                 )
         except _CancelTraining:
             raise RunCancelled from None
@@ -419,7 +444,9 @@ class TrainingRunner:
                     "step or a stall, likely a WDDM spill) — see the stderr watchdog note."
                 )
 
-        if result.checkpoints:
+        if result.checkpoints and execution.checkpoint_policy.cadence_optimizer_steps is None:
+            # Checkpoints from a run whose sealed policy DISABLED intermediate saving is a first-party-worker
+            # bug. An ENABLED cadence legitimately writes them (the CheckpointCoordinator), so allow those.
             raise RunnerFailure(
                 "trainer produced intermediate checkpoints despite the sealed disabled save policy",
                 taxonomy=FailureTaxonomy.CHECKPOINT_FAILURE,
@@ -633,19 +660,11 @@ class TrainingRunner:
                 stage=StageMarker.env_loaded,
                 remediation="create a derived RunPlan with a new execution hash",
             )
-        if (
-            execution.save_strategy != "no"
-            or execution.checkpoint_policy.cadence_optimizer_steps is not None
-            or execution.checkpoint_policy.keep_last is not None
-        ):
-            raise RunnerFailure(
-                "sealed intermediate checkpoints are unsupported until exact resume compatibility "
-                "and checkpoint lineage are implemented",
-                taxonomy=FailureTaxonomy.UNSUPPORTED_CONFIGURATION,
-                stage=StageMarker.process_start,
-                remediation="regenerate a checkpoint-free RunPlan; do not approve a long run until "
-                "sealed resume support exists",
-            )
+        # Intermediate checkpoint WRITING is supported on this adapter SFT lane: a sealed cadence drives the
+        # reviewed CheckpointCoordinator in run_training (the trainer_fn call above threads the plan's bound
+        # identities + a run-scoped checkpoints root). A checkpoint-free plan writes nothing. Consuming a
+        # checkpoint to RESUME remains a separate slice; the planner refuses a cadence on the full-parameter
+        # lane, whose worker does not yet write checkpoints.
         try:
             # The trainer owns one stable read/hash/capture of the dataset and parses those exact
             # bytes. Revalidating it here would create a redundant full-corpus pass.

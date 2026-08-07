@@ -1808,18 +1808,22 @@ def build_run_plan(
         "supervised_token_accumulation_target": token_target,
         "fallback_grad_accumulation_steps": constraints.gradient_accumulation_steps,
     }
-    if (
-        constraints.checkpoint_steps is not None
-        or constraints.checkpoint_keep_last is not None
-    ):
+    # Intermediate checkpoint WRITING is wired for the adapter SFT lane (run_training drives the reviewed
+    # CheckpointCoordinator); the full-parameter worker does not consume a cadence yet, so refuse it there
+    # rather than seal a plan its runner would reject. keep_last is meaningless without a cadence.
+    checkpoint_cadence = constraints.checkpoint_steps
+    checkpoint_keep_last = constraints.checkpoint_keep_last
+    if (checkpoint_cadence is not None or checkpoint_keep_last is not None) and is_full_finetune:
         raise PlannerError(
-            "the first-party sealed runner cannot write intermediate checkpoints until exact "
-            "resume compatibility and lineage are implemented"
+            "full-parameter fine-tuning cannot write intermediate checkpoints yet; drop "
+            "--checkpoint-cadence (the coordinator wires the adapter SFT lane)"
         )
+    if checkpoint_cadence is None and checkpoint_keep_last is not None:
+        raise PlannerError("--checkpoint-keep-last requires --checkpoint-cadence")
     checkpoint_policy = {
         "impl": checkpoint_impl,
-        "cadence_optimizer_steps": None,
-        "keep_last": None,
+        "cadence_optimizer_steps": checkpoint_cadence,
+        "keep_last": checkpoint_keep_last,
         "reload_verify": False,
     }
     schedule = TrainingSchedule(
@@ -1914,7 +1918,9 @@ def build_run_plan(
         "use_safetensors": True,
         "bnb_4bit_use_double_quant": quantization != "none",
         "adapter_task_type": "CAUSAL_LM",
-        "save_strategy": "no",
+        # "steps" signals the sealed cadence to resolve_checkpoint_execution_policy; HF's own saver stays
+        # off (build_training_kwargs forces it) so the CheckpointCoordinator owns exact-lineage writing.
+        "save_strategy": "steps" if checkpoint_cadence is not None else "no",
         "gradient_checkpointing": True,
         "output_dir": constraints.output_dir,
         "output_layout": "run_scoped_v1",

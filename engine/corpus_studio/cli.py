@@ -1054,6 +1054,21 @@ def platform_plan(
         "with bitsandbytes proves it, else none). A quantized mode must be proven on this host or the "
         "plan fails closed.",
     ),
+    checkpoint_cadence: Optional[int] = typer.Option(
+        None,
+        "--checkpoint-cadence",
+        min=1,
+        help="Write a sealed, exact-lineage intermediate checkpoint every N optimizer steps (the "
+        "adapter SFT lane). Default: none (checkpoint-free). A checkpointed run is a distinct sealed "
+        "config; a later 'training-run-resume-prepare' can resume from one of these checkpoints.",
+    ),
+    checkpoint_keep_last: Optional[int] = typer.Option(
+        None,
+        "--checkpoint-keep-last",
+        min=1,
+        help="Keep only the most recent N intermediate checkpoints (prune older ones). Requires "
+        "--checkpoint-cadence.",
+    ),
     gradient_accumulation_steps: int = typer.Option(
         8,
         "--gradient-accumulation-steps",
@@ -1341,6 +1356,8 @@ def platform_plan(
         lora_alpha=lora_alpha,
         adapter_method=adapter_method,
         quantization=quantization,
+        checkpoint_steps=checkpoint_cadence,
+        checkpoint_keep_last=checkpoint_keep_last,
         export_format=export_format or "adapter_peft",
         gradient_accumulation_steps=gradient_accumulation_steps,
         truncation_allowed=allow_truncation,

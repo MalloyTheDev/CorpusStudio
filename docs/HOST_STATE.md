@@ -627,6 +627,28 @@ instead of failing closed:
   managed-shipping-path step the other verticals carry). fp4 + int4 remain declared-but-unprobed (fail
   closed until a probe proves them).
 
+### Intermediate checkpoint WRITING on the adapter SFT lane, 2026-08-07
+
+The exact-lineage checkpoint machinery (`checkpoint_io.py` - seal/verify/admit + the `CheckpointCoordinator`,
+CPU-bitwise-proven by the 3-process equivalence test) is now WIRED into the real `SFTTrainer` loop and RUNS
+on this host. `platform-plan --checkpoint-cadence N` seals an enabled checkpoint policy on the adapter SFT
+lane (`save_strategy="steps"`; the full-parameter lane refuses a cadence, whose worker does not write yet),
+and `run_training` drives an on-step-end `CheckpointCoordinator` that seals a checkpoint every N optimizer
+steps. HF's own saver stays off (`build_training_kwargs` forces `save_strategy="no"`), so the coordinator
+owns writing and the two never double-write; a checkpoint-write fault degrades to a stderr log, never into
+the training loop.
+
+- **GPU proof (RTX 5070, in-process, 16-bit LoRA on a from-scratch GPT-2):** `--checkpoint-cadence 2` over 6
+  steps wrote `step-2 / step-4 / step-6`; `--checkpoint-cadence 1` over 3 steps wrote `step-1 / step-2 /
+  step-3` - the cadence fires exactly. Each checkpoint is a COMPLETE sealed set under the run-scoped
+  `.../artifacts/checkpoints/step-*`: `CheckpointManifest.json` + `adapter_state.pt` + `optimizer.pt` +
+  `scheduler.pt` + `rng.pt` + `sampler.pt`.
+- **Honesty scope.** This is checkpoint WRITING only. Consuming a checkpoint to RESUME (rebuild the plan,
+  `restore_checkpoint` + optimizer injection, verify continuation) is the next slice, and it - plus
+  recording the written checkpoints on the RunManifest and the SupportLevel promotion - is where the
+  measured resume-continuation evidence belongs. `run_training` is `# pragma: no cover` (proven by a run);
+  the coordinator, the threading, and the policy sealing are unit-tested.
+
 ## Verification boundary — what `HARDWARE_VERIFIED` does and does NOT prove
 
 `HARDWARE_VERIFIED` is the **Environment Manager** evidence level, not a training-run result.
