@@ -3863,6 +3863,15 @@ def run_training(  # pragma: no cover - optional training-stack integration
             live_model = kwargs.get("model", model)
             if optimizer is None:
                 return
+            # Seal HF's own TrainerState so a hybrid resume can round-trip it into the HF-layout
+            # checkpoint (dataclasses.asdict matches HF's save_to_json; best-effort - a capture fault
+            # must not stop the checkpoint).
+            try:
+                import dataclasses  # noqa: PLC0415
+
+                hf_trainer_state: dict[str, Any] | None = dataclasses.asdict(state)
+            except Exception:  # noqa: BLE001
+                hf_trainer_state = None
             try:
                 checkpoint_coordinator.maybe_checkpoint(
                     global_optimizer_step=int(state.global_step),
@@ -3871,9 +3880,11 @@ def run_training(  # pragma: no cover - optional training-stack integration
                     adapter_state=get_peft_model_state_dict(live_model),
                     optimizer=optimizer,
                     lr_scheduler=kwargs.get("lr_scheduler"),
-                    rng_state=capture_rng_state(torch),
+                    # include_numpy: HF's resume _load_rng_state requires a 'numpy' rng key.
+                    rng_state=capture_rng_state(torch, include_numpy=True),
                     sampler_state={"consumed_optimizer_steps": int(state.global_step)},
                     consumed_microsteps=int(state.global_step) * config.gradient_accumulation_steps,
+                    trainer_state=hf_trainer_state,
                 )
             except Exception as exc:  # noqa: BLE001 - a checkpoint write must never break training.
                 print(
