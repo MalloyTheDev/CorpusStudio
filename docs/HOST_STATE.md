@@ -669,7 +669,8 @@ continue. The sealed format is the trust anchor; HF is the restore engine.
   resumed run's evidence is honest rather than falsely rejected. The guarantee is EXACT VERIFIED LINEAGE
   (our seal) + HF-standard numerical continuation (not bitwise; bitwise holds only on the hand-rolled
   reference). The full 7B/seq-4096 write->resume and its `workload_verified` promotion are now done (the 7B
-  section below); a fully-sealed-WHEEL managed resume from a neutral CWD remains the deployment follow-up.
+  section below), proven both with the merged code and the sealed wheel; only worker-CWD-isolation hardening
+  remains as a deployment follow-up.
 
 ### Full 7B/seq-4096 checkpoint write -> resume, and the managed `--subprocess` resume fix (#830), 2026-08-07
 
@@ -683,12 +684,28 @@ plan (`docs/CHECKPOINT_RESUME_PLAN.md` C2) reserved for a 7B/seq-4096 run.
   liger_fused_ce + `paged_adamw_8bit` + allocator `max_split_size:128`, gradient checkpointing, on the WBG
   469-row chat corpus (zero-truncation; the plan sealed `attention=sdpa`/`torch_sdpa_flash`, fit
   `NATIVE_UNPROVEN` ~10.6 GB predicted). The from-scratch run wrote adapter checkpoints at `step-2 / step-4`
-  and MEASURED peak `torch_peak_allocated ~10.27 GiB` / `cuda_device_used ~11.49 GiB` - **~0.5 MB free** on
-  the 12 GB card at step 2 (R3 fits, barely, exactly the known envelope), ~23-25 s/step, ~750 tok/s.
-- **Resume, measured.** Resuming from `step-2` on the same plan reports `resumed_from_optimizer_step=2` and
-  trains ONLY the absolute steps `[3, 4]`; the resumed step-3 loss `2.935067653656006` is **byte-identical**
-  to the original run's step 3 (faithful optimizer / RNG / data-sampler restore). EXACT VERIFIED LINEAGE +
-  HF-standard continuation, at 7B/seq-4096.
+  and MEASURED (at step 2) `torch_peak_allocated_bytes` 11,025,304,064 (~10.27 GiB) and
+  `cuda_device_used_bytes` 12,336,758,784 of a sampled `dedicated_gpu_bytes` 12,337,348,608 device total -
+  i.e. `cuda_device_free_bytes` = **589,824 (~0.56 MiB) free** (R3 fits, barely, exactly the known envelope),
+  ~23-25 s/step, ~750 tok/s.
+- **Resume, measured** (evidence preserved under `examples/wbg/runs/checkpoint-resume-7b-seq4096/`).
+  Resuming from the `step-2` checkpoint (manifest hash `3db56855...`, `complete:true`, integrity-verified AND
+  proven a compatible resume source BEFORE any restore) on the same plan (plan_hash `27ac06df...`) reports
+  `resumed_from_optimizer_step=2` and trains ONLY the absolute steps `[3, 4]`. What the losses prove, exactly:
+  the resumed step-3 loss `2.935065` is IDENTICAL to the source run's step 3 - but a step's loss is the
+  forward pass BEFORE that step's optimizer update, so this proves the **model weights (incl. the step-2
+  update baked into the adapter), the data batch, and the RNG** were restored, NOT the optimizer moments. The
+  optimizer-continuation signal is the step-4 loss (the first forward AFTER a resumed update): source
+  `2.847071` vs resumed `2.847229`, agreeing to **~1.6e-4** - EXACT VERIFIED LINEAGE + HF-standard,
+  **non-bitwise** continuation (the residual is consistent with QLoRA + flash + bf16 CUDA nondeterminism;
+  bitwise holds only on the hand-rolled reference). Source run `run-019fde18-...`, resumed run
+  `run-019fde1c-...`, sealed env lock `db797ce1...`, wheel `222b6147...`.
+- **Interruption scope (honest).** The consumed checkpoint came from a source run that COMPLETED (steps 1-4),
+  not a `SIGKILL` mid-run. Because `step-2` is written atomically (`complete:true` + manifest hash) and fully
+  integrity-verified before any restore, it is byte-equivalent to the checkpoint an interrupted run would
+  leave, and the fresh-process resume is the same operation either way; a completed source additionally
+  supplies the ground-truth steps 3/4 for the comparison above (a killed source could not). A literal
+  kill-then-resume adds only write-atomicity-under-`SIGKILL` coverage and is an optional follow-up.
 - **A real unreachable-control bug, found by running it, fixed (#830).** The resume above went through the
   managed `--subprocess` dispatch - which, before #830, **silently ignored `--resume-from`**. #828 wired
   resume only into the in-process `execute_run`; `execute_run_subprocess` had no resume parameter,

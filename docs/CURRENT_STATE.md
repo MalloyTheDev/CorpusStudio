@@ -214,14 +214,18 @@ per-item error isolation, and off-thread document opens.
   answer). New platform plans render and tokenize the complete hash-pinned JSONL with the exact pinned
   tokenizer/template; over-length rows fail closed unless `allow_truncation` is explicit in the seal.
   The standalone report retains a documented heuristic when the tokenizer extra is absent.
-- **Resolved checkpoint/output policy**: new first-party plans explicitly seal checkpointing off
+- **Resolved checkpoint/output policy**: by default a first-party plan seals checkpointing off
   (`save_strategy="no"`, null cadence/retention) and each run writes beneath
-  `<output-root>/runs/<run-id>/`. Legacy step-checkpoint documents remain readable but the runner and
-  trainer refuse them before training; an unexpected worker checkpoint fails the run. The trainer
-  saves the **LoRA adapter** + tokenizer + model card, not a full base copy. Exact sealed resume and
-  checkpoint lineage remain future work under
-  [#440](https://github.com/MalloyTheDev/CorpusStudio/issues/440); first-party runs expected to exceed
-  30 minutes are blocked.
+  `<output-root>/runs/<run-id>/`; `platform-plan --checkpoint-cadence N [--checkpoint-keep-last M]` opts a
+  plan INTO sealed intermediate checkpoints on the adapter SFT lane. Legacy step-checkpoint documents remain
+  readable but the runner and trainer refuse them before training; an unexpected worker checkpoint fails the
+  run. The trainer saves the **LoRA adapter** + tokenizer + model card, not a full base copy. Exact sealed
+  resume + checkpoint lineage are now SHIPPED
+  ([#486](https://github.com/MalloyTheDev/CorpusStudio/issues/486) on
+  [#440](https://github.com/MalloyTheDev/CorpusStudio/issues/440)): intermediate-checkpoint WRITE (#827) +
+  exact-lineage RESUME (`platform-run --resume-from`, #828) wired through the managed `--subprocess` dispatch
+  (#830), all `workload_verified` at 7B/seq-4096 (see [`docs/HOST_STATE.md`](HOST_STATE.md)); the earlier
+  >30-minute block is lifted.
 - **Resolved training-success evidence**: the trainer hashes the complete sorted trainable adapter
   state before and after optimization and requires at least one changed tensor. It records at least
   one materialized post-accumulation gradient with honest observed/eligible coverage, observes a real
@@ -445,7 +449,8 @@ per-item error isolation, and off-thread document opens.
   per-step finite losses, verified output containment, recognized adapter bytes, and artifact
   integrity before measured fit becomes proven. Every execution gets a fresh UUIDv7 run ID, and
   final-adapter output is isolated under `<output-root>/runs/<run-id>/`; intermediate checkpoints are
-  disabled until exact sealed resume exists. Adapter IDs include the
+  off by default and opt-in via `--checkpoint-cadence` on the adapter SFT lane, with exact-lineage
+  `--resume-from` now shipped (#486, `workload_verified` at 7B/seq-4096). Adapter IDs include the
   run, role, and weight-content hash; persisted manifests live under `<record-root>/runs/<run-id>/`.
   Legacy plans remain readable but are not executable by the training runner; regenerate them. See
   [`EFFECTIVE_EXECUTION_CONFIGURATION.md`](EFFECTIVE_EXECUTION_CONFIGURATION.md).
