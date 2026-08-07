@@ -201,6 +201,10 @@ class RunContext:
         # RE-VERIFIES it (reload the saved adapter, re-hash, compare to the sealed trained state) before
         # it may reach the manifest - the runner cannot self-admit a success.
         self.preference_success_evidence: PreferenceSuccessEvidence | None = None
+        # A full-parameter SFT runner reports the worker-proposed full-model success evidence (reused
+        # full-model shape); execute_run RE-VERIFIES it (reload model.safetensors, re-hash, compare) before
+        # it may reach the manifest.
+        self.full_finetune_success_evidence: PretrainingSuccessEvidence | None = None
 
     @property
     def cancelled(self) -> bool:
@@ -693,6 +697,65 @@ def validate_pretraining_success_evidence(
     return proposed.model_copy(update={"measured_peak": measured_peak})
 
 
+def validate_full_finetune_success_evidence(
+    plan: RunPlan,
+    proposed: PretrainingSuccessEvidence | None,
+    produced: Sequence[ProducedArtifact],
+    measured_peak: MemoryMetrics | None,
+) -> PretrainingSuccessEvidence:
+    """Independently re-verify a full-parameter SFT runner's PROPOSED full-model success before terminal
+    PASS - the full-model sibling of :func:`validate_pretraining_success_evidence`. Full-parameter SFT emits
+    a full model, so it reuses the full-model evidence shape + reload-verify: execute_run confirms the
+    completed steps match the sealed schedule, then reloads the saved model.safetensors and asserts it
+    reproduces the sealed trained export state (and that the saved bytes match the proposal). Fail-closed."""
+    execution = plan.resolved_full_finetune_execution
+    if execution is None:  # pragma: no cover - caller restricts this to a resolved full-finetune plan.
+        raise RunnerFailure(
+            "full-finetune success evidence requires a resolved full-finetune execution",
+            taxonomy=FailureTaxonomy.UNSUPPORTED_CONFIGURATION,
+            stage=StageMarker.process_start,
+        )
+    if proposed is None:
+        raise RunnerFailure(
+            "resolved full-finetune returned without full-model success evidence",
+            taxonomy=FailureTaxonomy.UPDATE_FAILURE,
+            stage=StageMarker.optimizer_step,
+        )
+    if execution.schedule.max_steps is not None:
+        if proposed.execution.completed_optimizer_steps != execution.schedule.max_steps:
+            raise RunnerFailure(
+                "completed optimizer steps do not match the sealed schedule",
+                taxonomy=FailureTaxonomy.OPTIMIZER_FAILURE,
+                stage=StageMarker.optimizer_step,
+            )
+    elif proposed.execution.completed_optimizer_steps < 1:
+        raise RunnerFailure(
+            "epoch-scheduled full-finetune admitted zero completed optimizer steps",
+            taxonomy=FailureTaxonomy.OPTIMIZER_FAILURE,
+            stage=StageMarker.optimizer_step,
+        )
+    model_artifact = next((item for item in produced if item.kind == "model"), None)
+    if model_artifact is None:
+        raise RunnerFailure(
+            "resolved full-finetune produced no model artifact to admit",
+            taxonomy=FailureTaxonomy.ARTIFACT_FAILURE,
+            stage=StageMarker.export,
+        )
+    verified, reason = _reload_verify_full_model(
+        model_artifact.path,
+        expected_after_sha256=proposed.execution.model_export_state.after_sha256,
+        expected_model_sha256=proposed.model_safetensors_sha256,
+        expected_config_sha256=proposed.model_config_sha256,
+    )
+    if not verified:
+        raise RunnerFailure(
+            f"the full-finetune model artifact failed independent re-verification: {reason}",
+            taxonomy=FailureTaxonomy.ARTIFACT_FAILURE,
+            stage=StageMarker.export,
+        )
+    return proposed.model_copy(update={"measured_peak": measured_peak})
+
+
 def execute_run(
     plan: RunPlan,
     runner: Runner,
@@ -722,6 +785,7 @@ def execute_run(
         plan.resolved_execution is not None
         or plan.resolved_pretraining_execution is not None
         or plan.resolved_preference_execution is not None
+        or plan.resolved_full_finetune_execution is not None
     )
     record_dir = run_record_directory(out_dir, rid) if out_dir is not None else None
     events_handle: Any = None
@@ -779,6 +843,7 @@ def execute_run(
     training_success_evidence: TrainingSuccessEvidence | None = None
     pretraining_success_evidence: PretrainingSuccessEvidence | None = None
     preference_success_evidence: PreferenceSuccessEvidence | None = None
+    full_finetune_success_evidence: PretrainingSuccessEvidence | None = None
 
     try:
         # Defense in depth: callers can reach this public library boundary without going through the
@@ -845,6 +910,15 @@ def execute_run(
                     taxonomy=FailureTaxonomy.UNSUPPORTED_CONFIGURATION,
                     stage=StageMarker.env_loaded,
                 )
+        elif plan.resolved_full_finetune_execution is not None:
+            from corpus_studio.platform.runners import FullFinetuneRunner  # noqa: PLC0415
+
+            if type(runner) is not FullFinetuneRunner:
+                raise RunnerFailure(
+                    "resolved full-finetune plans require the first-party FullFinetuneRunner adapter",
+                    taxonomy=FailureTaxonomy.UNSUPPORTED_CONFIGURATION,
+                    stage=StageMarker.env_loaded,
+                )
         elif not isinstance(runner, EchoRunner):
             raise RunnerFailure(
                 "echo plans require the built-in EchoRunner adapter",
@@ -893,6 +967,13 @@ def execute_run(
             preference_success_evidence = validate_preference_success_evidence(
                 plan,
                 ctx.preference_success_evidence,
+                produced,
+                ctx.measured_peak,
+            )
+        if plan.resolved_full_finetune_execution is not None:
+            full_finetune_success_evidence = validate_full_finetune_success_evidence(
+                plan,
+                ctx.full_finetune_success_evidence,
                 produced,
                 ctx.measured_peak,
             )
@@ -980,6 +1061,9 @@ def execute_run(
         ),
         preference_success_evidence=(
             preference_success_evidence if state == "succeeded" else None
+        ),
+        full_finetune_success_evidence=(
+            full_finetune_success_evidence if state == "succeeded" else None
         ),
         notes=(
             "event sink failures were isolated: " + ", ".join(sink_errors)

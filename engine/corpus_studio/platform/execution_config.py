@@ -46,6 +46,7 @@ def run_scoped_training_output(
         ResolvedExecutionConfiguration
         | ResolvedPretrainingExecutionConfiguration
         | ResolvedPreferenceExecutionConfiguration
+        | ResolvedFullFinetuneExecutionConfiguration
     ),
     run_id: str,
     *,
@@ -319,6 +320,7 @@ def verify_run_scoped_output_path(
         ResolvedExecutionConfiguration
         | ResolvedPretrainingExecutionConfiguration
         | ResolvedPreferenceExecutionConfiguration
+        | ResolvedFullFinetuneExecutionConfiguration
     ),
     run_id: str,
     *,

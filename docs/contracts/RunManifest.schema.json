@@ -1381,6 +1381,17 @@
       "default": null,
       "title": "Finished At"
     },
+    "full_finetune_success_evidence": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PretrainingSuccessEvidence"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
     "notes": {
       "default": "",
       "title": "Notes",
