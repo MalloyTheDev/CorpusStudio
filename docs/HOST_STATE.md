@@ -473,6 +473,13 @@ IEEE cell) on the evidence below - from-scratch full-parameter pretraining now r
   workload_verified through the REAL dispatch, not just the direct bypass. (The base recipe source-installs the
   worker; the provenance-sealed wheel `4bacd4ef...` at `.../pretraining-hardened-c0e9870/` is for a future
   HASH-PINNED deployment via the `-verified` recipe, which `env-create` does not yet provision.)
+- **Re-confirmed GREEN with current main 2026-08-07.** The #812 proof predates the S0 shared-optimizer
+  refactor + the F3/F5 pretraining-worker audit fixes, which changed the pretraining worker. A managed
+  `platform-run --subprocess` re-run on current main (a tiny gpt2 4M random-init, seq 512, 10 steps)
+  **SUCCEEDED**: `STATE succeeded`, `final_fit NATIVE_SAFE`, supervisor-admitted `pretraining_success_evidence`
+  (loss 5.19 -> 3.46, 52/52 tensors changed with observed gradients, model reload-verified) - so all THREE
+  in-process verticals (pretraining, DPO, full-finetune) are now green through the REAL managed dispatch on
+  current main. (Hash-pinned wheels + sealed non-editable envs remain the reproducible-deployment last mile.)
 - **Wheel source-ahead after the 2026-08-06 audit.** The pre-merge audit fixed two pretraining-worker gaps
   (the sealed optimizer `optim`/betas/eps were not threaded into `TrainingArguments`; an imported tokenizer
   with no `tokenizer.json` silently skipped its required content pin - now fail-closed). These change
