@@ -44,6 +44,19 @@ def test_chat_fixture_rows_are_all_compatible():
     assert report.representative_rejections == ()
 
 
+def test_preference_pairs_are_conformant_and_a_blank_branch_is_rejected():
+    # A DPO/preference plan's data (prompt/chosen/rejected) is now a first-class conformance format, so a
+    # preference plan is sealable from the shipping CLI (previously "unknown dataset_format 'preference'").
+    good = {"prompt": "Q?", "chosen": "A right.", "rejected": "A wrong."}
+    report = assess_dataset_format_conformance([good, good], "preference")
+    assert report.is_conformant
+    assert (report.total_rows, report.compatible_rows, report.rejected_rows) == (2, 2, 0)
+    # a missing/blank branch is not a usable comparison -> rejected with a concrete reason
+    bad = assess_dataset_format_conformance([{"prompt": "Q?", "chosen": "A.", "rejected": "  "}], "preference")
+    assert not bad.is_conformant
+    assert "rejected" in bad.representative_rejections[0].reason
+
+
 def test_chat_fixture_planned_as_instruction_is_not_conformant():
     # The exact observed failure: chat rows have no instruction/output fields -> zero usable rows.
     report = assess_dataset_format_conformance([CHAT_ROW, CHAT_ROW], "instruction")

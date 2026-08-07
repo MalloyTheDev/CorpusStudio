@@ -32,7 +32,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Iterable
 
-SUPPORTED_DATASET_FORMATS: tuple[str, ...] = ("instruction", "chat", "trace")
+SUPPORTED_DATASET_FORMATS: tuple[str, ...] = ("instruction", "chat", "trace", "preference")
 RECOGNIZED_CHAT_ROLES = frozenset({"system", "user", "assistant", "tool"})
 TRAINABLE_CHAT_ROLES = frozenset({"assistant"})
 _MAX_REPRESENTATIVE_REJECTIONS = 5
@@ -165,6 +165,18 @@ def _classify_instruction(row: Mapping[str, Any]) -> str | None:
     return None
 
 
+def _classify_preference(row: Mapping[str, Any]) -> str | None:
+    # A preference pair (DPO/etc.) needs a prompt plus BOTH a chosen and a rejected response, all non-empty
+    # text - exactly what training.trainer.format_preference_pair consumes. A missing/blank branch is not a
+    # usable comparison (the DPO integrity preflight would also refuse it).
+    missing = [
+        key for key in ("prompt", "chosen", "rejected") if not str(row.get(key, "")).strip()
+    ]
+    if missing:
+        return f"preference pair requires non-empty {', '.join(missing)} (prompt/chosen/rejected)"
+    return None
+
+
 def _classify_chat(row: Mapping[str, Any]) -> str | None:
     messages = row.get("messages")
     if not isinstance(messages, list) or not messages:
@@ -213,6 +225,7 @@ _CLASSIFIERS: dict[str, Callable[[Mapping[str, Any]], str | None]] = {
     "instruction": _classify_instruction,
     "chat": _classify_chat,
     "trace": _classify_trace,
+    "preference": _classify_preference,
 }
 
 
