@@ -730,10 +730,13 @@ plan (`docs/CHECKPOINT_RESUME_PLAN.md` C2) reserved for a 7B/seq-4096 run.
   7B/seq-4096.
 - **Resume-guarantee hardening - DONE + GPU-validated (#832).** The code review of this evidence surfaced
   four guarantee gaps (the proof above was already sound - real training, measured continuation - but these
-  strengthen the *guarantees*). All four are now implemented and validated on the real 7B/seq-4096 workload
-  through the fully-sealed managed `--subprocess` path (a hardening worker wheel `1af5a079...` sealed into
-  env `backend-corpus-studio-sealed-flp-v5`, lock `aa9dac62...`, run from a neutral CWD; evidence preserved
-  under `examples/wbg/runs/resume-hardening-7b-seq4096/`):
+  strengthen the *guarantees*), then three more (PYTHONPATH isolation beyond `-P`, verify-worker-identity on
+  the hybrid resume, and a guarded lineage re-read). All are implemented and validated on the real
+  7B/seq-4096 workload through the fully-sealed managed `--subprocess` path from a neutral CWD (first on
+  wheel `1af5a079...` / env `flp-v5`; then re-proven with the review fixes on wheel `80515175...` / env
+  `flp-v7`, where the resuming wheel matched the checkpoint's bound wheel so the worker-identity gate
+  admitted the resume - a mismatch fails closed). Evidence preserved under
+  `examples/wbg/runs/resume-hardening-7b-seq4096/`:
   - **Worker-identity binding (H1).** The runner now seals the executing worker wheel sha256 (from the
     environment lock) into the checkpoint, and the hybrid restore verifies it. Validated: the step-2
     checkpoint bound `worker_wheel_sha256 = 1af5a079...` (previously null).
