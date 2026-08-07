@@ -4001,7 +4001,14 @@ def run_training(  # pragma: no cover - optional training-stack integration
             # global_step from the restored checkpoint, so the tracker's step-sequence + loss-coverage
             # checks must expect [resumed_from+1 .. schedule], not [1 .. schedule].
             execution_tracker.resumed_from_step = resume_manifest.state.global_optimizer_step
-        materialized_resume_dir = Path(config.output_dir).parent / "_resume_hf"
+        # A per-resume-unique translation dir: config.output_dir is already run-scoped, but a fixed name
+        # could still collide with a partial left by a crashed prior attempt under the same run scope, so
+        # isolate each attempt (uuid) - a tampered/incomplete one is rmtree'd on failure below.
+        from uuid import uuid4  # noqa: PLC0415
+
+        materialized_resume_dir = (
+            Path(config.output_dir).parent / f"_resume_hf_{uuid4().hex}"
+        )
         try:
             resume_from_checkpoint = str(
                 materialize_hf_checkpoint(
