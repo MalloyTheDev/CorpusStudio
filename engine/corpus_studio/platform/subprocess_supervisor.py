@@ -18,6 +18,7 @@ pipes isn't portable to Windows). Dependency-light: stdlib + platform contracts 
 from __future__ import annotations
 
 import math
+import os
 import queue
 import subprocess
 import sys
@@ -126,6 +127,19 @@ def _default_worker_argv(
     if corpus_root != ".":
         argv += ["--corpus-root", corpus_root]
     return argv
+
+
+def _worker_env() -> dict[str, str]:
+    """The child worker's environment: the parent's, minus the import-affecting variables PYTHONPATH and
+    PYTHONHOME. `-P` in the worker argv blocks the CWD/script-dir prepend but NOT PYTHONPATH; together
+    they isolate the worker's imports to its installed site-packages (the pinned wheel), so a managed
+    run cannot execute an inherited checkout's source while reporting the sealed wheel hash. CUDA/HF and
+    every other non-import variable are preserved."""
+    return {
+        key: value
+        for key, value in os.environ.items()
+        if key not in ("PYTHONPATH", "PYTHONHOME")
+    }
 
 
 def _dispatch_line(
@@ -527,6 +541,7 @@ def execute_run_subprocess(
             encoding="utf-8",
             errors="replace",
             bufsize=1,
+            env=_worker_env(),
             creationflags=process_group_creation_flags(),
             start_new_session=start_new_process_session(),
         )

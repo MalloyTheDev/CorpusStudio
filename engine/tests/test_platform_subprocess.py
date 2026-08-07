@@ -62,6 +62,20 @@ def test_worker_streams_accepted_events_and_terminal():
         assert m["correlation_id"] == "c-run-1"
 
 
+def test_worker_env_strips_import_shadowing_vars(monkeypatch):
+    """The worker child never inherits PYTHONPATH/PYTHONHOME, so an inherited path cannot shadow the
+    sealed wheel with another checkout (together with -P in the argv). Other vars are preserved."""
+    from corpus_studio.platform.subprocess_supervisor import _worker_env
+
+    monkeypatch.setenv("PYTHONPATH", "/tmp/other-checkout/engine")
+    monkeypatch.setenv("PYTHONHOME", "/tmp/other-home")
+    monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "0")
+    env = _worker_env()
+    assert "PYTHONPATH" not in env
+    assert "PYTHONHOME" not in env
+    assert env.get("CUDA_VISIBLE_DEVICES") == "0"
+
+
 def test_dispatch_carries_resume_only_when_resuming():
     """The run_dispatch line embeds the resume instruction only for an actual resume; an ordinary
     from-scratch dispatch is byte-for-byte unchanged, so a worker that never consumes resume receives

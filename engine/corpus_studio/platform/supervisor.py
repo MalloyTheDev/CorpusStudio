@@ -1046,18 +1046,32 @@ def execute_run(
     # request named, so the terminal record itself can establish what it resumed.
     resume_lineage = None
     if ctx.resume is not None:
-        from corpus_studio.platform.checkpoint import load_checkpoint_manifest  # noqa: PLC0415
+        from corpus_studio.platform.checkpoint import (  # noqa: PLC0415
+            CheckpointError,
+            load_checkpoint_manifest,
+        )
         from corpus_studio.platform.contracts import ResumeLineage  # noqa: PLC0415
 
-        # The parent checkpoint was already integrity-verified before the restore; read its manifest
-        # (no re-hash) only to name the parent run + resumed-from step on the terminal record.
-        parent_checkpoint = load_checkpoint_manifest(ctx.resume.checkpoint_dir)
-        resume_lineage = ResumeLineage(
-            parent_run_id=parent_checkpoint.source_run_id,
-            parent_checkpoint_id=ctx.resume.checkpoint_id,
-            parent_checkpoint_hash=ctx.resume.checkpoint_manifest_hash,
-            resumed_from_global_step=parent_checkpoint.state.global_optimizer_step,
-        )
+        # The parent checkpoint was already integrity-verified before the restore; re-read its manifest
+        # (no re-hash) only to name the parent run + resumed-from step. Guarded: a checkpoint that
+        # disappeared or was swapped after admission must not crash the terminal record nor attach
+        # lineage for a checkpoint this run did not restore - so a read failure, or an id/hash that no
+        # longer matches the verified request, yields no lineage rather than a wrong one.
+        try:
+            parent_checkpoint = load_checkpoint_manifest(ctx.resume.checkpoint_dir)
+        except CheckpointError:
+            parent_checkpoint = None
+        if (
+            parent_checkpoint is not None
+            and parent_checkpoint.checkpoint_id == ctx.resume.checkpoint_id
+            and parent_checkpoint.checkpoint_manifest_hash == ctx.resume.checkpoint_manifest_hash
+        ):
+            resume_lineage = ResumeLineage(
+                parent_run_id=parent_checkpoint.source_run_id,
+                parent_checkpoint_id=ctx.resume.checkpoint_id,
+                parent_checkpoint_hash=ctx.resume.checkpoint_manifest_hash,
+                resumed_from_global_step=parent_checkpoint.state.global_optimizer_step,
+            )
     manifest = RunManifest(
         run_id=rid,
         plan_ref=plan_ref,

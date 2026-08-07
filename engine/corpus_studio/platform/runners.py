@@ -382,6 +382,10 @@ class TrainingRunner:
         # resume without writing.
         if ctx.resume is not None:
             checkpoint_kwargs["resume"] = ctx.resume
+            # The resuming worker's own wheel sha256 (managed tier), so the trainer can verify the
+            # checkpoint was produced by the same worker BYTES even when this run writes no checkpoints
+            # of its own (checkpoint_bound is None then).
+            checkpoint_kwargs["worker_wheel_sha256"] = ctx.worker_wheel_sha256
         try:
             with watchdog:
                 result = trainer_fn(

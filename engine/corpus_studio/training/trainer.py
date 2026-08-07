@@ -3459,6 +3459,7 @@ def run_training(  # pragma: no cover - optional training-stack integration
     source_run_id: str | None = None,
     checkpoints_root: str | None = None,
     resume: CheckpointResumeRequest | None = None,
+    worker_wheel_sha256: str | None = None,
 ) -> TrainResult:
     """Run the training. Lazy-imports the heavy stack; verified via the CPU toy path (a real GPU QLoRA
     can only be user-smoke-tested). Raises :class:`TrainerError` if the runtime can't run the request.
@@ -4015,6 +4016,21 @@ def run_training(  # pragma: no cover - optional training-stack integration
 
         resume_manifest = verify_checkpoint_integrity(resume.checkpoint_dir)
         verify_matches_request(resume_manifest, resume)
+        # Verify the RESUMING worker's bytes against the checkpoint: a managed checkpoint records the
+        # sealed wheel sha256 it was produced by, so a resume under a different wheel (or a shadowing
+        # checkout) fails closed here rather than silently continuing under unsealed worker bytes. The
+        # hybrid path does not call restore_checkpoint (HF owns the restore), so this is the one place
+        # the worker-identity gate fires on resume.
+        sealed_wheel = resume_manifest.bound.worker_wheel_sha256
+        if (
+            sealed_wheel is not None
+            and worker_wheel_sha256 is not None
+            and sealed_wheel != worker_wheel_sha256
+        ):
+            raise TrainerError(
+                "the checkpoint was produced by a different worker wheel than this worker; resume is "
+                "incompatible (exact-lineage worker-byte mismatch)"
+            )
         if execution_tracker is not None:
             # A resumed run's evidence counts from the resumed-from optimizer step: HF continues its
             # global_step from the restored checkpoint, so the tracker's step-sequence + loss-coverage
