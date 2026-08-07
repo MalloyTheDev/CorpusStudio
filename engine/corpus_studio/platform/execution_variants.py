@@ -105,6 +105,12 @@ def reference_execution_variants() -> tuple[BackendExecutionVariant, ...]:
         BackendExecutionVariant(
             backend_id="corpus_studio",
             variant_kind=ExecutionVariantKind.dense_qlora_sft,
+            # workload_verified: the canonical harness. Its intermediate-checkpoint WRITE + exact-lineage
+            # RESUME (a FEATURE of this variant, NOT a separate variant) are also workload_verified on the
+            # real 7B/seq-4096 workload - Qwen2.5-7B QLoRA nf4 r16, flash SDPA + liger + paged_adamw_8bit;
+            # resumed from step 2 with a byte-identical continuation loss - through the managed
+            # --subprocess dispatch after #830 wired resume into it (previously in-process only).
+            # See docs/HOST_STATE.md.
             support=ExecutionVariantSupport.workload_verified,
         ),
         BackendExecutionVariant(
