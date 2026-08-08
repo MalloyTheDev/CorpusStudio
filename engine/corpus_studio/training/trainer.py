@@ -3714,23 +3714,32 @@ def grpo_policy_loss(
             "empty/failed rollout that would silently dilute the group objective"
         )
 
+    valid = completion_mask > 0
+
     def _completion_mean(per_token: Any) -> Any:
         # per-completion mean over VALID tokens, then group-mean (length-unbiased, padding-free). Use
-        # torch.where (NOT per_token * mask): a padded cell that went inf/NaN in a nonlinear term (e.g.
-        # expm1 of an extreme pad log-ratio) must be REPLACED by 0, since 0 * NaN/inf == NaN would poison
-        # the whole group's mean despite every valid token being healthy.
-        masked = torch.where(completion_mask > 0, per_token, torch.zeros_like(per_token))
+        # torch.where (NOT per_token * mask) so a padded cell is REPLACED by 0, not multiplied
+        # (0 * NaN/inf == NaN would poison the whole group's mean).
+        masked = torch.where(valid, per_token, torch.zeros_like(per_token))
         per_completion = masked.sum(dim=-1) / valid_tokens.to(per_token.dtype)
         return per_completion.mean()
 
     adv = advantages.unsqueeze(-1)  # [G, 1] -> broadcast across each completion's tokens
-    ratio = torch.exp(policy_logprobs - old_logprobs)
+    # Mask the log-ratios BEFORE the nonlinear exp / expm1: an overflowing PAD value keeps the FORWARD loss
+    # finite (via _completion_mean's output mask), but autograd would still flow 0 * exp'(pad) == 0 * inf ==
+    # NaN into the policy gradient and corrupt the update. Substituting 0 at masked positions (exp(0)=1,
+    # expm1(0)=0) keeps BOTH the forward and the gradient clean; the pad is then excluded from the mean.
+    safe_logratio = torch.where(
+        valid, policy_logprobs - old_logprobs, torch.zeros_like(policy_logprobs)
+    )
+    ratio = torch.exp(safe_logratio)
     unclipped = ratio * adv
     clipped = torch.clamp(ratio, 1.0 - clip_range, 1.0 + clip_range) * adv
     pg_loss = _completion_mean(-torch.min(unclipped, clipped))
     # k3 KL in float32: expm1(x) - x == exp(x) - 1 - x, cancellation-free even for a tiny log-ratio.
-    log_ref_ratio = (ref_logprobs - policy_logprobs).float()
-    kl = _completion_mean(torch.expm1(log_ref_ratio) - log_ref_ratio)
+    ref_logratio = (ref_logprobs - policy_logprobs).float()
+    safe_ref_logratio = torch.where(valid, ref_logratio, torch.zeros_like(ref_logratio))
+    kl = _completion_mean(torch.expm1(safe_ref_logratio) - safe_ref_logratio)
     loss = pg_loss + kl_coefficient * kl.to(pg_loss.dtype)
     if entropy_bonus:
         loss = loss - entropy_bonus * _completion_mean(entropy)

@@ -96,6 +96,20 @@ def test_grpo_policy_loss_masks_padding_without_nan_poisoning() -> None:
     assert float(loss) == pytest.approx(-1.0, abs=1e-4)
 
 
+def test_grpo_policy_loss_gradient_is_finite_despite_extreme_padding() -> None:
+    torch = pytest.importorskip("torch")
+
+    # An extreme pad log-ratio makes exp overflow; the forward is masked finite, but a naive output-only
+    # mask would flow 0 * exp'(inf) == NaN into the policy gradient. Masking the log-ratio INPUT before exp
+    # keeps the GRADIENT finite too (a forward-only check would miss this).
+    policy = torch.tensor([[-0.5, -0.5, 100.0]], requires_grad=True)
+    old = torch.tensor([[-0.5, -0.5, 0.0]])
+    mask = torch.tensor([[1.0, 1.0, 0.0]])
+    loss, _ = grpo_policy_loss(policy, old, policy.detach(), torch.tensor([1.0]), mask, kl_coefficient=1.0)
+    loss.backward()
+    assert policy.grad is not None and bool(torch.isfinite(policy.grad).all())
+
+
 def test_grpo_policy_loss_refuses_an_empty_completion_row() -> None:
     torch = pytest.importorskip("torch")
 
