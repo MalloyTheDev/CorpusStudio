@@ -8,6 +8,14 @@ ladder only on **measured evidence**, and all foundational contracts stay **dens
 MoE-compatible** (see [`TRAINING_SYSTEMS_ARCHITECTURE.md`](TRAINING_SYSTEMS_ARCHITECTURE.md),
 [`PRODUCT_VS_RESEARCH.md`](PRODUCT_VS_RESEARCH.md)).
 
+> **Reconciled 2026-08-08.** Reward-model *training* has since shipped as a `workload_verified` **PRODUCT**
+> capability (RL slice S5a, #833-#838) - a `RewardRunner` lane that trains a QLoRA SEQ_CLS scalar score head
+> under a Bradley-Terry loss, promoted on held-out pairwise ranking accuracy. That is a training capability
+> in the product S-series, **not** the gated on-policy-RL work here. Section 1 below is updated to reflect it
+> and now carries the concrete, **reviewable** on-policy-RL (S5b/S5c) design that a trained reward model
+> unblocks. On-policy RL (rollout + PPO/GRPO) stays gated: **no implementation PR until this design is
+> reviewed**.
+
 CorpusStudio is a model-development platform: it **builds, trains, evaluates, and releases** models and
 model-powered systems. This track extends that surface to three learning/memory paradigms it does not
 yet architect. What exists today is captured honestly in each section so the gap is explicit, not
@@ -15,28 +23,78 @@ implied-away.
 
 ## 1. Reinforcement learning as an architected mode (not just labels)
 
-**Today:** **offline preference optimization (DPO) has a shipped control-plane vertical** -
-`ObjectiveKind.preference_optimization` + the `dpo_qlora` objective, fail-closed admission (#775/#779), a
-resolver that seals a `ResolvedPreferenceExecutionConfiguration` (#782), and CLI knobs (#783); its worker
-primitive is GPU-validated (exploratory), refused at execution until a sealed run promotes it (#784).
-**On-policy RL** (`reward_modeling`, `TaskType.grpo` / `reward`) remains *declared objectives only* -
-there is still no rollout loop, reward-model serving, or on-policy driver.
+**Today (reconciled 2026-08-08):**
 
-**Proposed additive architecture:**
+- **Offline preference optimization (DPO) is `workload_verified`** - the `dpo_qlora` objective +
+  `ResolvedPreferenceExecutionConfiguration` + a `PreferenceRunner` lane that trains a QLoRA adapter over a
+  frozen reference with a sequence-chunked log-prob, promoted by a measured GPU bring-up.
+- **Reward-model training is `workload_verified`** (RL slice S5a, #833-#838) - the `reward_model` objective +
+  `ResolvedRewardExecutionConfiguration` + a `RewardRunner` lane that trains a QLoRA **SEQ_CLS** scalar score
+  head under a Bradley-Terry loss; the promotion gate is **held-out pairwise ranking accuracy**. So a reward
+  **source** now exists as a trainable, supervisor-admittable product artifact.
+- **On-policy RL is still NOT built.** There is no rollout / generation loop, no reward-model **serving**
+  (using a trained reward model to score fresh completions), and no on-policy driver. `TaskType.grpo` is
+  declared-only; there is no `ppo` task/objective, no experience/rollout contract, and no KL/entropy
+  controller. That gap is what S5b/S5c below design.
 
-- **On-policy training loops**: PPO, GRPO (group-relative), and the RLHF / RLAIF pipeline
-  (policy + reference + reward + optional critic).
-- **Rollout / experience collection**: a generation phase (sample completions from the current
-  policy) feeding an experience buffer - a streaming data source distinct from a static dataset (ties
-  to the P3 streaming data-cursor gap).
-- **Reward sources**: served reward models (`reward_modeling`), rule / verifier rewards
-  (`process_supervision` / `verifier_training`), and RLAIF (an LLM judge as reward, reusing Evaluation
-  Studio's judge under the provider policy - never an unsanctioned generation path).
-- **Stability controls**: KL-to-reference penalty, entropy bonus, advantage normalization, clip ranges
-  - sealed like any other execution field.
-- **Additive contracts**: an experience/rollout source, a reward-source reference, and a KL/entropy
-  controller config - all **backend-scoped**. RL is not dense-QLoRA-SFT, so it needs the P0c/P0d
-  backend-scoped resolved-execution variants, **never a mutation of the sealed SFT execution seal**.
+### S5b/S5c design (reviewable proposal - no implementation PR until approved)
+
+On-policy RL is **not** dense-QLoRA-SFT, so it takes its OWN **backend-scoped** resolved-execution config
+(P0d, #484 - the same sibling-seal mechanism SFT / DPO / pretraining / full-finetune / **reward** already
+use), and **never mutates the byte-locked SFT seal**. It reuses, rather than redesigns: the reward model
+(S5a) as the reward source, the frozen-reference-via-`disable_adapter` pattern (DPO), the sealed-optimizer +
+gradient/adapter evidence primitives, the admit-at-planning / refuse-at-execution ladder, and (for RLAIF)
+Evaluation Studio's judge under the provider policy.
+
+**Execution shape.** A new sibling `ResolvedRolloutExecutionConfiguration` (the 6th resolved-execution
+config), carried on `RunPlan` via the existing "exactly one execution authority" tuple, behind a new
+`on_policy_rl` execution-variant kind - admitted at planning, refused at execution until a measured run
+promotes it (exactly the ladder reward followed).
+
+**Additive contracts (all backend-scoped):**
+
+- **`RolloutSpec`** - the generation phase: sampling params (temperature, top_p, `max_new_tokens`), the
+  number of rollouts per prompt (the **GRPO group size**), and the decode policy. Generation reuses the
+  sanctioned decode path - never an unsanctioned generation path.
+- **`ExperienceSource`** - the on-policy experience buffer: completions are generated FRESH from the current
+  policy each iteration (a streaming source distinct from a static dataset), so this ties to the **G2
+  streaming data-cursor** gap (shard/offset/consumed/mixture-RNG). On-policy => regenerated, not replayed;
+  off-policy replay is a later variant.
+- **`RewardSourceRef`** - a hash-pinned reference to what scores each completion: (a) the
+  **`workload_verified` `reward_model`** served for scoring [the primary path, reusing S5a], (b) rule /
+  verifier rewards (`process_supervision` / `verifier_training`), or (c) RLAIF (an LLM judge reusing
+  Evaluation Studio's judge under the provider policy). Fail-closed: a reward source that is not itself
+  admittable (e.g. a reward model below `workload_verified`) refuses.
+- **`StabilityController`** - sealed on-policy controls: KL-to-reference penalty (coefficient + target),
+  entropy bonus, advantage normalization, and the PPO clip range (or GRPO group-relative advantage). Sealed
+  like any execution field; no silent defaults.
+- **`PolicyOptimizationSpec`** - **GRPO first** (group-relative advantage, NO critic - cheaper, fits the
+  12 GB envelope like DPO/reward did), then **PPO** (adds a critic/value head). Reference = the frozen base
+  via `disable_adapter` (the DPO pattern); reward = the `RewardSourceRef`.
+
+**Evidence + promotion gate.** A new sibling `RolloutExecutionEvidence` (mirroring
+`RewardExecutionEvidence`): per-iteration rollouts generated, mean/spread reward from the source, **KL
+divergence to the reference** (must stay within the sealed bound - a blown-up KL is reward-hacking /
+collapse), entropy, advantage stats, and finite policy-update steps. The **promotion GATE is a MEASURED
+mean-reward lift on a HELD-OUT prompt set while KL stays within bound** - never a falling loss, and never
+training-reward alone (which reward-hacks). That held-out-reward-under-bounded-KL signal is the on-policy
+analog of reward's held-out pairwise accuracy.
+
+**Boundary posture.** A PRODUCT capability (STANDARD tier), opt-in, **dense + MoE-safe**, backend-scoped;
+**not** a product default, navigation, or identity, and **not** the IEEE sealed-research overlay. It
+advances the `SupportLevel` ladder only on measured evidence.
+
+**Slice sequence (each evidence-gated, mirroring the reward vertical):**
+
+1. **S5b-1** contracts + enums (`RolloutSpec` / `ExperienceSource` / `RewardSourceRef` /
+   `StabilityController` / `PolicyOptimizationSpec` + the `on_policy_rl` variant) at `contract_validated`;
+2. **S5b-2** resolver + planner routing (admit-at-planning, refuse-at-execution);
+3. **S5b-3** execution-evidence contracts + tracker (rollouts / reward / KL / advantage);
+4. **S5b-4** the worker: rollout generation -> reward scoring (served reward model) -> **GRPO** update,
+   backend-scoped, reusing the frozen-reference + sealed-optimizer primitives;
+5. **S5b-5** runner + supervisor re-verify + the `on_policy_rl` lane;
+6. **S5b-6** GPU proof (a small model, GRPO, no critic) -> `on_policy_rl` `workload_verified`.
+7. **S5c** then adds **PPO** (critic/value head) and the **RLAIF** reward source (Evaluation Studio judge).
 
 ## 2. Memory-augmented training
 
@@ -95,6 +153,8 @@ explicit "remember this." OpenAI reports large lifts across the 2024 -> 2026 sys
   cursor (P3); dreaming leans on Evaluation Studio + the trace/data loops.
 - **Sequence (after the current P0-P7 training-systems ladder; a proposal for review, each
   evidence-gated):**
-  - **L1** RL as an architected mode (rollout + reward + KL, backend-scoped);
+  - **L1** RL as an architected mode (rollout + reward + KL, backend-scoped): the **reward source** is
+    shipped (`reward_model` `workload_verified`, S5a); the on-policy **rollout + GRPO/PPO** half is designed
+    in Section 1 (S5b/S5c) and stays gated until that design is reviewed;
   - **L2** memory-augmented training (episodic/long-term memory, retrieval-augmented);
   - **L3** memory synthesis / consolidation ("dreaming") + the long-horizon memory eval profiles.
