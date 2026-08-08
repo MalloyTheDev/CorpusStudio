@@ -566,6 +566,19 @@ def test_on_policy_rl_refuses_a_tampered_provenance_plan(tmp_path):
         )
 
 
+def test_on_policy_rl_refuses_a_checkpoint_cadence():
+    # The rollout worker has no CheckpointCoordinator, so a sealed cadence would set save_strategy="steps"
+    # yet write nothing - a silent broken promise. The planner refuses --checkpoint-cadence fail-closed
+    # rather than seal an unkept guarantee (the coordinator wires only the adapter SFT lane).
+    with pytest.raises(PlannerError, match="on-policy RL lane cannot write intermediate checkpoints"):
+        _plan(
+            _profile(cc_major=8), _report(), task_type="grpo", objective_id="grpo",
+            checkpoint_steps=10,
+            reward_source_manifest=str(_REWARD_BRINGUP / "runs/run-reward-sealed-0001/RunManifest.json"),
+            reward_source_plan=str(_REWARD_BRINGUP / "reward-bringup.RunPlan.json"),
+        )
+
+
 def test_execute_run_refuses_a_reward_plan_with_a_non_reward_runner():
     # A reward plan routes to the "reward" lane; execute_run additionally pins the RUNNER TYPE, so a
     # look-alike runner that merely names the reward lane is refused fail-closed before any training - the

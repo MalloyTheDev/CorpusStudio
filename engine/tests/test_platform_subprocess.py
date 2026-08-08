@@ -364,6 +364,8 @@ def test_build_lane_runner_is_the_shared_factory():
         FullFinetuneRunner,
         PreferenceRunner,
         PretrainingRunner,
+        RewardRunner,
+        RolloutRunner,
         TrainingRunner,
         build_lane_runner,
     )
@@ -375,6 +377,8 @@ def test_build_lane_runner_is_the_shared_factory():
     assert build_lane_runner("cpu_toy").cpu_toy is True
     assert isinstance(build_lane_runner("preference"), PreferenceRunner)
     assert isinstance(build_lane_runner("full_finetune"), FullFinetuneRunner)
+    assert isinstance(build_lane_runner("reward"), RewardRunner)
+    assert isinstance(build_lane_runner("rollout"), RolloutRunner)
     pre = build_lane_runner("pretraining", corpus_root="/data/corpus")
     assert isinstance(pre, PretrainingRunner) and pre.cpu_toy is False
     assert pre.corpus_root == "/data/corpus"
@@ -387,15 +391,24 @@ def test_worker_arg_parser_accepts_the_pretraining_lanes():
     # pretraining plan (forced to --subprocess) could never run. Gate on what the parser ACCEPTS.
     from corpus_studio.platform.worker import _build_arg_parser
 
+    from corpus_studio.platform.worker import _RUNNER_CHOICES
+
     parser = _build_arg_parser()
     base = ["--backend-id", "b", "--environment-id", "e"]
     # Every lane build_lane_runner routes must be an accepted --runner choice, or it is a dead subprocess
-    # lane: preference (DPO, workload_verified) + full_finetune both route, so both must parse.
+    # lane: preference (DPO), full_finetune, reward (pairwise RM) and rollout (on-policy RL) all route, so
+    # all must parse. required_runner_lane returns these names and the managed --subprocess path passes
+    # them straight to --runner.
     for lane in (
-        "echo", "cpu_toy", "training", "preference", "full_finetune",
+        "echo", "cpu_toy", "training", "preference", "full_finetune", "reward", "rollout",
         "pretraining", "pretraining_cpu_toy",
     ):
         assert parser.parse_args(["--runner", lane, *base]).runner == lane
+    # Gate on wiring, not a hardcoded list: every non-fallthrough lane the factory maps must be an accepted
+    # choice (a routable-but-unparseable lane is a dead runner - the #810 dead-lane class). 'reward' and
+    # 'rollout' regressed exactly this way (mapped by build_lane_runner, absent from the parser choices).
+    for lane in ("preference", "full_finetune", "reward", "rollout", "pretraining"):
+        assert lane in _RUNNER_CHOICES, f"lane {lane!r} maps in build_lane_runner but the parser rejects it"
     assert parser.parse_args(base).corpus_root == "."
     assert parser.parse_args([*base, "--corpus-root", "/data/corpus"]).corpus_root == "/data/corpus"
     with pytest.raises(SystemExit):

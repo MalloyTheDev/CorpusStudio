@@ -2143,6 +2143,17 @@ def build_run_plan(
             "full-parameter fine-tuning cannot write intermediate checkpoints yet; drop "
             "--checkpoint-cadence (the coordinator wires the adapter SFT lane)"
         )
+    # The reward (pairwise RM) and rollout (on-policy RL) workers have no CheckpointCoordinator, so a
+    # sealed cadence would set save_strategy="steps" yet write nothing - a silent broken promise. Refuse it
+    # fail-closed rather than seal an unkept guarantee (the coordinator wires only the adapter SFT lane).
+    if (checkpoint_cadence is not None or checkpoint_keep_last is not None) and (
+        is_reward_model or is_rollout
+    ):
+        lane = "reward-model" if is_reward_model else "on-policy RL"
+        raise PlannerError(
+            f"the {lane} lane cannot write intermediate checkpoints; drop --checkpoint-cadence "
+            "(the CheckpointCoordinator wires only the adapter SFT lane)"
+        )
     if checkpoint_cadence is None and checkpoint_keep_last is not None:
         raise PlannerError("--checkpoint-keep-last requires --checkpoint-cadence")
     checkpoint_policy = {

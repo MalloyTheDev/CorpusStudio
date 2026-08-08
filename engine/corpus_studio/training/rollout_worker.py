@@ -109,6 +109,15 @@ def run_rollout(  # pragma: no cover - optional training-stack integration; prov
     objective = get_objective(execution.objective_ref.id)
     if objective is None:
         raise RolloutWorkerError(f"unknown sealed rollout objective {execution.objective_ref.id!r}")
+    # Defense-in-depth: this worker hardcodes nf4 loaders for BOTH the policy and the served reward model.
+    # Refuse any other sealed quantization rather than silently run nf4 on a differently-sealed config (the
+    # planner already pins grpo to nf4; a hand-built or future int4 config must fail closed here, not lie).
+    if execution.precision.quantized_storage_format.value != "nf4":
+        raise RolloutWorkerError(
+            "the rollout worker loads nf4 4-bit models only; the sealed quantization is "
+            f"{execution.precision.quantized_storage_format.value!r} - refuse rather than run a different "
+            "precision than the seal declares."
+        )
     # The rollout loop processes ONE prompt per microbatch (a group of rollouts already fills memory); a
     # larger per-device batch must be expressed via gradient accumulation, not silently ignored.
     if execution.batching.micro_batch_size != 1:

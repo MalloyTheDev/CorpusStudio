@@ -266,14 +266,19 @@ def run_worker(
 
 
 # Must stay in sync with runners.build_lane_runner - a routable lane the parser rejects is a dead runner
-# no matter what the factory maps (the pretraining #810 dead-lane lesson). 'preference' (DPO) and
-# 'full_finetune' route through build_lane_runner, so the subprocess parser must accept them too.
+# no matter what the factory maps (the pretraining #810 dead-lane lesson). 'preference' (DPO),
+# 'full_finetune', 'reward' (pairwise RM) and 'rollout' (on-policy RL) all route through
+# build_lane_runner, so the subprocess parser must accept them too - required_runner_lane returns those
+# names and the managed --subprocess path passes them straight to '--runner'. A regression test asserts
+# every build_lane_runner lane parses here (test_platform_subprocess), so this set cannot silently drift.
 _RUNNER_CHOICES = (
     "echo",
     "cpu_toy",
     "training",
     "preference",
     "full_finetune",
+    "reward",
+    "rollout",
     "pretraining",
     "pretraining_cpu_toy",
 )

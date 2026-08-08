@@ -1332,7 +1332,18 @@ def execute_run(
                             if failed_fit is not None
                             else None
                         ),
+                        # A failed manifest may carry NO success evidence (RunManifest's terminal-only
+                        # validator). Clear EVERY family, not just SFT - a succeeded pretraining / DPO /
+                        # full-finetune / reward / rollout run whose manifest persistence fails would
+                        # otherwise rebuild a "failed" payload still carrying its evidence, and
+                        # model_validate below would reject it, escaping this classified storage failure
+                        # as an unhandled ValidationError.
                         "training_success_evidence": None,
+                        "pretraining_success_evidence": None,
+                        "preference_success_evidence": None,
+                        "full_finetune_success_evidence": None,
+                        "reward_success_evidence": None,
+                        "rollout_success_evidence": None,
                     }
                 )
                 manifest = RunManifest.model_validate(payload)
