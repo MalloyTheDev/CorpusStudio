@@ -6,11 +6,43 @@ import pytest
 
 from corpus_studio.training.trainer import (
     TrainerError,
+    completion_token_mask,
     format_rollout_prompt,
     grpo_group_advantage,
     grpo_policy_loss,
     token_logprobs_and_entropy,
 )
+
+
+# --- completion_token_mask: keep up-to-and-including the first EOS, drop trailing pad (torch-guarded) ----
+
+
+def test_completion_token_mask_keeps_first_eos_drops_trailing_pad() -> None:
+    torch = pytest.importorskip("torch")
+
+    # [real, real, EOS(real), EOS(pad), EOS(pad)] with pad_id == eos_id == 9 (no dedicated pad token).
+    targets = torch.tensor([[1, 2, 9, 9, 9]])
+    mask = completion_token_mask(targets, eos_id=9)
+    # the REAL end-of-completion EOS stays scored; only the trailing pad is masked.
+    assert mask.tolist() == [[1.0, 1.0, 1.0, 0.0, 0.0]]
+
+
+def test_completion_token_mask_immediate_eos_is_one_valid_token() -> None:
+    torch = pytest.importorskip("torch")
+
+    # an immediate-EOS completion must count as ONE valid token (not zero -> wrongly refused).
+    targets = torch.tensor([[9, 9, 9]])
+    mask = completion_token_mask(targets, eos_id=9)
+    assert mask.tolist() == [[1.0, 0.0, 0.0]]
+
+
+def test_completion_token_mask_keeps_all_when_no_eos() -> None:
+    torch = pytest.importorskip("torch")
+
+    # a completion truncated at max_new_tokens with no EOS keeps every generated token.
+    targets = torch.tensor([[1, 2, 3]])
+    mask = completion_token_mask(targets, eos_id=9)
+    assert mask.tolist() == [[1.0, 1.0, 1.0]]
 
 
 # --- format_rollout_prompt: the SEALED generation-prompt formatter (fail-closed guards, torch-free) ------
