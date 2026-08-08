@@ -1048,17 +1048,18 @@ def execute_run(
     if ctx.resume is not None:
         from corpus_studio.platform.checkpoint import (  # noqa: PLC0415
             CheckpointError,
-            load_checkpoint_manifest,
+            verify_checkpoint_integrity,
         )
         from corpus_studio.platform.contracts import ResumeLineage  # noqa: PLC0415
 
-        # The parent checkpoint was already integrity-verified before the restore; re-read its manifest
-        # (no re-hash) only to name the parent run + resumed-from step. Guarded: a checkpoint that
-        # disappeared or was swapped after admission must not crash the terminal record nor attach
-        # lineage for a checkpoint this run did not restore - so a read failure, or an id/hash that no
-        # longer matches the verified request, yields no lineage rather than a wrong one.
+        # Re-verify the parent checkpoint's integrity (recompute its content + manifest hash) before
+        # recording lineage, so a checkpoint that disappeared, was corrupted, or was CONTENT-swapped
+        # after admission yields NO lineage rather than crashing the terminal record or attaching lineage
+        # for a checkpoint this run did not restore. The id + hash must additionally still match the
+        # verified resume request. (Re-verification is cheap relative to the run and only touches the
+        # named parent checkpoint.)
         try:
-            parent_checkpoint = load_checkpoint_manifest(ctx.resume.checkpoint_dir)
+            parent_checkpoint = verify_checkpoint_integrity(ctx.resume.checkpoint_dir)
         except CheckpointError:
             parent_checkpoint = None
         if (
