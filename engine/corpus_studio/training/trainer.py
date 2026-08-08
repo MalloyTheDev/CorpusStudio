@@ -3536,8 +3536,14 @@ def run_reward_training(  # pragma: no cover - optional training-stack integrati
         length_deltas.append(micro_delta / gradient_accumulation_steps)
         if checkpoint_callback is not None and checkpoint_every > 0 and (step + 1) % checkpoint_every == 0:
             checkpoint_callback(step + 1)
+    # peak_gib is allocated-only (comparable across the SFT/DPO/pretraining primitives); peak_reserved_gib
+    # adds the caching allocator's reservations - the truer occupancy ceiling against the device budget.
+    # Both are exploratory telemetry; the authoritative memory-fit measurement is the runner's measure-fit.
     peak_gib = (
         torch.cuda.max_memory_allocated(cuda_device) / (1024**3) if cuda_device is not None else 0.0
+    )
+    peak_reserved_gib = (
+        torch.cuda.max_memory_reserved(cuda_device) / (1024**3) if cuda_device is not None else 0.0
     )
     evidence = summarize_preference_evidence(losses, margins, length_deltas)
     evidence.update({
@@ -3548,6 +3554,7 @@ def run_reward_training(  # pragma: no cover - optional training-stack integrati
         "grad_norms": grad_norms,
         "final_grad_norm": grad_norms[-1] if grad_norms else 0.0,
         "peak_gib": peak_gib,
+        "peak_reserved_gib": peak_reserved_gib,
         "supervision_intact": ledger.supervision_intact,
         "integrity_issues": [issue.model_dump() for issue in integrity_issues],
     })
