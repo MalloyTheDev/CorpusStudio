@@ -3643,6 +3643,67 @@ def evaluate_reward_accuracy(  # pragma: no cover - optional training-stack inte
     }
 
 
+# --------------------------------------------------------------------------------------------------
+# On-policy RL / GRPO (RL slice S5b) - the critic-free group-relative math core. Kept PURE (advantage) +
+# torch-thin (loss) so the correctness is locked in the base gate; the rollout-generation + reward-serving
+# loop that drives them is ``run_rollout_training`` below (pragma, proven by a GPU run).
+# --------------------------------------------------------------------------------------------------
+
+
+def grpo_group_advantage(rewards: Sequence[float], *, eps: float = 1e-6) -> list[float]:
+    """Group-relative advantage for ONE GRPO prompt group (PURE, torch-free). GRPO has no critic: it
+    normalizes each rollout's scalar reward by the GROUP's own mean + std - ``A_i = (r_i - mean) / (std +
+    eps)``. A rollout scored above its group's average earns a positive advantage (reinforce it), below-
+    average negative (suppress it); a UNIFORM group (std 0 - the reward source could not separate the
+    rollouts) yields all-zero advantages, so an indistinguishable group teaches nothing. Requires a group
+    of at least two rollouts."""
+    group = list(rewards)
+    if len(group) < 2:
+        raise TrainerError("GRPO needs a group of at least two rollouts to compute a relative advantage")
+    for reward in group:
+        if isinstance(reward, bool) or not isinstance(reward, Real) or not math.isfinite(float(reward)):
+            raise TrainerError("GRPO rewards must be finite numbers")
+    mean = sum(group) / len(group)
+    std = math.sqrt(sum((reward - mean) ** 2 for reward in group) / len(group))
+    return [(reward - mean) / (std + eps) for reward in group]
+
+
+def grpo_policy_loss(
+    policy_logprobs: Any,
+    old_logprobs: Any,
+    ref_logprobs: Any,
+    advantages: Any,
+    *,
+    clip_range: float = 0.2,
+    kl_coefficient: float = 0.05,
+    entropy: Any = None,
+    entropy_bonus: float = 0.0,
+) -> tuple[Any, Any]:
+    """The GRPO surrogate loss + the mean KL-to-reference, from aligned per-token tensors. Returns
+    ``(loss, mean_kl)``.
+
+    The policy-gradient term is the PPO-style CLIPPED surrogate over the importance ratio
+    ``exp(policy_logprob - old_logprob)`` times the group-relative ``advantages`` (broadcast to the token
+    grid by the caller): ``-mean(min(ratio*A, clip(ratio, 1-eps, 1+eps)*A))``. On the FIRST on-policy update
+    ``old == policy`` so ``ratio == 1`` and it reduces to ``-mean(A * logprob)``; the clip binds only once the
+    policy moves off the sampling distribution. The KL penalty keeps the policy anchored to the FROZEN
+    reference via Schulman's k3 estimator ``E[ref_ratio - log(ref_ratio) - 1]`` (``ref_ratio =
+    exp(ref_logprob - policy_logprob)``), which is always >= 0 and lower-variance than the naive log-ratio.
+    An optional entropy bonus preserves exploration. KL is the safety rail the success gate re-checks."""
+    import torch  # noqa: PLC0415
+
+    ratio = torch.exp(policy_logprobs - old_logprobs)
+    unclipped = ratio * advantages
+    clipped = torch.clamp(ratio, 1.0 - clip_range, 1.0 + clip_range) * advantages
+    pg_loss = -torch.min(unclipped, clipped).mean()
+    log_ref_ratio = ref_logprobs - policy_logprobs
+    kl = (torch.exp(log_ref_ratio) - log_ref_ratio - 1.0).mean()
+    loss = pg_loss + kl_coefficient * kl
+    if entropy is not None and entropy_bonus:
+        loss = loss - entropy_bonus * entropy.mean()
+    return loss, kl
+
+
 def _prepare_training_texts(
     rows: list[dict[str, Any]],
     config: TrainRunConfig,
