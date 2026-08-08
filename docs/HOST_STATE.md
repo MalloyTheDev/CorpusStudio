@@ -530,6 +530,34 @@ IEEE cell) on the evidence below - offline DPO now runs end to end on this host 
   (loss 0.6931 -> 0.1022, reward margin 0 -> 27.49, adapter reload-verified). A hash-pinned worker wheel +
   sealed env is the reproducible-deployment follow-up.
 
+### Pairwise reward-model `workload_verified` bring-up (PRODUCT), 2026-08-08
+
+The **reward_model** execution variant is promoted to `workload_verified` (a PRODUCT claim, NOT a sealed
+IEEE cell) - a pairwise reward model now trains end to end on this host through the first-party
+`RewardRunner` lane.
+
+- **Bring-up run:** a pairwise reward model of **Qwen2.5-0.5B-Instruct** (nf4 QLoRA **SEQ_CLS** scalar score
+  head, all-linear LoRA) trained on the RTX 5070 at **seq 512, 20 steps, Bradley-Terry loss** through the
+  FULL managed **`execute_run` -> `RewardRunner` -> supervisor independent adapter reload-verify**
+  (`validate_reward_success_evidence`): **supervisor-admitted `RewardSuccessEvidence`** - optimizer created,
+  one finite loss per step (**0.7563 -> 0.0**), a monotonic **score margin -0.07 -> 46.65** (chosen 33.52 /
+  rejected -13.13), **all 337/337 trainable tensors** (the LoRA adapter **and** the randomly-initialized
+  score head) **changed with an observed materialized gradient**, and `adapter.safetensors` reload-verified
+  to reproduce the trained export state. Measured **`final_fit` NATIVE_SAFE**, peak **0.95 GiB allocated /
+  1.2 GiB reserved / 12**. Evidence preserved under
+  [`engine/examples/wbg/runs/reward-bringup-qwen05b/`](../engine/examples/wbg/runs/reward-bringup-qwen05b/).
+- **Promotion gate.** HELD-OUT pairwise ranking accuracy = **1.0 over 2 held-out pairs** (a seeded carve-out
+  from the sealed pairs), never a falling training loss - a reward model that only fits the training pairs is
+  useless. Reward modeling is cheaper than DPO: no reference model, no `[seq x vocab]` log-prob.
+- **Honesty scope.** PRODUCT workload_verified, not a sealed IEEE cell. It ran the first-party runner + the
+  full supervisor admission gate through `execute_run` (an authorized new-variant bring-up; the subprocess
+  dispatch parent still refused reward until this run promoted it). A trivially-separable synthetic pair set,
+  so this is a feasibility + honesty-evidence bring-up, not a preference-quality result. The managed
+  `platform-run --subprocess` route (a reward worker wheel + sealed env) is the deployment follow-up, exactly
+  as for pretraining/DPO. The GPU bring-up also surfaced + fixed three reward-lane integration gaps in
+  `execute_run` (the runner-type check, the `resolved_run` fit clause, and the proven-fit success-evidence
+  validator all lacked a reward branch).
+
 ### Full-parameter SFT `workload_verified` bring-up (PRODUCT), 2026-08-07
 
 The **dense_full_finetune** execution variant is promoted to `workload_verified` (a PRODUCT claim, NOT a

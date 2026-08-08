@@ -1,0 +1,23 @@
+{
+  "contract_version": "1.0.0",
+  "artifact_id": "run-reward-sealed-0001-adapter-b6c5c713621a",
+  "producer_run_ref": {
+    "id": "run-reward-sealed-0001",
+    "hash": null
+  },
+  "created_at": "2026-08-08T04:41:58.224668+00:00",
+  "updated_at": "2026-08-08T04:41:58.224668+00:00",
+  "kind": "adapter",
+  "path": "output/runs/run-reward-sealed-0001/artifacts/adapter",
+  "status": "candidate",
+  "integrity": {
+    "cheap_fingerprint": "adapter_config.json=1134:1786164117718454208;adapter_model.safetensors=35240784:1786164117701455740",
+    "content_hash": "d83a051966d3b275cd383bbfadf77e3716c6399d7cef986d4e61e86985f90203",
+    "metadata_hash": "4bd61fac8e83d63e07fe16ad163a1c6022265b61e5ba8d50a18a3885c12fa4d1",
+    "current_integrity": "ok"
+  },
+  "reload_verified": false,
+  "base_model": "Qwen/Qwen2.5-0.5B-Instruct",
+  "parameter_accounting_ref": null,
+  "notes": ""
+}

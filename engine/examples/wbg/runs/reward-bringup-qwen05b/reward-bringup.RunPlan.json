@@ -1,0 +1,612 @@
+{
+  "contract_version": "1.0.0",
+  "plan_id": "reward-sealed",
+  "plan_hash": "00ca94dc072794a9499bd856db2e18acbe6938603d4ce2c6b550ea7c1b4b9505",
+  "created_at": "2026-08-08T00:00:00+00:00",
+  "backend_ref": {
+    "id": "corpus_studio",
+    "hash": {
+      "algo": "sha256",
+      "value": "84a2c4a305c5159e1216665b69f04cf7ace20553e058c0c9d1461610ef2572b6"
+    }
+  },
+  "environment_ref": {
+    "id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "hash": {
+      "algo": "sha256",
+      "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+  },
+  "dataset_ref": {
+    "id": "ds-1",
+    "hash": {
+      "algo": "sha256",
+      "value": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+    }
+  },
+  "task_type": "reward",
+  "base_model": "Qwen/Qwen2.5-0.5B-Instruct",
+  "precision": "bf16",
+  "quantization": "nf4",
+  "adapter": {
+    "method": "qlora",
+    "lora_r": 16,
+    "lora_alpha": 32,
+    "lora_dropout": 0.05,
+    "target_modules": [
+      "all-linear"
+    ],
+    "bias": "none"
+  },
+  "optimizer": {
+    "impl": "adamw_torch",
+    "learning_rate": 0.0002,
+    "weight_decay": 0.0,
+    "adam_beta1": 0.9,
+    "adam_beta2": 0.999,
+    "adam_epsilon": 1e-8,
+    "max_grad_norm": 1.0,
+    "lr_scheduler": "linear",
+    "warmup_ratio": 0.0
+  },
+  "loss_impl": "reward_bt",
+  "attention_backend": "math",
+  "sequence": {
+    "max_sequence_len": 512,
+    "buckets": [],
+    "packing": false,
+    "truncation_allowed": false
+  },
+  "batching": {
+    "micro_batch_size": 1,
+    "supervised_token_accumulation_target": 4096,
+    "fallback_grad_accumulation_steps": 8
+  },
+  "checkpoint_policy": {
+    "impl": "adapter_only",
+    "cadence_optimizer_steps": null,
+    "cadence_seconds": null,
+    "keep_last": null,
+    "reload_verify": false
+  },
+  "offload_strategy": "none",
+  "allocator_policy": "default",
+  "allocator_max_split_size_mb": null,
+  "allocator_gc_threshold": null,
+  "compile_mode": "none",
+  "gradient_checkpointing": true,
+  "eval_schedule": {
+    "before_run": true,
+    "after_run": true,
+    "every_optimizer_steps": null,
+    "suite_ref": null
+  },
+  "export": {
+    "format": "adapter_peft",
+    "output_dir": "output"
+  },
+  "seed": 42,
+  "training_config_snapshot": {},
+  "resolved_execution": null,
+  "resolved_reward_execution": {
+    "contract_version": "1.0.0",
+    "configuration_id": "reward-sealed-execution",
+    "configuration_hash": "a24fd336304a91ddcb53aa3e34f00d001045b6654956e92be31ed6f382c3cce2",
+    "backend_ref": {
+      "id": "corpus_studio",
+      "hash": {
+        "algo": "sha256",
+        "value": "84a2c4a305c5159e1216665b69f04cf7ace20553e058c0c9d1461610ef2572b6"
+      }
+    },
+    "environment_ref": {
+      "id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "hash": {
+        "algo": "sha256",
+        "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    },
+    "environment_binding": "profile_snapshot",
+    "capability_report_ref": {
+      "id": "capability-corpus_studio-4648e31886a0",
+      "hash": {
+        "algo": "sha256",
+        "value": "4648e31886a056c4d5c30ac1c3f2e49b6c1a0db369c9f225425eea2f2cf2c571"
+      }
+    },
+    "inputs": {
+      "dataset": {
+        "kind": "dataset",
+        "ref": {
+          "id": "ds-1",
+          "hash": {
+            "algo": "sha256",
+            "value": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+          }
+        },
+        "source": "local_file",
+        "location": "/mnt/training-nvme/tmp/claude-1000/-mnt-training-nvme-repos-CorpusStudio/db8d3e08-7869-4ab6-a3e8-cc2b6ccd8a3c/scratchpad/dpo_bringup/pref.jsonl",
+        "resolved_revision": null,
+        "content_sha256": "2b0100efda741addc01b55c8a0cb82c3919b0e4bcab2ead6365ae9f3398c3798"
+      },
+      "model": {
+        "kind": "model",
+        "ref": {
+          "id": "model-b6828c692922",
+          "hash": {
+            "algo": "sha256",
+            "value": "b6828c692922ce2ea90cfe068c2daa20bffa9efdeaa3b0e0211c47c7afed7b41"
+          }
+        },
+        "source": "huggingface",
+        "location": "Qwen/Qwen2.5-0.5B-Instruct",
+        "resolved_revision": "1111111111111111111111111111111111111111",
+        "content_sha256": null
+      },
+      "tokenizer": {
+        "kind": "tokenizer",
+        "ref": {
+          "id": "tokenizer-1c2f1cc3adc2",
+          "hash": {
+            "algo": "sha256",
+            "value": "1c2f1cc3adc265fbd425cdbe69536cc2c578ac675efe1f238862c6ae15e0e2ff"
+          }
+        },
+        "source": "huggingface",
+        "location": "Qwen/Qwen2.5-0.5B-Instruct",
+        "resolved_revision": "1111111111111111111111111111111111111111",
+        "content_sha256": null
+      }
+    },
+    "objective_ref": {
+      "id": "reward_model",
+      "hash": {
+        "algo": "sha256",
+        "value": "cc880924d3e729ee7641dbd865794dd6bea9de626678b68b9849de003dd84b2b"
+      }
+    },
+    "runtime_mode": "training",
+    "precision": {
+      "weight_storage_dtype": null,
+      "quantized_storage_format": "nf4",
+      "dequantization_dtype": "bf16",
+      "forward_compute_dtype": "bf16",
+      "gradient_dtype": "fp32",
+      "optimizer_state_dtype": "fp32",
+      "optimizer_auxiliary_dtype": "fp32",
+      "master_weight_dtype": "fp32"
+    },
+    "attention": {
+      "model_attention_api": "sdpa",
+      "effective_backend_required": "torch_sdpa_math",
+      "flash_sdp_enabled": false,
+      "mem_efficient_sdp_enabled": false,
+      "math_sdp_enabled": true,
+      "flash_attention_package": null,
+      "kernel_probe_ref": {
+        "id": "capability-corpus_studio-4648e31886a0",
+        "hash": {
+          "algo": "sha256",
+          "value": "4648e31886a056c4d5c30ac1c3f2e49b6c1a0db369c9f225425eea2f2cf2c571"
+        }
+      },
+      "evidence_kind": "functional_probe",
+      "safety_mandate": null,
+      "verification_requirement": "require_verified",
+      "fallback_policy": "refuse"
+    },
+    "device_map": [
+      {
+        "module": "",
+        "device": "cuda:0"
+      }
+    ],
+    "adapter": {
+      "method": "qlora",
+      "lora_r": 16,
+      "lora_alpha": 32,
+      "lora_dropout": 0.05,
+      "target_modules": [
+        "all-linear"
+      ],
+      "bias": "none"
+    },
+    "optimizer": {
+      "impl": "adamw_torch",
+      "learning_rate": 0.0002,
+      "weight_decay": 0.0,
+      "adam_beta1": 0.9,
+      "adam_beta2": 0.999,
+      "adam_epsilon": 1e-8,
+      "max_grad_norm": 1.0,
+      "lr_scheduler": "linear",
+      "warmup_ratio": 0.0
+    },
+    "sequence": {
+      "max_sequence_len": 512,
+      "buckets": [],
+      "packing": false,
+      "truncation_allowed": false
+    },
+    "batching": {
+      "micro_batch_size": 1,
+      "supervised_token_accumulation_target": 4096,
+      "fallback_grad_accumulation_steps": 8
+    },
+    "checkpoint_policy": {
+      "impl": "adapter_only",
+      "cadence_optimizer_steps": null,
+      "cadence_seconds": null,
+      "keep_last": null,
+      "reload_verify": false
+    },
+    "schedule": {
+      "max_steps": 20,
+      "num_train_epochs": null
+    },
+    "data": {
+      "contract_version": "1.0.0",
+      "schema_id": "preference",
+      "schema_version": "0.1.0",
+      "schema_sha256": "d121aff64d632a2c2a2a162d2f2472430e80da5372e41d300f044dd5a6a9ce99",
+      "pair_schema": "chosen_rejected",
+      "formatter_id": "corpus-studio:preference-pair-v1",
+      "formatter_sha256": "e3fd0b4eb6e0608b8b21cc28fb38557ed424f77684338875620644d9c24f683b",
+      "chat_template_sha256": null,
+      "max_prompt_length": 256,
+      "max_length": 512,
+      "truncation_policy": "refuse",
+      "data_seed": 42
+    },
+    "reward": {
+      "family": "pairwise",
+      "loss_type": "bradley_terry",
+      "score_pooling": "last_token",
+      "output_direction": "higher_is_better",
+      "margin": 0.0
+    },
+    "trainer_interface": {
+      "package_versions": [
+        {
+          "name": "accelerate",
+          "normalized_name": "accelerate",
+          "version": "1.0",
+          "hash": {
+            "algo": "sha256",
+            "value": "1111111111111111111111111111111111111111111111111111111111111111"
+          },
+          "source": "unknown",
+          "source_index_url": null,
+          "direct_url": null,
+          "artifact": "accelerate-1.0-py3-none-any.whl",
+          "artifact_hash": {
+            "algo": "sha256",
+            "value": "2222222222222222222222222222222222222222222222222222222222222222"
+          },
+          "installer": null,
+          "requested": null,
+          "direct": null,
+          "editable": null,
+          "vcs_repository": null,
+          "vcs_commit": null,
+          "source_evidence_reason": null,
+          "record_integrity": "verified",
+          "record_count_semantics": "all_record_rows_v2",
+          "record_entries": 1,
+          "record_verified_entries": 1,
+          "record_failed_entries": [],
+          "installed_files_hash": {
+            "algo": "sha256",
+            "value": "3333333333333333333333333333333333333333333333333333333333333333"
+          },
+          "installed_file_count": 1,
+          "dependencies": []
+        },
+        {
+          "name": "bitsandbytes",
+          "normalized_name": "bitsandbytes",
+          "version": "1.0",
+          "hash": {
+            "algo": "sha256",
+            "value": "1111111111111111111111111111111111111111111111111111111111111111"
+          },
+          "source": "unknown",
+          "source_index_url": null,
+          "direct_url": null,
+          "artifact": "bitsandbytes-1.0-py3-none-any.whl",
+          "artifact_hash": {
+            "algo": "sha256",
+            "value": "2222222222222222222222222222222222222222222222222222222222222222"
+          },
+          "installer": null,
+          "requested": null,
+          "direct": null,
+          "editable": null,
+          "vcs_repository": null,
+          "vcs_commit": null,
+          "source_evidence_reason": null,
+          "record_integrity": "verified",
+          "record_count_semantics": "all_record_rows_v2",
+          "record_entries": 1,
+          "record_verified_entries": 1,
+          "record_failed_entries": [],
+          "installed_files_hash": {
+            "algo": "sha256",
+            "value": "3333333333333333333333333333333333333333333333333333333333333333"
+          },
+          "installed_file_count": 1,
+          "dependencies": []
+        },
+        {
+          "name": "datasets",
+          "normalized_name": "datasets",
+          "version": "1.0",
+          "hash": {
+            "algo": "sha256",
+            "value": "1111111111111111111111111111111111111111111111111111111111111111"
+          },
+          "source": "unknown",
+          "source_index_url": null,
+          "direct_url": null,
+          "artifact": "datasets-1.0-py3-none-any.whl",
+          "artifact_hash": {
+            "algo": "sha256",
+            "value": "2222222222222222222222222222222222222222222222222222222222222222"
+          },
+          "installer": null,
+          "requested": null,
+          "direct": null,
+          "editable": null,
+          "vcs_repository": null,
+          "vcs_commit": null,
+          "source_evidence_reason": null,
+          "record_integrity": "verified",
+          "record_count_semantics": "all_record_rows_v2",
+          "record_entries": 1,
+          "record_verified_entries": 1,
+          "record_failed_entries": [],
+          "installed_files_hash": {
+            "algo": "sha256",
+            "value": "3333333333333333333333333333333333333333333333333333333333333333"
+          },
+          "installed_file_count": 1,
+          "dependencies": []
+        },
+        {
+          "name": "peft",
+          "normalized_name": "peft",
+          "version": "1.0",
+          "hash": {
+            "algo": "sha256",
+            "value": "1111111111111111111111111111111111111111111111111111111111111111"
+          },
+          "source": "unknown",
+          "source_index_url": null,
+          "direct_url": null,
+          "artifact": "peft-1.0-py3-none-any.whl",
+          "artifact_hash": {
+            "algo": "sha256",
+            "value": "2222222222222222222222222222222222222222222222222222222222222222"
+          },
+          "installer": null,
+          "requested": null,
+          "direct": null,
+          "editable": null,
+          "vcs_repository": null,
+          "vcs_commit": null,
+          "source_evidence_reason": null,
+          "record_integrity": "verified",
+          "record_count_semantics": "all_record_rows_v2",
+          "record_entries": 1,
+          "record_verified_entries": 1,
+          "record_failed_entries": [],
+          "installed_files_hash": {
+            "algo": "sha256",
+            "value": "3333333333333333333333333333333333333333333333333333333333333333"
+          },
+          "installed_file_count": 1,
+          "dependencies": []
+        },
+        {
+          "name": "torch",
+          "normalized_name": "torch",
+          "version": "1.0",
+          "hash": {
+            "algo": "sha256",
+            "value": "1111111111111111111111111111111111111111111111111111111111111111"
+          },
+          "source": "unknown",
+          "source_index_url": null,
+          "direct_url": null,
+          "artifact": "torch-1.0-py3-none-any.whl",
+          "artifact_hash": {
+            "algo": "sha256",
+            "value": "2222222222222222222222222222222222222222222222222222222222222222"
+          },
+          "installer": null,
+          "requested": null,
+          "direct": null,
+          "editable": null,
+          "vcs_repository": null,
+          "vcs_commit": null,
+          "source_evidence_reason": null,
+          "record_integrity": "verified",
+          "record_count_semantics": "all_record_rows_v2",
+          "record_entries": 1,
+          "record_verified_entries": 1,
+          "record_failed_entries": [],
+          "installed_files_hash": {
+            "algo": "sha256",
+            "value": "3333333333333333333333333333333333333333333333333333333333333333"
+          },
+          "installed_file_count": 1,
+          "dependencies": []
+        },
+        {
+          "name": "transformers",
+          "normalized_name": "transformers",
+          "version": "1.0",
+          "hash": {
+            "algo": "sha256",
+            "value": "1111111111111111111111111111111111111111111111111111111111111111"
+          },
+          "source": "unknown",
+          "source_index_url": null,
+          "direct_url": null,
+          "artifact": "transformers-1.0-py3-none-any.whl",
+          "artifact_hash": {
+            "algo": "sha256",
+            "value": "2222222222222222222222222222222222222222222222222222222222222222"
+          },
+          "installer": null,
+          "requested": null,
+          "direct": null,
+          "editable": null,
+          "vcs_repository": null,
+          "vcs_commit": null,
+          "source_evidence_reason": null,
+          "record_integrity": "verified",
+          "record_count_semantics": "all_record_rows_v2",
+          "record_entries": 1,
+          "record_verified_entries": 1,
+          "record_failed_entries": [],
+          "installed_files_hash": {
+            "algo": "sha256",
+            "value": "3333333333333333333333333333333333333333333333333333333333333333"
+          },
+          "installed_file_count": 1,
+          "dependencies": []
+        },
+        {
+          "name": "trl",
+          "normalized_name": "trl",
+          "version": "1.0",
+          "hash": {
+            "algo": "sha256",
+            "value": "1111111111111111111111111111111111111111111111111111111111111111"
+          },
+          "source": "unknown",
+          "source_index_url": null,
+          "direct_url": null,
+          "artifact": "trl-1.0-py3-none-any.whl",
+          "artifact_hash": {
+            "algo": "sha256",
+            "value": "2222222222222222222222222222222222222222222222222222222222222222"
+          },
+          "installer": null,
+          "requested": null,
+          "direct": null,
+          "editable": null,
+          "vcs_repository": null,
+          "vcs_commit": null,
+          "source_evidence_reason": null,
+          "record_integrity": "verified",
+          "record_count_semantics": "all_record_rows_v2",
+          "record_entries": 1,
+          "record_verified_entries": 1,
+          "record_failed_entries": [],
+          "installed_files_hash": {
+            "algo": "sha256",
+            "value": "3333333333333333333333333333333333333333333333333333333333333333"
+          },
+          "installed_file_count": 1,
+          "dependencies": []
+        }
+      ],
+      "required_sft_config_fields": [
+        "adam_beta1",
+        "adam_beta2",
+        "adam_epsilon",
+        "bf16",
+        "data_seed",
+        "dataset_text_field",
+        "disable_tqdm",
+        "fp16",
+        "gradient_accumulation_steps",
+        "gradient_checkpointing",
+        "learning_rate",
+        "logging_nan_inf_filter",
+        "logging_steps",
+        "logging_strategy",
+        "lr_scheduler_type",
+        "max_grad_norm",
+        "max_length",
+        "max_steps",
+        "optim",
+        "output_dir",
+        "packing",
+        "per_device_train_batch_size",
+        "report_to",
+        "save_strategy",
+        "seed",
+        "warmup_ratio",
+        "weight_decay"
+      ],
+      "sequence_length_field": "max_length",
+      "tokenizer_parameter": "processing_class",
+      "logging_strategy": "steps",
+      "logging_steps": 1,
+      "logging_nan_inf_filter": false,
+      "report_to": [],
+      "disable_tqdm": true
+    },
+    "export_format": "reward_model",
+    "trust_remote_code": false,
+    "use_safetensors": true,
+    "bnb_4bit_use_double_quant": true,
+    "adapter_task_type": "SEQ_CLS",
+    "save_strategy": "no",
+    "gradient_checkpointing": true,
+    "output_dir": "output",
+    "output_layout": "run_scoped_v1",
+    "seed": 42,
+    "data_seed": 42
+  },
+  "parameter_accounting_ref": null,
+  "physical_execution": {
+    "evidence_status": "planned_not_measured",
+    "route_fidelity": "preserve_or_fail",
+    "semantic_fallback_policy_ref": null,
+    "storage_profile_ref": null,
+    "resources": [
+      {
+        "resource_id": "compute-0",
+        "tier": "gpu",
+        "device_kind": "cuda",
+        "device_id": "cuda:0",
+        "storage": null
+      }
+    ],
+    "placements": [
+      {
+        "placement_id": "parameters-authoritative",
+        "state": "parameters",
+        "selector": {
+          "whole_model": true,
+          "parameter_scope_ids": [],
+          "component_ids": [],
+          "expert_ids": []
+        },
+        "resource_id": "compute-0",
+        "role": "authoritative",
+        "source_placement_id": null,
+        "shard_group_id": null,
+        "shard_index": null,
+        "shard_count": null
+      }
+    ],
+    "offload_rules": [],
+    "parallelism": {
+      "world_size": 1,
+      "ranks": [
+        {
+          "rank": 0,
+          "resource_id": "compute-0",
+          "node_id": "local",
+          "local_rank": 0
+        }
+      ],
+      "groups": []
+    }
+  }
+}

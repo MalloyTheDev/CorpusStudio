@@ -6354,13 +6354,14 @@ class RunManifest(ContractModel):
             and self.pretraining_success_evidence is None
             and self.preference_success_evidence is None
             and self.full_finetune_success_evidence is None
+            and self.reward_success_evidence is None
         ):
-            # A proven native fit is earned by an SFT adapter, a full-model pretraining, a DPO adapter, or a
-            # full-parameter SFT success - never none. The one-family XOR guard keeps them from co-existing;
-            # this keeps a proven fit from standing on no success evidence at all.
+            # A proven native fit is earned by an SFT adapter, a full-model pretraining, a DPO adapter, a
+            # full-parameter SFT, or a reward-model success - never none. The one-family XOR guard keeps them
+            # from co-existing; this keeps a proven fit from standing on no success evidence at all.
             raise ValueError(
                 "a proven native fit requires complete success evidence (an SFT adapter, a full-model "
-                "pretraining, a DPO adapter, or a full-parameter SFT run)"
+                "pretraining, a DPO adapter, a full-parameter SFT run, or a reward-model run)"
             )
         return self
 

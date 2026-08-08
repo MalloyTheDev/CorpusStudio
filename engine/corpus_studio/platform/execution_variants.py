@@ -167,12 +167,19 @@ def reference_execution_variants() -> tuple[BackendExecutionVariant, ...]:
         BackendExecutionVariant(
             backend_id="corpus_studio",
             variant_kind=ExecutionVariantKind.reward_model,
-            # contract_validated (RL slice S5a-1): the pairwise reward-model shape - a QLoRA SEQ_CLS
-            # scalar score head over a base, trained on chosen/rejected pairs under a Bradley-Terry loss
-            # - is contract-expressible (ResolvedRewardExecutionConfiguration + resolver + admission), but
-            # NOT executable: the reward-head trainer branch, a workload-verified run, and the promoting
-            # wheel are the following slices. Admission stays fail-closed until then.
-            support=ExecutionVariantSupport.contract_validated,
+            # workload_verified: a pairwise reward model of Qwen2.5-0.5B-Instruct (nf4 QLoRA SEQ_CLS scalar
+            # score head, seq 512, 20 steps, Bradley-Terry loss) on the RTX 5070, through the FULL managed
+            # execute_run -> RewardRunner -> supervisor independent adapter reload-verify path -
+            # supervisor-admitted RewardSuccessEvidence (optimizer + 20 loss/steps 0.7563 -> 0.0 + score
+            # margin -0.07 -> 46.65 [chosen 33.52 / rejected -13.13] + the randomly-initialized score head
+            # TRAINED: 337/337 tensors changed with observed gradients + adapter.safetensors reproduced from
+            # bytes; MEASURED final_fit NATIVE_SAFE, peak 0.95 GiB allocated / 1.2 GiB reserved of 12). The
+            # PROMOTION GATE is HELD-OUT pairwise ranking accuracy = 1.0 over 2 held-out pairs (a seeded
+            # carve-out), never a falling training loss. Evidence: examples/wbg/runs/reward-bringup-qwen05b/.
+            # A PRODUCT claim, not a sealed IEEE cell. The managed platform-run --subprocess route (a reward
+            # worker wheel + env) is the deployment follow-up, exactly as for pretraining/DPO. See
+            # docs/HOST_STATE.md.
+            support=ExecutionVariantSupport.workload_verified,
         ),
     )
 
