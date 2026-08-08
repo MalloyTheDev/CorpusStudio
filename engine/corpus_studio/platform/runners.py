@@ -549,6 +549,7 @@ class TrainingRunner:
         from corpus_studio.platform.execution_config import (  # noqa: PLC0415
             PREFERENCE_NOT_EXECUTABLE_REASON,
             PRETRAINING_NOT_EXECUTABLE_REASON,
+            REWARD_NOT_EXECUTABLE_REASON,
         )
 
         if plan.resolved_execution is None and plan.resolved_preference_execution is not None:
@@ -560,6 +561,16 @@ class TrainingRunner:
                 taxonomy=FailureTaxonomy.UNSUPPORTED_CONFIGURATION,
                 stage=StageMarker.env_loaded,
                 remediation="await the DPO worker milestone that promotes preference_dpo to "
+                "workload_verified; do not hand-edit the plan to the SFT lane",
+            )
+        if plan.resolved_execution is None and plan.resolved_reward_execution is not None:
+            # Same typed defense-in-depth for a sealed reward-model plan (admit-at-planning /
+            # refuse-at-execution) - reachable here rather than the generic contract-mismatch below.
+            raise RunnerFailure(
+                REWARD_NOT_EXECUTABLE_REASON,
+                taxonomy=FailureTaxonomy.UNSUPPORTED_CONFIGURATION,
+                stage=StageMarker.env_loaded,
+                remediation="await the reward-model worker milestone that promotes reward_model to "
                 "workload_verified; do not hand-edit the plan to the SFT lane",
             )
         if plan.resolved_execution is None and plan.resolved_pretraining_execution is not None:
@@ -621,6 +632,7 @@ class TrainingRunner:
         from corpus_studio.platform.execution_config import (  # noqa: PLC0415
             PREFERENCE_NOT_EXECUTABLE_REASON,
             PRETRAINING_NOT_EXECUTABLE_REASON,
+            REWARD_NOT_EXECUTABLE_REASON,
             ExecutionConfigurationError,
             run_scoped_training_output,
             verify_execution_configuration_hash,
@@ -649,6 +661,14 @@ class TrainingRunner:
                     stage=StageMarker.env_loaded,
                     remediation="dispatch the plan through platform-run so required_runner_lane "
                     "selects the pretraining lane; do not hand-edit the plan to the SFT lane",
+                )
+            if plan.resolved_reward_execution is not None:
+                raise RunnerFailure(
+                    REWARD_NOT_EXECUTABLE_REASON,
+                    taxonomy=FailureTaxonomy.UNSUPPORTED_CONFIGURATION,
+                    stage=StageMarker.env_loaded,
+                    remediation="await the reward-model worker milestone that promotes reward_model to "
+                    "workload_verified; do not hand-edit the plan to the SFT lane",
                 )
             raise RunnerFailure(
                 "the RunPlan carries no ResolvedExecutionConfiguration to execute",
