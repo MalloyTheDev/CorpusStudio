@@ -2615,6 +2615,7 @@
     "ExportFormat": {
       "enum": [
         "adapter_peft",
+        "reward_model",
         "merged_safetensors",
         "merged_fp16",
         "gguf",
@@ -6522,6 +6523,190 @@
       "title": "ResolvedPretrainingExecutionConfiguration",
       "type": "object"
     },
+    "ResolvedRewardExecutionConfiguration": {
+      "additionalProperties": false,
+      "description": "The hash-sealed configuration for a pairwise reward-model run - the sibling of\n:class:`ResolvedExecutionConfiguration` for the ``reward_model`` execution variant (RL slice S5a-1).\n\nLike the DPO seal, it reuses every shared execution sub-spec (placement / precision / attention /\nadapter / optimizer / sequence / batching / checkpoint / schedule / trainer interface) and reuses the\n:class:`PreferenceDataPolicy` (a reward model trains on the SAME chosen/rejected pairs), adding only\na :class:`RewardModelingSpec`. It binds the declared ``reward_model`` objective. Two things differ\nfrom every policy config: the adapter task type is ``SEQ_CLS`` (a scalar score head, not\n``CAUSAL_LM``), and the export format is ``reward_model`` (a new artifact family, not an adapter).\n\nCarried on ``RunPlan.resolved_reward_execution`` (a plan holds EXACTLY ONE execution config). The\ncontract + resolver are the control plane; EXECUTION (the reward-head trainer branch + a\nworkload-verified run + the promoting wheel) remains gated - ``reward_model`` stays\n``contract_validated`` until a measured run promotes it.",
+      "properties": {
+        "adapter": {
+          "$ref": "#/$defs/AdapterSpec"
+        },
+        "adapter_task_type": {
+          "const": "SEQ_CLS",
+          "default": "SEQ_CLS",
+          "title": "Adapter Task Type",
+          "type": "string"
+        },
+        "attention": {
+          "$ref": "#/$defs/AttentionExecutionPolicy"
+        },
+        "backend_ref": {
+          "$ref": "#/$defs/Ref"
+        },
+        "batching": {
+          "$ref": "#/$defs/BatchingSpec"
+        },
+        "bnb_4bit_use_double_quant": {
+          "title": "Bnb 4Bit Use Double Quant",
+          "type": "boolean"
+        },
+        "capability_report_ref": {
+          "$ref": "#/$defs/Ref"
+        },
+        "checkpoint_policy": {
+          "$ref": "#/$defs/CheckpointPolicy"
+        },
+        "configuration_hash": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Configuration Hash",
+          "type": "string"
+        },
+        "configuration_id": {
+          "pattern": "^[A-Za-z0-9._-]+$",
+          "title": "Configuration Id",
+          "type": "string"
+        },
+        "contract_version": {
+          "const": "1.0.0",
+          "default": "1.0.0",
+          "title": "Contract Version",
+          "type": "string"
+        },
+        "data": {
+          "$ref": "#/$defs/PreferenceDataPolicy"
+        },
+        "data_seed": {
+          "default": 42,
+          "minimum": 0,
+          "title": "Data Seed",
+          "type": "integer"
+        },
+        "device_map": {
+          "items": {
+            "$ref": "#/$defs/DeviceMapEntry"
+          },
+          "minItems": 1,
+          "title": "Device Map",
+          "type": "array"
+        },
+        "environment_binding": {
+          "enum": [
+            "profile_snapshot",
+            "managed_lock"
+          ],
+          "title": "Environment Binding",
+          "type": "string"
+        },
+        "environment_ref": {
+          "$ref": "#/$defs/Ref"
+        },
+        "export_format": {
+          "$ref": "#/$defs/ExportFormat"
+        },
+        "gradient_checkpointing": {
+          "default": true,
+          "title": "Gradient Checkpointing",
+          "type": "boolean"
+        },
+        "inputs": {
+          "$ref": "#/$defs/ExecutionInputs"
+        },
+        "objective_ref": {
+          "$ref": "#/$defs/Ref"
+        },
+        "optimizer": {
+          "$ref": "#/$defs/OptimizerSpec"
+        },
+        "output_dir": {
+          "minLength": 1,
+          "title": "Output Dir",
+          "type": "string"
+        },
+        "output_layout": {
+          "const": "run_scoped_v1",
+          "default": "run_scoped_v1",
+          "title": "Output Layout",
+          "type": "string"
+        },
+        "precision": {
+          "$ref": "#/$defs/PrecisionExecutionPolicy"
+        },
+        "reward": {
+          "$ref": "#/$defs/RewardModelingSpec"
+        },
+        "runtime_mode": {
+          "enum": [
+            "training",
+            "cpu_toy"
+          ],
+          "title": "Runtime Mode",
+          "type": "string"
+        },
+        "save_strategy": {
+          "default": "steps",
+          "enum": [
+            "no",
+            "steps"
+          ],
+          "title": "Save Strategy",
+          "type": "string"
+        },
+        "schedule": {
+          "$ref": "#/$defs/TrainingSchedule"
+        },
+        "seed": {
+          "default": 42,
+          "minimum": 0,
+          "title": "Seed",
+          "type": "integer"
+        },
+        "sequence": {
+          "$ref": "#/$defs/SequenceSpec"
+        },
+        "trainer_interface": {
+          "$ref": "#/$defs/TrainerInterfacePolicy"
+        },
+        "trust_remote_code": {
+          "const": false,
+          "default": false,
+          "title": "Trust Remote Code",
+          "type": "boolean"
+        },
+        "use_safetensors": {
+          "const": true,
+          "default": true,
+          "title": "Use Safetensors",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "configuration_id",
+        "configuration_hash",
+        "backend_ref",
+        "environment_ref",
+        "environment_binding",
+        "capability_report_ref",
+        "inputs",
+        "objective_ref",
+        "runtime_mode",
+        "precision",
+        "attention",
+        "device_map",
+        "adapter",
+        "optimizer",
+        "sequence",
+        "batching",
+        "checkpoint_policy",
+        "schedule",
+        "data",
+        "reward",
+        "trainer_interface",
+        "export_format",
+        "bnb_4bit_use_double_quant",
+        "output_dir"
+      ],
+      "title": "ResolvedRewardExecutionConfiguration",
+      "type": "object"
+    },
     "ResumeLineage": {
       "additionalProperties": false,
       "description": "Recorded on a resumed run's :class:`RunManifest` so a resumed run always shows the exact parent\nrun and parent checkpoint it continued from - a fresh run identity with explicit provenance, never\na silent reuse of the parent run.",
@@ -6554,6 +6739,44 @@
         "resumed_from_global_step"
       ],
       "title": "ResumeLineage",
+      "type": "object"
+    },
+    "RewardModelingSpec": {
+      "additionalProperties": false,
+      "description": "The reward-model training shape for a PAIRWISE (Bradley-Terry) reward model - the sibling of\n:class:`PreferenceOptimizationSpec` for the ``reward_model`` execution variant. Kept off\n:class:`PreferenceDataPolicy` (reused verbatim as the chosen/rejected data contract) so the data\npolicy stays method-agnostic. A reward model's output is a NEW artifact family: a scalar SCORE HEAD\nover the base (a SEQ_CLS ``num_labels=1`` projection), NOT a policy adapter and NOT causal-LM\ngeneration.\n\nOnly the pairwise Bradley-Terry family is admitted here; scalar-pointwise / process / outcome /\ngenerative-verifier reward families are DISTINCT (different output artifacts + eval semantics) and are\nadded as their own specs + objectives, never silently under this seal (each gates independently).",
+      "properties": {
+        "family": {
+          "const": "pairwise",
+          "default": "pairwise",
+          "title": "Family",
+          "type": "string"
+        },
+        "loss_type": {
+          "const": "bradley_terry",
+          "default": "bradley_terry",
+          "title": "Loss Type",
+          "type": "string"
+        },
+        "margin": {
+          "default": 0.0,
+          "minimum": 0,
+          "title": "Margin",
+          "type": "number"
+        },
+        "output_direction": {
+          "const": "higher_is_better",
+          "default": "higher_is_better",
+          "title": "Output Direction",
+          "type": "string"
+        },
+        "score_pooling": {
+          "const": "last_token",
+          "default": "last_token",
+          "title": "Score Pooling",
+          "type": "string"
+        }
+      },
+      "title": "RewardModelingSpec",
       "type": "object"
     },
     "RouteMissAction": {
@@ -7308,6 +7531,17 @@
           "anyOf": [
             {
               "$ref": "#/$defs/ResolvedPretrainingExecutionConfiguration"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "resolved_reward_execution": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ResolvedRewardExecutionConfiguration"
             },
             {
               "type": "null"

@@ -67,7 +67,7 @@ export type Value = string | null;
 export type Id = string;
 export type ExecutionContractVersions = string[];
 export type ExportFormat =
-  "adapter_peft" | "merged_safetensors" | "merged_fp16" | "gguf" | "onnx" | "awq" | "gptq" | "mlx";
+  "adapter_peft" | "reward_model" | "merged_safetensors" | "merged_fp16" | "gguf" | "onnx" | "awq" | "gptq" | "mlx";
 export type ServesIn = string[];
 export type ExportCompatibility = ExportCompatibilityEntry[];
 export type ExportFormats = ExportFormat[];
@@ -647,7 +647,31 @@ export type TokenizerLocation = string | null;
 export type VocabSize1 = number | null;
 export type TrustRemoteCode4 = false;
 export type UseSafetensors3 = true;
+export type AdapterTaskType3 = "SEQ_CLS";
+export type Bnb4BitUseDoubleQuant3 = boolean;
+export type ConfigurationHash4 = string;
+export type ConfigurationId4 = string;
+export type ContractVersion10 = "1.0.0";
+export type DataSeed6 = number;
+/**
+ * @minItems 1
+ */
+export type DeviceMap4 = [DeviceMapEntry, ...DeviceMapEntry[]];
+export type EnvironmentBinding4 = "profile_snapshot" | "managed_lock";
+export type GradientCheckpointing5 = boolean;
+export type OutputDir5 = string;
+export type OutputLayout4 = "run_scoped_v1";
+export type Family = "pairwise";
+export type LossType1 = "bradley_terry";
+export type Margin = number;
+export type OutputDirection = "higher_is_better";
+export type ScorePooling = "last_token";
+export type RuntimeMode5 = "training" | "cpu_toy";
+export type SaveStrategy3 = "no" | "steps";
 export type Seed4 = number;
+export type TrustRemoteCode5 = false;
+export type UseSafetensors4 = true;
+export type Seed5 = number;
 export type CheckpointDir = string;
 export type CheckpointId = string;
 export type CheckpointManifestHash = string;
@@ -657,7 +681,7 @@ export type ExecutionConfigurationHash = string | null;
 export type Pid = number | null;
 export type ProcessStartedAt = string | null;
 export type RunId1 = string;
-export type ContractVersion10 = "1.0.0";
+export type ContractVersion11 = "1.0.0";
 export type Detail1 = string | null;
 export type DetectedAt = string | null;
 export type ExceptionType = string | null;
@@ -680,7 +704,7 @@ export type FitClass =
   | "ACCIDENTAL_WDDM_SPILL"
   | "THRASHING"
   | "FAIL";
-export type ContractVersion11 = "1.0.0";
+export type ContractVersion12 = "1.0.0";
 export type DeviceCapacityBytes = number | null;
 export type EstimatedPeakBytes = number | null;
 export type HeadroomBytes = number | null;
@@ -702,7 +726,7 @@ export type RunId2 = string | null;
 export type Signal = string | null;
 export type Action = "cancel" | "pause" | "resume" | "checkpoint_now";
 export type RunId3 = string;
-export type ContractVersion12 = "1.0.0";
+export type ContractVersion13 = "1.0.0";
 export type EmittedAt = string;
 export type Epoch = number | null;
 export type EventType =
@@ -832,7 +856,7 @@ export type PidAlive = boolean;
 export type RunId5 = string;
 export type ArtifactId = string;
 export type BaseModel1 = string | null;
-export type ContractVersion13 = "1.0.0";
+export type ContractVersion14 = "1.0.0";
 export type CreatedAt1 = string | null;
 export type CheapFingerprint = string | null;
 export type ContentHash = string | null;
@@ -848,7 +872,7 @@ export type Artifacts = ArtifactManifest[];
 export type AdapterApplied = boolean | null;
 export type Backend = string | null;
 export type ChatTemplateApplied = boolean | null;
-export type ContractVersion14 = "1.0.0";
+export type ContractVersion15 = "1.0.0";
 export type DatasetFingerprint = string | null;
 export type Name3 = string;
 export type VersionRef = string | null;
@@ -881,7 +905,7 @@ export type RunId6 = string;
 export type ArtifactIds = string[];
 export type BaseModel2 = string;
 export type Checkpoints = string[];
-export type ContractVersion15 = "1.0.0";
+export type ContractVersion16 = "1.0.0";
 export type CreatedAt2 = string;
 export type AfterEvalModel = string | null;
 export type AfterEvalRef = string | null;
@@ -938,7 +962,7 @@ export type ModelConfigSha256 = string;
 export type ModelSafetensorsSha256 = string;
 export type OutputPathVerified = true;
 export type Notes4 = string;
-export type OutputDir5 = string;
+export type OutputDir6 = string;
 export type ParameterAccountingRefs = Ref[];
 export type AdapterBytesVerified = true;
 export type AdapterConfigSha256 = string;
@@ -971,7 +995,7 @@ export type StepLosses1 = [OptimizerStepLossEvidence, ...OptimizerStepLossEviden
  */
 export type StepRewardMargins = [PreferenceRewardMarginEvidence, ...PreferenceRewardMarginEvidence[]];
 export type ChosenReward = number;
-export type Margin = number;
+export type Margin1 = number;
 export type OptimizerStep3 = number;
 export type RejectedReward = number;
 export type OutputPathVerified1 = true;
@@ -1379,7 +1403,8 @@ export interface RunPlan {
   resolved_full_finetune_execution?: ResolvedFullFinetuneExecutionConfiguration | null;
   resolved_preference_execution?: ResolvedPreferenceExecutionConfiguration | null;
   resolved_pretraining_execution?: ResolvedPretrainingExecutionConfiguration | null;
-  seed?: Seed4;
+  resolved_reward_execution?: ResolvedRewardExecutionConfiguration | null;
+  seed?: Seed5;
   sequence: SequenceSpec;
   task_type: TaskType;
   training_config_snapshot?: TrainingConfigSnapshot;
@@ -1970,6 +1995,76 @@ export interface TokenizerSourceSpec {
   tokenizer_location?: TokenizerLocation;
   vocab_size?: VocabSize1;
 }
+/**
+ * The hash-sealed configuration for a pairwise reward-model run - the sibling of
+ * :class:`ResolvedExecutionConfiguration` for the ``reward_model`` execution variant (RL slice S5a-1).
+ *
+ * Like the DPO seal, it reuses every shared execution sub-spec (placement / precision / attention /
+ * adapter / optimizer / sequence / batching / checkpoint / schedule / trainer interface) and reuses the
+ * :class:`PreferenceDataPolicy` (a reward model trains on the SAME chosen/rejected pairs), adding only
+ * a :class:`RewardModelingSpec`. It binds the declared ``reward_model`` objective. Two things differ
+ * from every policy config: the adapter task type is ``SEQ_CLS`` (a scalar score head, not
+ * ``CAUSAL_LM``), and the export format is ``reward_model`` (a new artifact family, not an adapter).
+ *
+ * Carried on ``RunPlan.resolved_reward_execution`` (a plan holds EXACTLY ONE execution config). The
+ * contract + resolver are the control plane; EXECUTION (the reward-head trainer branch + a
+ * workload-verified run + the promoting wheel) remains gated - ``reward_model`` stays
+ * ``contract_validated`` until a measured run promotes it.
+ */
+export interface ResolvedRewardExecutionConfiguration {
+  adapter: AdapterSpec;
+  adapter_task_type?: AdapterTaskType3;
+  attention: AttentionExecutionPolicy;
+  backend_ref: Ref;
+  batching: BatchingSpec;
+  bnb_4bit_use_double_quant: Bnb4BitUseDoubleQuant3;
+  capability_report_ref: Ref;
+  checkpoint_policy: CheckpointPolicy;
+  configuration_hash: ConfigurationHash4;
+  configuration_id: ConfigurationId4;
+  contract_version?: ContractVersion10;
+  data: PreferenceDataPolicy;
+  data_seed?: DataSeed6;
+  device_map: DeviceMap4;
+  environment_binding: EnvironmentBinding4;
+  environment_ref: Ref;
+  export_format: ExportFormat;
+  gradient_checkpointing?: GradientCheckpointing5;
+  inputs: ExecutionInputs;
+  objective_ref: Ref;
+  optimizer: OptimizerSpec;
+  output_dir: OutputDir5;
+  output_layout?: OutputLayout4;
+  precision: PrecisionExecutionPolicy;
+  reward: RewardModelingSpec;
+  runtime_mode: RuntimeMode5;
+  save_strategy?: SaveStrategy3;
+  schedule: TrainingSchedule;
+  seed?: Seed4;
+  sequence: SequenceSpec;
+  trainer_interface: TrainerInterfacePolicy;
+  trust_remote_code?: TrustRemoteCode5;
+  use_safetensors?: UseSafetensors4;
+}
+/**
+ * The reward-model training shape for a PAIRWISE (Bradley-Terry) reward model - the sibling of
+ * :class:`PreferenceOptimizationSpec` for the ``reward_model`` execution variant. Kept off
+ * :class:`PreferenceDataPolicy` (reused verbatim as the chosen/rejected data contract) so the data
+ * policy stays method-agnostic. A reward model's output is a NEW artifact family: a scalar SCORE HEAD
+ * over the base (a SEQ_CLS ``num_labels=1`` projection), NOT a policy adapter and NOT causal-LM
+ * generation.
+ *
+ * Only the pairwise Bradley-Terry family is admitted here; scalar-pointwise / process / outcome /
+ * generative-verifier reward families are DISTINCT (different output artifacts + eval semantics) and are
+ * added as their own specs + objectives, never silently under this seal (each gates independently).
+ */
+export interface RewardModelingSpec {
+  family?: Family;
+  loss_type?: LossType1;
+  margin?: Margin;
+  output_direction?: OutputDirection;
+  score_pooling?: ScorePooling;
+}
 export interface TrainingConfigSnapshot {
   [k: string]: unknown;
 }
@@ -1996,7 +2091,7 @@ export interface RunAcceptedBody {
  * fused-attention deadlock) vs an ACCIDENTAL_SPILL vs a CONTROLLED_OFFLOAD. NEW.
  */
 export interface FailureRecord {
-  contract_version?: ContractVersion10;
+  contract_version?: ContractVersion11;
   detail?: Detail1;
   detected_at?: DetectedAt;
   exception_type?: ExceptionType;
@@ -2020,7 +2115,7 @@ export interface FailureRecord {
 export interface FitClassification {
   attention_path?: AttentionImpl | null;
   classification: FitClass;
-  contract_version?: ContractVersion11;
+  contract_version?: ContractVersion12;
   device_capacity_bytes?: DeviceCapacityBytes;
   estimated_peak_bytes?: EstimatedPeakBytes;
   headroom_bytes?: HeadroomBytes;
@@ -2054,7 +2149,7 @@ export interface RunControlBody {
  * streaming telemetry today (run_registry is a durable per-run record, not an event stream).
  */
 export interface RunEvent {
-  contract_version?: ContractVersion12;
+  contract_version?: ContractVersion13;
   emitted_at: EmittedAt;
   epoch?: Epoch;
   event_type: EventType;
@@ -2192,7 +2287,7 @@ export interface TerminalResultBody {
 export interface ArtifactManifest {
   artifact_id: ArtifactId;
   base_model?: BaseModel1;
-  contract_version?: ContractVersion13;
+  contract_version?: ContractVersion14;
   created_at?: CreatedAt1;
   integrity?: ArtifactIntegrity | null;
   kind?: Kind2;
@@ -2221,7 +2316,7 @@ export interface ArtifactIntegrity {
  */
 export interface EvaluationResult {
   as_served?: AsServed | null;
-  contract_version?: ContractVersion14;
+  contract_version?: ContractVersion15;
   dataset?: EvalDataset | null;
   eval_id: EvalId;
   gate?: EvalGate | null;
@@ -2300,7 +2395,7 @@ export interface RunManifest {
   artifact_ids?: ArtifactIds;
   base_model?: BaseModel2;
   checkpoints?: Checkpoints;
-  contract_version?: ContractVersion15;
+  contract_version?: ContractVersion16;
   created_at: CreatedAt2;
   dataset_ref?: Ref | null;
   environment_ref?: Ref | null;
@@ -2310,7 +2405,7 @@ export interface RunManifest {
   finished_at?: FinishedAt;
   full_finetune_success_evidence?: PretrainingSuccessEvidence | null;
   notes?: Notes4;
-  output_dir?: OutputDir5;
+  output_dir?: OutputDir6;
   parameter_accounting_refs?: ParameterAccountingRefs;
   plan_ref: Ref;
   preference_success_evidence?: PreferenceSuccessEvidence | null;
@@ -2465,7 +2560,7 @@ export interface AdapterExportStateEvidence {
  */
 export interface PreferenceRewardMarginEvidence {
   chosen_reward: ChosenReward;
-  margin: Margin;
+  margin: Margin1;
   optimizer_step: OptimizerStep3;
   rejected_reward: RejectedReward;
 }

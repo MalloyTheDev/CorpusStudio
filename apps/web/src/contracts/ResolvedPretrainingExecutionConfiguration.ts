@@ -99,7 +99,7 @@ export type Device = string;
 export type Module = string;
 export type EnvironmentBinding = "profile_snapshot" | "managed_lock";
 export type ExportFormat =
-  "adapter_peft" | "merged_safetensors" | "merged_fp16" | "gguf" | "onnx" | "awq" | "gptq" | "mlx";
+  "adapter_peft" | "reward_model" | "merged_safetensors" | "merged_fp16" | "gguf" | "onnx" | "awq" | "gptq" | "mlx";
 export type GradientCheckpointing = boolean;
 export type EntrySymbol = string;
 export type InterfaceVersion = "custom_decoder_v1";

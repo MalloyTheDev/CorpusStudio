@@ -772,6 +772,10 @@ class ExecutionVariantKind(str, Enum):
     # Offline DPO (S2b-2): a QLoRA preference-optimization shape - a CAUSAL_LM PEFT adapter over a frozen
     # reference model, one preference-pair dataset. No rollout / no reward model (that is the RL slice).
     preference_dpo = "preference_dpo"
+    # Pairwise reward model (S5a-1, the first RL slice): a QLoRA SEQ_CLS scalar SCORE HEAD over a base,
+    # trained on chosen/rejected pairs under a Bradley-Terry loss. NOT a policy adapter and NOT causal-LM
+    # generation - a distinct artifact family (a reward model), the reward SOURCE later RL stages consume.
+    reward_model = "reward_model"
 
 
 class ExecutionVariantSupport(str, Enum):
@@ -854,6 +858,9 @@ class CompileMode(str, Enum):
 
 class ExportFormat(str, Enum):
     adapter_peft = "adapter_peft"
+    # A pairwise reward model (RL slice S5a-1): a LoRA SEQ_CLS adapter + a scalar score head - a distinct
+    # artifact family from a policy adapter (different load path, output semantics, and eval).
+    reward_model = "reward_model"
     merged_safetensors = "merged_safetensors"
     merged_fp16 = "merged_fp16"
     gguf = "gguf"

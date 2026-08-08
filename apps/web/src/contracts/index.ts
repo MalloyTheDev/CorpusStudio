@@ -29,6 +29,7 @@ export type { ResolvedExecutionConfiguration } from "./ResolvedExecutionConfigur
 export type { ResolvedFullFinetuneExecutionConfiguration } from "./ResolvedFullFinetuneExecutionConfiguration";
 export type { ResolvedPreferenceExecutionConfiguration } from "./ResolvedPreferenceExecutionConfiguration";
 export type { ResolvedPretrainingExecutionConfiguration } from "./ResolvedPretrainingExecutionConfiguration";
+export type { ResolvedRewardExecutionConfiguration } from "./ResolvedRewardExecutionConfiguration";
 export type { RunEvent } from "./RunEvent";
 export type { RunManifest } from "./RunManifest";
 export type { RunPlan } from "./RunPlan";

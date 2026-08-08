@@ -34,7 +34,7 @@ export type CommunicationBackends = CommunicationBackend[];
 export type DeviceKind = "cuda" | "rocm" | "mps" | "xpu" | "cpu";
 export type ExecutionContractVersion = string;
 export type ExportFormat =
-  "adapter_peft" | "merged_safetensors" | "merged_fp16" | "gguf" | "onnx" | "awq" | "gptq" | "mlx";
+  "adapter_peft" | "reward_model" | "merged_safetensors" | "merged_fp16" | "gguf" | "onnx" | "awq" | "gptq" | "mlx";
 export type LossImpl = "cross_entropy" | "liger_fused_ce" | "chunked_ce" | "dpo" | "orpo" | "kto" | "ipo" | "reward_bt";
 export type Optimizer =
   | "adamw_torch"

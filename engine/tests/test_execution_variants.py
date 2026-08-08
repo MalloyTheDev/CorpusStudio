@@ -230,6 +230,33 @@ def test_reference_variants_workload_verified_are_the_four_dense_paths():
     assert by_kind[ExecutionVariantKind.moe] != ExecutionVariantSupport.workload_verified
 
 
+def test_reward_model_variant_is_contract_validated_and_refused_at_execution():
+    reference = {v.variant_kind: v for v in reference_execution_variants()}
+    reward = reference[ExecutionVariantKind.reward_model]
+    # The pairwise reward-model shape is contract-expressible but NOT executable (RL slice S5a-1) - below
+    # the workload_verified admission bar, so execution admission refuses it fail-closed.
+    assert reward.support == ExecutionVariantSupport.contract_validated
+    with pytest.raises(ExecutionVariantRefused):
+        admit_execution_variant(reward)
+    # A reward task resolves by its SPECIFIC objective (only reward_model has a built shape); an absent /
+    # unmapped objective, or a MoE reward request, refuses fail-closed rather than mis-claiming a shape.
+    assert (
+        execution_variant_kind_for_task(TaskType.reward, objective_id="reward_model")
+        == ExecutionVariantKind.reward_model
+    )
+    assert execution_variant_kind_for_task(TaskType.reward, objective_id=None) is None
+    assert execution_variant_kind_for_task(TaskType.reward, objective_id="process_supervision") is None
+    assert (
+        execution_variant_kind_for_task(TaskType.reward, objective_id="reward_model", is_moe=True)
+        is None
+    )
+    # Its envelope: a SEQ_CLS scalar score head (NOT causal-LM), a QLoRA adapter, one dataset.
+    env = variant_envelope(ExecutionVariantKind.reward_model)
+    assert env.task_type == "SEQ_CLS"
+    assert not env.requires_causal_lm
+    assert env.requires_peft_adapter and not env.allows_full_parameter
+
+
 def test_descriptor_is_not_the_sealed_worker_configuration():
     # the capability descriptor must never be usable as a worker configuration, and admission returns
     # None (admit/refuse) - never a ResolvedExecutionConfiguration.

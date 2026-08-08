@@ -457,20 +457,6 @@
       "title": "HashRef",
       "type": "object"
     },
-    "LossImpl": {
-      "enum": [
-        "cross_entropy",
-        "liger_fused_ce",
-        "chunked_ce",
-        "dpo",
-        "orpo",
-        "kto",
-        "ipo",
-        "reward_bt"
-      ],
-      "title": "LossImpl",
-      "type": "string"
-    },
     "ModelAttentionApi": {
       "description": "The model-loader API selected before execution.\n\nThis is deliberately separate from :class:`AttentionKernel`: ``sdpa`` is an API that can\ndispatch to several materially different PyTorch kernels.",
       "enum": [
@@ -1039,6 +1025,101 @@
       "title": "PrecisionMode",
       "type": "string"
     },
+    "PreferenceDataPolicy": {
+      "additionalProperties": false,
+      "description": "Additive, dense/MoE-safe preference-pair data policy (S2 / DPO), PARALLEL to the SFT-only\n``TrainingDataPolicy`` - never reuse the SFT contract for preference pairs. It seals the RESOLVED\ndataset schema identity - ``schema_id`` + ``schema_version`` + ``schema_sha256`` (the content digest\nof the resolved schema) - so a consumer fails closed on a row-layout change even when a project-local\nschema shadows the builtin and edits fields without bumping the version; plus the pair render layout,\nformatter + chat template, and the DPO prompt/response length budget - so a preference run formats\nevery pair identically and refuses (never silently truncates) an over-length prompt or response. The\nreference model + DPO loss hyperparameters live on the DPO execution seal (a separate worker slice),\nnot here - this is only the data contract.",
+      "properties": {
+        "chat_template_sha256": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Chat Template Sha256"
+        },
+        "contract_version": {
+          "const": "1.0.0",
+          "default": "1.0.0",
+          "title": "Contract Version",
+          "type": "string"
+        },
+        "data_seed": {
+          "default": 42,
+          "minimum": 0,
+          "title": "Data Seed",
+          "type": "integer"
+        },
+        "formatter_id": {
+          "minLength": 1,
+          "title": "Formatter Id",
+          "type": "string"
+        },
+        "formatter_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Formatter Sha256",
+          "type": "string"
+        },
+        "max_length": {
+          "minimum": 1,
+          "title": "Max Length",
+          "type": "integer"
+        },
+        "max_prompt_length": {
+          "minimum": 1,
+          "title": "Max Prompt Length",
+          "type": "integer"
+        },
+        "pair_schema": {
+          "default": "chosen_rejected",
+          "enum": [
+            "chosen_rejected",
+            "preference_pair"
+          ],
+          "title": "Pair Schema",
+          "type": "string"
+        },
+        "schema_id": {
+          "minLength": 1,
+          "title": "Schema Id",
+          "type": "string"
+        },
+        "schema_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Schema Sha256",
+          "type": "string"
+        },
+        "schema_version": {
+          "minLength": 1,
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "truncation_policy": {
+          "default": "refuse",
+          "enum": [
+            "refuse",
+            "allow"
+          ],
+          "title": "Truncation Policy",
+          "type": "string"
+        }
+      },
+      "required": [
+        "schema_id",
+        "schema_version",
+        "schema_sha256",
+        "formatter_id",
+        "formatter_sha256",
+        "max_prompt_length",
+        "max_length"
+      ],
+      "title": "PreferenceDataPolicy",
+      "type": "object"
+    },
     "QuantizationMode": {
       "enum": [
         "none",
@@ -1078,6 +1159,44 @@
         "id"
       ],
       "title": "Ref",
+      "type": "object"
+    },
+    "RewardModelingSpec": {
+      "additionalProperties": false,
+      "description": "The reward-model training shape for a PAIRWISE (Bradley-Terry) reward model - the sibling of\n:class:`PreferenceOptimizationSpec` for the ``reward_model`` execution variant. Kept off\n:class:`PreferenceDataPolicy` (reused verbatim as the chosen/rejected data contract) so the data\npolicy stays method-agnostic. A reward model's output is a NEW artifact family: a scalar SCORE HEAD\nover the base (a SEQ_CLS ``num_labels=1`` projection), NOT a policy adapter and NOT causal-LM\ngeneration.\n\nOnly the pairwise Bradley-Terry family is admitted here; scalar-pointwise / process / outcome /\ngenerative-verifier reward families are DISTINCT (different output artifacts + eval semantics) and are\nadded as their own specs + objectives, never silently under this seal (each gates independently).",
+      "properties": {
+        "family": {
+          "const": "pairwise",
+          "default": "pairwise",
+          "title": "Family",
+          "type": "string"
+        },
+        "loss_type": {
+          "const": "bradley_terry",
+          "default": "bradley_terry",
+          "title": "Loss Type",
+          "type": "string"
+        },
+        "margin": {
+          "default": 0.0,
+          "minimum": 0,
+          "title": "Margin",
+          "type": "number"
+        },
+        "output_direction": {
+          "const": "higher_is_better",
+          "default": "higher_is_better",
+          "title": "Output Direction",
+          "type": "string"
+        },
+        "score_pooling": {
+          "const": "last_token",
+          "default": "last_token",
+          "title": "Score Pooling",
+          "type": "string"
+        }
+      },
+      "title": "RewardModelingSpec",
       "type": "object"
     },
     "SequenceSpec": {
@@ -1201,75 +1320,6 @@
       "title": "TrainerInterfacePolicy",
       "type": "object"
     },
-    "TrainingDataPolicy": {
-      "additionalProperties": false,
-      "properties": {
-        "chat_template_sha256": {
-          "anyOf": [
-            {
-              "pattern": "^[0-9a-f]{64}$",
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Chat Template Sha256"
-        },
-        "dataset_format": {
-          "enum": [
-            "instruction",
-            "chat",
-            "trace"
-          ],
-          "title": "Dataset Format",
-          "type": "string"
-        },
-        "dataset_text_field": {
-          "default": "text",
-          "title": "Dataset Text Field",
-          "type": "string"
-        },
-        "formatter_id": {
-          "minLength": 1,
-          "title": "Formatter Id",
-          "type": "string"
-        },
-        "formatter_sha256": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Formatter Sha256",
-          "type": "string"
-        },
-        "packing": {
-          "default": false,
-          "title": "Packing",
-          "type": "boolean"
-        },
-        "truncation_analysis": {
-          "const": "full_pinned_dataset",
-          "default": "full_pinned_dataset",
-          "title": "Truncation Analysis",
-          "type": "string"
-        },
-        "truncation_policy": {
-          "default": "refuse",
-          "enum": [
-            "refuse",
-            "allow"
-          ],
-          "title": "Truncation Policy",
-          "type": "string"
-        }
-      },
-      "required": [
-        "dataset_format",
-        "formatter_id",
-        "formatter_sha256"
-      ],
-      "title": "TrainingDataPolicy",
-      "type": "object"
-    },
     "TrainingSchedule": {
       "additionalProperties": false,
       "properties": {
@@ -1305,14 +1355,14 @@
     }
   },
   "additionalProperties": false,
-  "description": "The hash-sealed configuration consumed directly by an isolated training worker.\n\nIt contains every execution-affecting default. Workers may refuse it, but may not fill in,\nfilter, reinterpret, or override semantic fields after this configuration is sealed.",
+  "description": "The hash-sealed configuration for a pairwise reward-model run - the sibling of\n:class:`ResolvedExecutionConfiguration` for the ``reward_model`` execution variant (RL slice S5a-1).\n\nLike the DPO seal, it reuses every shared execution sub-spec (placement / precision / attention /\nadapter / optimizer / sequence / batching / checkpoint / schedule / trainer interface) and reuses the\n:class:`PreferenceDataPolicy` (a reward model trains on the SAME chosen/rejected pairs), adding only\na :class:`RewardModelingSpec`. It binds the declared ``reward_model`` objective. Two things differ\nfrom every policy config: the adapter task type is ``SEQ_CLS`` (a scalar score head, not\n``CAUSAL_LM``), and the export format is ``reward_model`` (a new artifact family, not an adapter).\n\nCarried on ``RunPlan.resolved_reward_execution`` (a plan holds EXACTLY ONE execution config). The\ncontract + resolver are the control plane; EXECUTION (the reward-head trainer branch + a\nworkload-verified run + the promoting wheel) remains gated - ``reward_model`` stays\n``contract_validated`` until a measured run promotes it.",
   "properties": {
     "adapter": {
       "$ref": "#/$defs/AdapterSpec"
     },
     "adapter_task_type": {
-      "const": "CAUSAL_LM",
-      "default": "CAUSAL_LM",
+      "const": "SEQ_CLS",
+      "default": "SEQ_CLS",
       "title": "Adapter Task Type",
       "type": "string"
     },
@@ -1352,7 +1402,7 @@
       "type": "string"
     },
     "data": {
-      "$ref": "#/$defs/TrainingDataPolicy"
+      "$ref": "#/$defs/PreferenceDataPolicy"
     },
     "data_seed": {
       "default": 42,
@@ -1390,9 +1440,6 @@
     "inputs": {
       "$ref": "#/$defs/ExecutionInputs"
     },
-    "loss_impl": {
-      "$ref": "#/$defs/LossImpl"
-    },
     "objective_ref": {
       "$ref": "#/$defs/Ref"
     },
@@ -1412,6 +1459,9 @@
     },
     "precision": {
       "$ref": "#/$defs/PrecisionExecutionPolicy"
+    },
+    "reward": {
+      "$ref": "#/$defs/RewardModelingSpec"
     },
     "runtime_mode": {
       "enum": [
@@ -1473,17 +1523,17 @@
     "device_map",
     "adapter",
     "optimizer",
-    "loss_impl",
     "sequence",
     "batching",
     "checkpoint_policy",
     "schedule",
     "data",
+    "reward",
     "trainer_interface",
     "export_format",
     "bnb_4bit_use_double_quant",
     "output_dir"
   ],
-  "title": "ResolvedExecutionConfiguration",
+  "title": "ResolvedRewardExecutionConfiguration",
   "type": "object"
 }
