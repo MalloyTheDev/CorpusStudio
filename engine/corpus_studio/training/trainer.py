@@ -3459,6 +3459,7 @@ def run_training(  # pragma: no cover - optional training-stack integration
     source_run_id: str | None = None,
     checkpoints_root: str | None = None,
     resume: CheckpointResumeRequest | None = None,
+    worker_wheel_sha256: str | None = None,
 ) -> TrainResult:
     """Run the training. Lazy-imports the heavy stack; verified via the CPU toy path (a real GPU QLoRA
     can only be user-smoke-tested). Raises :class:`TrainerError` if the runtime can't run the request.
@@ -3785,6 +3786,14 @@ def run_training(  # pragma: no cover - optional training-stack integration
     # no token evidence (null downstream) - it can never fail or alter training.
     token_accumulator = _TokenAccumulator() if token_callback is not None else None
 
+    # For a RESUMED run the honesty-core adapter-change gate must measure the delta over the RESUMED
+    # interval, NOT the checkpoint restore. HF restores the parent state at the start of train(), so a
+    # baseline captured before train() would let the restore alone satisfy before != after (a resumed
+    # interval that performed no real update could pass). We capture the trainable/export baseline in
+    # on_train_begin - which fires AFTER the restore, before the first resumed update - and use it in
+    # place of the pre-train baseline at finalize below.
+    post_restore_baseline: dict[str, Any] = {}
+
     class _ProgressCallback(TrainerCallback):  # type: ignore[misc]
         def on_train_begin(self, args: Any, state: Any, control: Any, **kwargs: Any) -> None:
             optimizer = kwargs.get("optimizer")
@@ -3792,6 +3801,17 @@ def run_training(  # pragma: no cover - optional training-stack integration
                 execution_tracker.on_train_begin(optimizer)
             elif optimizer is not None:
                 _stage("optimizer_created", "observed the optimizer at on_train_begin")
+            if resume is not None and execution_tracker is not None and not post_restore_baseline:
+                restored_model = kwargs.get("model")
+                if restored_model is not None:
+                    post_restore_baseline["trainable"] = capture_trainable_state(
+                        restored_model, torch, stage=StageMarker.adapter_attached
+                    )
+                    post_restore_baseline["export"] = capture_adapter_export_state(
+                        get_peft_model_state_dict(restored_model),
+                        torch,
+                        stage=StageMarker.adapter_attached,
+                    )
 
         def on_step_begin(self, args: Any, state: Any, control: Any, **kwargs: Any) -> None:
             # Mark the forward/backward COMPUTE region of this optimizer step. Without it the live stage
@@ -3996,6 +4016,32 @@ def run_training(  # pragma: no cover - optional training-stack integration
 
         resume_manifest = verify_checkpoint_integrity(resume.checkpoint_dir)
         verify_matches_request(resume_manifest, resume)
+        # Verify the RESUMING worker's bytes against the checkpoint: a managed checkpoint records the
+        # sealed wheel sha256 it was produced by, so a resume under a different wheel (or a shadowing
+        # checkout) fails closed here rather than silently continuing under unsealed worker bytes. The
+        # hybrid path does not call restore_checkpoint (HF owns the restore), so this is the one place
+        # the worker-identity gate fires on resume.
+        sealed_wheel = resume_manifest.bound.worker_wheel_sha256
+        managed_checkpoint = resume_manifest.bound.environment_lock_hash is not None
+        if managed_checkpoint and (sealed_wheel is None or worker_wheel_sha256 is None):
+            # A managed checkpoint that does not carry BOTH worker identities cannot be proven exact
+            # lineage down to the worker bytes: a pre-hardening checkpoint may have run repo-shadowed
+            # source. Fail closed rather than admit it as exact lineage. (The two-sided check below
+            # then guards a present-but-mismatched pair.)
+            raise TrainerError(
+                "a managed checkpoint resume requires both the checkpoint's bound worker wheel and the "
+                "resuming worker's wheel identity, but one is absent; the worker bytes cannot be verified "
+                "as exact lineage"
+            )
+        if (
+            sealed_wheel is not None
+            and worker_wheel_sha256 is not None
+            and sealed_wheel != worker_wheel_sha256
+        ):
+            raise TrainerError(
+                "the checkpoint was produced by a different worker wheel than this worker; resume is "
+                "incompatible (exact-lineage worker-byte mismatch)"
+            )
         if execution_tracker is not None:
             # A resumed run's evidence counts from the resumed-from optimizer step: HF continues its
             # global_step from the restored checkpoint, so the tracker's step-sequence + loss-coverage
@@ -4054,10 +4100,26 @@ def run_training(  # pragma: no cover - optional training-stack integration
                 torch,
                 stage=StageMarker.optimizer_step,
             )
+            # A resumed run measures the adapter-change gate over the RESUMED interval: use the
+            # post-restore baseline captured in on_train_begin, never the pre-train (pre-restore) one,
+            # so the checkpoint restore cannot by itself satisfy the change gate. Fail closed if the
+            # baseline is missing rather than silently falling back to the pre-restore state.
+            resumed_before_trainable = before_trainable_state
+            resumed_before_export = before_export_state
+            if resume is not None:
+                if "trainable" not in post_restore_baseline or "export" not in post_restore_baseline:
+                    raise TrainingEvidenceError(
+                        "a resumed run did not capture a post-restore adapter baseline; the "
+                        "canonical-adapter-change gate must measure the resumed interval, not the restore",
+                        taxonomy=FailureTaxonomy.UPDATE_FAILURE,
+                        stage=StageMarker.adapter_attached,
+                    )
+                resumed_before_trainable = post_restore_baseline["trainable"]
+                resumed_before_export = post_restore_baseline["export"]
             execution_evidence = execution_tracker.finalize(
                 steps=steps,
-                before=before_trainable_state,
-                before_export=before_export_state,
+                before=resumed_before_trainable,
+                before_export=resumed_before_export,
                 after_export=after_export_state,
                 adapter_config_semantic_sha256=expected_saved_adapter_config_sha256(
                     trained_model,

@@ -180,6 +180,7 @@ class RunContext:
         cancel: CancelToken,
         clock: Callable[[], str] = _now_iso,
         resume: CheckpointResumeRequest | None = None,
+        worker_wheel_sha256: str | None = None,
     ) -> None:
         self.plan = plan
         self.run_id = run_id
@@ -190,6 +191,9 @@ class RunContext:
         # A checkpoint RESUME request (exact-lineage) the runner threads to the trainer, or None for a
         # fresh run. The trainer verifies it (integrity + request pin) before restoring anything.
         self.resume = resume
+        # The executing worker's sealed wheel sha256 (managed tier), threaded from the environment lock
+        # so an intermediate checkpoint binds the exact worker BYTES; None for an unmanaged run.
+        self.worker_wheel_sha256 = worker_wheel_sha256
         # The intermediate checkpoints the run produced (recorded on the RunManifest for discovery/resume).
         self.checkpoints: list[str] = []
         # A runner may set the MEASURED fit (from the watchdog's observed peak) — the post-run
@@ -775,6 +779,7 @@ def execute_run(
     telemetry: TelemetryControl | None = None,
     warmup_steps: int = 2,
     resume: CheckpointResumeRequest | None = None,
+    worker_wheel_sha256: str | None = None,
 ) -> SupervisedRun:
     """Execute ``plan`` through ``runner``, collecting the ``RunEvent`` stream and returning the
     terminal :class:`RunManifest`. Terminal classification is total: :class:`RunCancelled` →
@@ -839,7 +844,9 @@ def execute_run(
                 if label not in sink_errors:
                     sink_errors.append(label)
 
-    ctx = RunContext(plan, rid, _collect, cancel, clock, resume=resume)
+    ctx = RunContext(
+        plan, rid, _collect, cancel, clock, resume=resume, worker_wheel_sha256=worker_wheel_sha256
+    )
     started = clock()
     plan_ref = Ref(id=plan.plan_id, hash=HashRef(value=plan.plan_hash))
 
@@ -1034,6 +1041,38 @@ def execute_run(
 
         ctx.final_fit = reconcile_measured_fit(ctx.measured_peak, proven=False)
     finished = clock()
+    # A resumed run records the exact parent run + checkpoint it continued from (fresh identity, explicit
+    # provenance - never a silent reuse of the parent). Derived from the verified checkpoint the resume
+    # request named, so the terminal record itself can establish what it resumed.
+    resume_lineage = None
+    if ctx.resume is not None:
+        from corpus_studio.platform.checkpoint import (  # noqa: PLC0415
+            CheckpointError,
+            verify_checkpoint_integrity,
+        )
+        from corpus_studio.platform.contracts import ResumeLineage  # noqa: PLC0415
+
+        # Re-verify the parent checkpoint's integrity (recompute its content + manifest hash) before
+        # recording lineage, so a checkpoint that disappeared, was corrupted, or was CONTENT-swapped
+        # after admission yields NO lineage rather than crashing the terminal record or attaching lineage
+        # for a checkpoint this run did not restore. The id + hash must additionally still match the
+        # verified resume request. (Re-verification is cheap relative to the run and only touches the
+        # named parent checkpoint.)
+        try:
+            parent_checkpoint = verify_checkpoint_integrity(ctx.resume.checkpoint_dir)
+        except CheckpointError:
+            parent_checkpoint = None
+        if (
+            parent_checkpoint is not None
+            and parent_checkpoint.checkpoint_id == ctx.resume.checkpoint_id
+            and parent_checkpoint.checkpoint_manifest_hash == ctx.resume.checkpoint_manifest_hash
+        ):
+            resume_lineage = ResumeLineage(
+                parent_run_id=parent_checkpoint.source_run_id,
+                parent_checkpoint_id=ctx.resume.checkpoint_id,
+                parent_checkpoint_hash=ctx.resume.checkpoint_manifest_hash,
+                resumed_from_global_step=parent_checkpoint.state.global_optimizer_step,
+            )
     manifest = RunManifest(
         run_id=rid,
         plan_ref=plan_ref,
@@ -1060,6 +1099,7 @@ def execute_run(
         ),
         artifact_ids=artifact_ids,
         checkpoints=ctx.checkpoints,  # the exact-lineage intermediate checkpoints this run sealed
+        resume_lineage=resume_lineage,  # the parent run + checkpoint a resumed run continued from
         failure=failure,
         final_fit=ctx.final_fit,  # the MEASURED fit, when a runner captured one (via the watchdog)
         training_success_evidence=(

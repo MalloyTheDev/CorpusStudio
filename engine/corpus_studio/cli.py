@@ -622,6 +622,7 @@ def platform_run(
             raise typer.Exit(2) from exc
 
     managed_worker_argv = None
+    managed_worker_wheel_sha256: Optional[str] = None
     telemetry_identity_overlay = None
     managed_lease = contextlib.ExitStack()
     managed_environment = (
@@ -676,6 +677,11 @@ def platform_run(
                 )
             managed_worker_argv = [
                 descriptor.python_executable,
+                # -P (PYTHONSAFEPATH): never prepend the launch CWD to sys.path, so the worker imports
+                # corpus_studio from the SEALED environment's site-packages (the pinned wheel), never a
+                # repository checkout that happens to be the current directory. Without this, a managed
+                # run launched from a repo CWD silently shadows the sealed wheel with local source.
+                "-P",
                 "-m",
                 "corpus_studio.platform.worker",
                 "--runner",
@@ -684,6 +690,18 @@ def platform_run(
             from corpus_studio.platform.subprocess_supervisor import worker_identity_argv
 
             managed_worker_argv += worker_identity_argv(plan)
+            # Bind the executing worker wheel sha256 (from the sealed environment lock) so an
+            # intermediate checkpoint records the exact worker BYTES it was produced by and a resume
+            # verifies them - exact lineage down to the wheel, not only the plan + environment lock.
+            # Delivered via an ENVIRONMENT VARIABLE (below), not an argv option, so a pre-hardening
+            # pinned worker wheel (whose arg parser has no such option) is not broken by an upgraded
+            # control plane - it simply ignores the unknown variable.
+            managed_worker_wheel_sha256 = (
+                lock.worker_artifact.content_hash.value
+                if lock.worker_artifact is not None
+                and lock.worker_artifact.content_hash is not None
+                else None
+            )
             # A non-default corpus root anchors a managed pretraining plan's relative shard locations
             # inside the isolated interpreter; the default is left off so ordinary argv is unchanged.
             if corpus_root != ".":
@@ -735,6 +753,20 @@ def platform_run(
 
             resume_manifest = verify_checkpoint_integrity(str(resume_from))
             verify_resumable_into(resume_manifest, plan)
+            # Parent-side worker-identity gate: a MANAGED checkpoint that does not carry its worker wheel
+            # sha256 cannot be proven exact lineage down to the worker BYTES (it may have been produced by
+            # pre-hardening, possibly repo-shadowed, source). Refuse it here, before dispatch - this fires
+            # even when the target environment still pins a legacy worker that would silently skip the
+            # in-worker gate. The worker re-checks a present pair (defense in depth).
+            if (
+                resume_manifest.bound.environment_lock_hash is not None
+                and resume_manifest.bound.worker_wheel_sha256 is None
+            ):
+                raise EnvironmentManagerError(
+                    "this managed checkpoint does not record the worker wheel it was produced by, so its "
+                    "worker bytes cannot be verified as exact lineage; refusing the resume (regenerate the "
+                    "checkpoint under a worker that seals its wheel identity)"
+                )
             resume_request = CheckpointResumeRequest(
                 checkpoint_id=resume_manifest.checkpoint_id,
                 checkpoint_manifest_hash=resume_manifest.checkpoint_manifest_hash,
@@ -755,6 +787,7 @@ def platform_run(
                 worker_argv=managed_worker_argv,
                 telemetry=sampler,
                 resume=resume_request,
+                worker_wheel_sha256=managed_worker_wheel_sha256,
             )
         else:
             # The SAME lane factory the subprocess worker uses, so the in-process path can't drift (it

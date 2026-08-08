@@ -3694,7 +3694,10 @@ def test_platform_run_verifies_lock_and_dispatches_with_managed_interpreter(
     assert dispatched.exit_code == 0, dispatched.output
     worker_argv = captured["worker_argv"]
     assert worker_argv[0] == result.descriptor.python_executable
-    assert worker_argv[1:3] == ["-m", "corpus_studio.platform.worker"]
+    # -P (PYTHONSAFEPATH) keeps the launch CWD off sys.path so the worker imports the sealed wheel,
+    # never a repo checkout in the current directory.
+    assert worker_argv[1] == "-P"
+    assert worker_argv[2:4] == ["-m", "corpus_studio.platform.worker"]
     assert worker_argv[worker_argv.index("--backend-id") + 1] == "corpus_studio"
     assert worker_argv[worker_argv.index("--environment-id") + 1] == "run-env"
     assert worker_argv[worker_argv.index("--environment-hash") + 1] == result.lock.lock_hash

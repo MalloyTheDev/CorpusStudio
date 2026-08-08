@@ -1,0 +1,107 @@
+{
+  "contract_version": "1.0.0",
+  "schema_kind": "checkpoint-manifest-v1",
+  "checkpoint_id": "run-019fde9f-4329-7d9e-b9a5-54f59248146d-ckpt-step-00000002",
+  "checkpoint_manifest_hash": "5ec2c03c7238f810b7a11c0a5f6ae36d085c4efd0096ba7b298bba2361952b82",
+  "source_run_id": "run-019fde9f-4329-7d9e-b9a5-54f59248146d",
+  "parent_checkpoint_id": null,
+  "parent_checkpoint_hash": null,
+  "created_at": "2026-08-07T23:49:15.006328+00:00",
+  "complete": true,
+  "bound": {
+    "plan_hash": "c2cbe309ffa3bfbbdea4902e5fc112f708108f9d36f9827dfff6ea0f553a1b8f",
+    "execution_configuration_hash": "e6ceb53cec147d48db1cc1464a3b7b96563bed2444189c9114cf5671600cc81a",
+    "backend_ref": {
+      "id": "corpus_studio",
+      "hash": {
+        "algo": "sha256",
+        "value": "84a2c4a305c5159e1216665b69f04cf7ace20553e058c0c9d1461610ef2572b6"
+      }
+    },
+    "environment_lock_hash": "2a587ad9c002747d39ce9a5e9fb4978dbdd6930634c931b1e502a1a274584ed2",
+    "worker_wheel_sha256": "69d94b6117b99b77cd5ec2eb9795b934ffa483585f825888dce90b231a563523",
+    "model_ref": {
+      "id": "model-d2d9ab0fbeed",
+      "hash": {
+        "algo": "sha256",
+        "value": "d2d9ab0fbeed7ab74ff3dc433209aec9b01952ccc4d88eec16c0d9aaf1fef9c8"
+      }
+    },
+    "tokenizer_ref": {
+      "id": "tokenizer-d2d9ab0fbeed",
+      "hash": {
+        "algo": "sha256",
+        "value": "d2d9ab0fbeed7ab74ff3dc433209aec9b01952ccc4d88eec16c0d9aaf1fef9c8"
+      }
+    },
+    "dataset_ref": {
+      "id": "dataset",
+      "hash": {
+        "algo": "sha256",
+        "value": "bb0bbf21c7ae38103d97238e6c74d234aee984e0acfb7f5127600c2a48ab032b"
+      }
+    },
+    "chat_template_sha256": null,
+    "formatter_sha256": null,
+    "objective_ref": {
+      "id": "qlora",
+      "hash": {
+        "algo": "sha256",
+        "value": "385e015954a2ad85517af61e2fc9a66de9f03223fffd7554f429abb23c87f1a5"
+      }
+    },
+    "seed": 42,
+    "data_seed": 42
+  },
+  "state": {
+    "optimizer_captured": true,
+    "scheduler_captured": true,
+    "scaler_captured": false,
+    "rng_captured": true,
+    "sampler_state_captured": true,
+    "rng_algorithm": "torch-cpu-mt19937+torch-cuda-philox+python-mt19937+numpy-mt19937",
+    "epoch": 0.03411513859275053,
+    "global_optimizer_step": 2,
+    "microstep_within_step": 0,
+    "gradient_accumulation_steps": 8,
+    "consumed_microsteps": 16
+  },
+  "files": [
+    {
+      "path": "adapter_state.pt",
+      "role": "adapter_weights",
+      "sha256": "f9ec76def2bb97ed28611b3363c702569c062c90f0581cf419d1a70429d295f8",
+      "size_bytes": 161622211
+    },
+    {
+      "path": "optimizer.pt",
+      "role": "optimizer",
+      "sha256": "a17ad62c3b4b24b77e651d33b935f0c7bd6d51fe8b5b6d3574b431e6b7438c5f",
+      "size_bytes": 82469637
+    },
+    {
+      "path": "rng.pt",
+      "role": "rng",
+      "sha256": "279537ab348cd9c803500b7d8a01216f97e29570b823c318c9a4ffbd0c5de794",
+      "size_bytes": 14597
+    },
+    {
+      "path": "sampler.pt",
+      "role": "sampler",
+      "sha256": "978c75b7315b3575656150f7a05ab69f25f1371f8ba82e4f83bc82119b08ff14",
+      "size_bytes": 1261
+    },
+    {
+      "path": "scheduler.pt",
+      "role": "scheduler",
+      "sha256": "be35a3e57125c0fc0e55166f9620fa37875f726fd401fd65a70db449bb8baf45",
+      "size_bytes": 1465
+    },
+    {
+      "path": "trainer_state.json",
+      "role": "trainer_state",
+      "sha256": "e6aa562f434de0ecd36e5c37f8e7b69233c35c5c869760b90d39fd49a19112d3",
+      "size_bytes": 1028
+    }
+  ]
+}

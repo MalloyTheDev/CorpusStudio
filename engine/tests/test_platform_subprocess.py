@@ -62,6 +62,23 @@ def test_worker_streams_accepted_events_and_terminal():
         assert m["correlation_id"] == "c-run-1"
 
 
+def test_worker_env_strips_import_shadowing_vars(monkeypatch):
+    """The worker child never inherits PYTHONPATH/PYTHONHOME, so an inherited path cannot shadow the
+    sealed wheel with another checkout (together with -P in the argv). Other vars are preserved. The
+    managed worker wheel sha is delivered via an env var (a channel a pre-hardening worker ignores)."""
+    from corpus_studio.platform.subprocess_supervisor import WORKER_WHEEL_SHA256_ENV, _worker_env
+
+    monkeypatch.setenv("PYTHONPATH", "/tmp/other-checkout/engine")
+    monkeypatch.setenv("PYTHONHOME", "/tmp/other-home")
+    monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "0")
+    env = _worker_env()
+    assert "PYTHONPATH" not in env
+    assert "PYTHONHOME" not in env
+    assert env.get("CUDA_VISIBLE_DEVICES") == "0"
+    assert WORKER_WHEEL_SHA256_ENV not in env
+    assert _worker_env("a" * 64)[WORKER_WHEEL_SHA256_ENV] == "a" * 64
+
+
 def test_dispatch_carries_resume_only_when_resuming():
     """The run_dispatch line embeds the resume instruction only for an actual resume; an ordinary
     from-scratch dispatch is byte-for-byte unchanged, so a worker that never consumes resume receives
@@ -83,12 +100,64 @@ def test_dispatch_carries_resume_only_when_resuming():
     assert resuming["body"]["resume"]["checkpoint_manifest_hash"] == "a" * 64
 
 
-def test_worker_forwards_resume_from_dispatch_to_execute_run(monkeypatch):
+def _write_min_checkpoint(directory) -> "CheckpointResumeRequest":  # noqa: F821
+    """Seal a minimal real checkpoint at ``directory`` and return the resume request that names it."""
+    import hashlib
+
+    from corpus_studio.platform import checkpoint as ck
+    from corpus_studio.platform.contracts import (
+        CheckpointFileEntry,
+        CheckpointManifest,
+        CheckpointResumeRequest,
+        SealedTrainingState,
+    )
+    from corpus_studio.platform.runners import demo_training_plan
+
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / "optimizer.pt").write_bytes(b"opt")
+    (directory / "rng.pt").write_bytes(b"rng")
+    files = sorted(
+        [
+            CheckpointFileEntry(
+                path="optimizer.pt", role="optimizer",
+                sha256=hashlib.sha256(b"opt").hexdigest(), size_bytes=3,
+            ),
+            CheckpointFileEntry(
+                path="rng.pt", role="rng",
+                sha256=hashlib.sha256(b"rng").hexdigest(), size_bytes=3,
+            ),
+        ],
+        key=lambda e: e.path,
+    )
+    sealed = ck.seal_checkpoint_manifest(
+        CheckpointManifest(
+            checkpoint_id="run-parent01-ckpt-step-00000002",
+            checkpoint_manifest_hash="0" * 64,
+            source_run_id="run-parent01",
+            created_at="2026-07-15T00:00:00+00:00",
+            bound=ck.bound_identities_from_plan(demo_training_plan(plan_id="demo-ckpt")),
+            state=SealedTrainingState(
+                scheduler_captured=True, scaler_captured=False, rng_captured=True,
+                sampler_state_captured=True, rng_algorithm="philox", epoch=0.5,
+                global_optimizer_step=2, microstep_within_step=0,
+                gradient_accumulation_steps=1, consumed_microsteps=2,
+            ),
+            files=files,
+        )
+    )
+    ck.write_checkpoint_manifest(sealed, directory)
+    return CheckpointResumeRequest(
+        checkpoint_id=sealed.checkpoint_id,
+        checkpoint_manifest_hash=sealed.checkpoint_manifest_hash,
+        checkpoint_dir=str(directory),
+    )
+
+
+def test_worker_forwards_resume_from_dispatch_to_execute_run(monkeypatch, tmp_path):
     """Reachability: a resume carried by the dispatch reaches ``execute_run`` - the managed
     --subprocess path is wired end to end, not just the in-process one. Before this wiring the
     subprocess worker silently ignored resume and re-ran from scratch."""
     import corpus_studio.platform.supervisor as supervisor_mod
-    from corpus_studio.platform.contracts import CheckpointResumeRequest
 
     real_execute_run = supervisor_mod.execute_run
     captured: dict = {}
@@ -99,11 +168,7 @@ def test_worker_forwards_resume_from_dispatch_to_execute_run(monkeypatch):
 
     monkeypatch.setattr(supervisor_mod, "execute_run", _spy)
 
-    req = CheckpointResumeRequest(
-        checkpoint_id="run-1-ckpt-step-00000002",
-        checkpoint_manifest_hash="b" * 64,
-        checkpoint_dir="/checkpoints/step-00000002",
-    )
+    req = _write_min_checkpoint(tmp_path / "step-00000002")
     out = io.StringIO()
     rc = run_worker(
         _dispatch_line(_PLAN, "run-1", 30, req),
@@ -114,7 +179,13 @@ def test_worker_forwards_resume_from_dispatch_to_execute_run(monkeypatch):
     )
     assert rc == 0
     assert captured["resume"] is not None
-    assert captured["resume"].checkpoint_dir == "/checkpoints/step-00000002"
+    assert captured["resume"].checkpoint_dir == str(tmp_path / "step-00000002")
+    # The resumed run's manifest records the parent lineage read from that checkpoint (F2).
+    messages = [json.loads(line) for line in out.getvalue().splitlines() if line.strip()]
+    terminal = next(m for m in messages if m["type"] == "terminal_result")
+    lineage = terminal["body"]["run_manifest"].get("resume_lineage")
+    assert lineage is not None and lineage["parent_run_id"] == "run-parent01"
+    assert lineage["resumed_from_global_step"] == 2
     # And the from-scratch dispatch forwards resume=None (no accidental resume on ordinary runs).
     captured.clear()
     run_worker(

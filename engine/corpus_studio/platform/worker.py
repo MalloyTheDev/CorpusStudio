@@ -129,6 +129,7 @@ def run_worker(
     backend_id: str,
     environment_ref: Ref,
     corpus_root: str = ".",
+    worker_wheel_sha256: str | None = None,
     out: Any = None,
 ) -> int:
     """Execute one dispatched run and stream it back. ``dispatch_line`` is the raw ``run_dispatch``
@@ -241,6 +242,7 @@ def run_worker(
             "event", event, correlation_id=correlation_id, out=stream
         ),
         resume=resume,
+        worker_wheel_sha256=worker_wheel_sha256,
     )
     manifest = result.manifest
     outcome = (
@@ -346,6 +348,10 @@ def main(out: TextIO | None = None) -> None:
             backend_id=args.backend_id,
             environment_ref=environment_ref,
             corpus_root=args.corpus_root,
+            # The sealed wheel sha256 arrives via an env var (set by the control plane), NOT an argv
+            # option, so a pre-hardening worker whose arg parser lacks it is never broken - it just
+            # does not read the variable. Bound into any checkpoint + verified on resume.
+            worker_wheel_sha256=os.environ.get("CORPUS_STUDIO_WORKER_WHEEL_SHA256"),
             out=out,
         )
     )

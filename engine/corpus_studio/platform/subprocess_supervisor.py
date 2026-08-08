@@ -18,6 +18,7 @@ pipes isn't portable to Windows). Dependency-light: stdlib + platform contracts 
 from __future__ import annotations
 
 import math
+import os
 import queue
 import subprocess
 import sys
@@ -112,6 +113,10 @@ def _default_worker_argv(
 ) -> list[str]:
     argv = [
         sys.executable,
+        # -P (PYTHONSAFEPATH): keep the launch CWD off sys.path so the worker imports corpus_studio from
+        # its installed location (sealed wheel / editable install), never a shadowing repo checkout in
+        # the current directory. See the managed argv builder in cli.py for the same rationale.
+        "-P",
         "-m",
         "corpus_studio.platform.worker",
         "--runner",
@@ -122,6 +127,29 @@ def _default_worker_argv(
     if corpus_root != ".":
         argv += ["--corpus-root", corpus_root]
     return argv
+
+
+WORKER_WHEEL_SHA256_ENV = "CORPUS_STUDIO_WORKER_WHEEL_SHA256"
+
+
+def _worker_env(worker_wheel_sha256: str | None = None) -> dict[str, str]:
+    """The child worker's environment: the parent's, minus the import-affecting variables PYTHONPATH and
+    PYTHONHOME. `-P` in the worker argv blocks the CWD/script-dir prepend but NOT PYTHONPATH; together
+    they isolate the worker's imports to its installed site-packages (the pinned wheel), so a managed
+    run cannot execute an inherited checkout's source while reporting the sealed wheel hash. CUDA/HF and
+    every other non-import variable are preserved. ``worker_wheel_sha256`` (managed tier) is delivered
+    as an env var - a channel a pre-hardening pinned worker simply ignores, so an upgraded control plane
+    never breaks an older sealed environment's worker (unlike a new argv option its parser would reject)."""
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if key not in ("PYTHONPATH", "PYTHONHOME")
+    }
+    if worker_wheel_sha256 is not None:
+        env[WORKER_WHEEL_SHA256_ENV] = worker_wheel_sha256
+    else:
+        env.pop(WORKER_WHEEL_SHA256_ENV, None)
+    return env
 
 
 def _dispatch_line(
@@ -288,6 +316,7 @@ def execute_run_subprocess(
     warmup_steps: int = 2,
     capture_stderr: bool | None = None,
     resume: CheckpointResumeRequest | None = None,
+    worker_wheel_sha256: str | None = None,
 ) -> SupervisedRun:
     """Run ``plan`` in a supervised child process and return its :class:`SupervisedRun`.
 
@@ -523,6 +552,7 @@ def execute_run_subprocess(
             encoding="utf-8",
             errors="replace",
             bufsize=1,
+            env=_worker_env(worker_wheel_sha256),
             creationflags=process_group_creation_flags(),
             start_new_session=start_new_process_session(),
         )
