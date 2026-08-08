@@ -37,7 +37,7 @@ export type BeforeRun = boolean;
 export type EveryOptimizerSteps = number | null;
 export type SuiteRef = string | null;
 export type ExportFormat =
-  "adapter_peft" | "merged_safetensors" | "merged_fp16" | "gguf" | "onnx" | "awq" | "gptq" | "mlx";
+  "adapter_peft" | "reward_model" | "merged_safetensors" | "merged_fp16" | "gguf" | "onnx" | "awq" | "gptq" | "mlx";
 export type OutputDir = string;
 export type GradientCheckpointing = boolean;
 export type LossImpl = "cross_entropy" | "liger_fused_ce" | "chunked_ce" | "dpo" | "orpo" | "kto" | "ipo" | "reward_bt";
@@ -409,7 +409,31 @@ export type TokenizerLocation = string | null;
 export type VocabSize1 = number | null;
 export type TrustRemoteCode4 = false;
 export type UseSafetensors3 = true;
+export type AdapterTaskType3 = "SEQ_CLS";
+export type Bnb4BitUseDoubleQuant3 = boolean;
+export type ConfigurationHash4 = string;
+export type ConfigurationId4 = string;
+export type ContractVersion7 = "1.0.0";
+export type DataSeed6 = number;
+/**
+ * @minItems 1
+ */
+export type DeviceMap4 = [DeviceMapEntry, ...DeviceMapEntry[]];
+export type EnvironmentBinding4 = "profile_snapshot" | "managed_lock";
+export type GradientCheckpointing5 = boolean;
+export type OutputDir5 = string;
+export type OutputLayout4 = "run_scoped_v1";
+export type Family = "pairwise";
+export type LossType1 = "bradley_terry";
+export type Margin = number;
+export type OutputDirection = "higher_is_better";
+export type ScorePooling = "last_token";
+export type RuntimeMode4 = "training" | "cpu_toy";
+export type SaveStrategy3 = "no" | "steps";
 export type Seed4 = number;
+export type TrustRemoteCode5 = false;
+export type UseSafetensors4 = true;
+export type Seed5 = number;
 export type TaskType =
   | "sft"
   | "pretraining"
@@ -459,7 +483,8 @@ export interface RunPlan {
   resolved_full_finetune_execution?: ResolvedFullFinetuneExecutionConfiguration | null;
   resolved_preference_execution?: ResolvedPreferenceExecutionConfiguration | null;
   resolved_pretraining_execution?: ResolvedPretrainingExecutionConfiguration | null;
-  seed?: Seed4;
+  resolved_reward_execution?: ResolvedRewardExecutionConfiguration | null;
+  seed?: Seed5;
   sequence: SequenceSpec;
   task_type: TaskType;
   training_config_snapshot?: TrainingConfigSnapshot;
@@ -1099,6 +1124,76 @@ export interface TokenizerSourceSpec {
   tokenizer_content_sha256?: TokenizerContentSha256;
   tokenizer_location?: TokenizerLocation;
   vocab_size?: VocabSize1;
+}
+/**
+ * The hash-sealed configuration for a pairwise reward-model run - the sibling of
+ * :class:`ResolvedExecutionConfiguration` for the ``reward_model`` execution variant (RL slice S5a-1).
+ *
+ * Like the DPO seal, it reuses every shared execution sub-spec (placement / precision / attention /
+ * adapter / optimizer / sequence / batching / checkpoint / schedule / trainer interface) and reuses the
+ * :class:`PreferenceDataPolicy` (a reward model trains on the SAME chosen/rejected pairs), adding only
+ * a :class:`RewardModelingSpec`. It binds the declared ``reward_model`` objective. Two things differ
+ * from every policy config: the adapter task type is ``SEQ_CLS`` (a scalar score head, not
+ * ``CAUSAL_LM``), and the export format is ``reward_model`` (a new artifact family, not an adapter).
+ *
+ * Carried on ``RunPlan.resolved_reward_execution`` (a plan holds EXACTLY ONE execution config). The
+ * contract + resolver are the control plane; EXECUTION (the reward-head trainer branch + a
+ * workload-verified run + the promoting wheel) remains gated - ``reward_model`` stays
+ * ``contract_validated`` until a measured run promotes it.
+ */
+export interface ResolvedRewardExecutionConfiguration {
+  adapter: AdapterSpec;
+  adapter_task_type?: AdapterTaskType3;
+  attention: AttentionExecutionPolicy;
+  backend_ref: Ref;
+  batching: BatchingSpec;
+  bnb_4bit_use_double_quant: Bnb4BitUseDoubleQuant3;
+  capability_report_ref: Ref;
+  checkpoint_policy: CheckpointPolicy;
+  configuration_hash: ConfigurationHash4;
+  configuration_id: ConfigurationId4;
+  contract_version?: ContractVersion7;
+  data: PreferenceDataPolicy;
+  data_seed?: DataSeed6;
+  device_map: DeviceMap4;
+  environment_binding: EnvironmentBinding4;
+  environment_ref: Ref;
+  export_format: ExportFormat;
+  gradient_checkpointing?: GradientCheckpointing5;
+  inputs: ExecutionInputs;
+  objective_ref: Ref;
+  optimizer: OptimizerSpec;
+  output_dir: OutputDir5;
+  output_layout?: OutputLayout4;
+  precision: PrecisionExecutionPolicy;
+  reward: RewardModelingSpec;
+  runtime_mode: RuntimeMode4;
+  save_strategy?: SaveStrategy3;
+  schedule: TrainingSchedule;
+  seed?: Seed4;
+  sequence: SequenceSpec;
+  trainer_interface: TrainerInterfacePolicy;
+  trust_remote_code?: TrustRemoteCode5;
+  use_safetensors?: UseSafetensors4;
+}
+/**
+ * The reward-model training shape for a PAIRWISE (Bradley-Terry) reward model - the sibling of
+ * :class:`PreferenceOptimizationSpec` for the ``reward_model`` execution variant. Kept off
+ * :class:`PreferenceDataPolicy` (reused verbatim as the chosen/rejected data contract) so the data
+ * policy stays method-agnostic. A reward model's output is a NEW artifact family: a scalar SCORE HEAD
+ * over the base (a SEQ_CLS ``num_labels=1`` projection), NOT a policy adapter and NOT causal-LM
+ * generation.
+ *
+ * Only the pairwise Bradley-Terry family is admitted here; scalar-pointwise / process / outcome /
+ * generative-verifier reward families are DISTINCT (different output artifacts + eval semantics) and are
+ * added as their own specs + objectives, never silently under this seal (each gates independently).
+ */
+export interface RewardModelingSpec {
+  family?: Family;
+  loss_type?: LossType1;
+  margin?: Margin;
+  output_direction?: OutputDirection;
+  score_pooling?: ScorePooling;
 }
 export interface TrainingConfigSnapshot {
   [k: string]: unknown;

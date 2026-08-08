@@ -56,7 +56,7 @@ export type Value = string | null;
 export type Id = string;
 export type ExecutionContractVersions = string[];
 export type ExportFormat =
-  "adapter_peft" | "merged_safetensors" | "merged_fp16" | "gguf" | "onnx" | "awq" | "gptq" | "mlx";
+  "adapter_peft" | "reward_model" | "merged_safetensors" | "merged_fp16" | "gguf" | "onnx" | "awq" | "gptq" | "mlx";
 export type ServesIn = string[];
 export type ExportCompatibility = ExportCompatibilityEntry[];
 export type ExportFormats = ExportFormat[];

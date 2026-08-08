@@ -233,6 +233,7 @@
     "ExportFormat": {
       "enum": [
         "adapter_peft",
+        "reward_model",
         "merged_safetensors",
         "merged_fp16",
         "gguf",

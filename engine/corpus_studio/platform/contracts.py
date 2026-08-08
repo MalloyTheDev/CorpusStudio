@@ -4108,6 +4108,151 @@ class PreferenceOptimizationSpec(ContractModel):
     average_log_prob: bool = True
 
 
+class RewardModelingSpec(ContractModel):
+    """The reward-model training shape for a PAIRWISE (Bradley-Terry) reward model - the sibling of
+    :class:`PreferenceOptimizationSpec` for the ``reward_model`` execution variant. Kept off
+    :class:`PreferenceDataPolicy` (reused verbatim as the chosen/rejected data contract) so the data
+    policy stays method-agnostic. A reward model's output is a NEW artifact family: a scalar SCORE HEAD
+    over the base (a SEQ_CLS ``num_labels=1`` projection), NOT a policy adapter and NOT causal-LM
+    generation.
+
+    Only the pairwise Bradley-Terry family is admitted here; scalar-pointwise / process / outcome /
+    generative-verifier reward families are DISTINCT (different output artifacts + eval semantics) and are
+    added as their own specs + objectives, never silently under this seal (each gates independently)."""
+
+    family: Literal["pairwise"] = "pairwise"
+    # Bradley-Terry pairwise ranking loss: -log sigmoid(score(chosen) - score(rejected) - margin).
+    loss_type: Literal["bradley_terry"] = "bradley_terry"
+    # Pool the base's final hidden state at the last non-pad token into the scalar score (the standard
+    # sequence-reward pooling); the head is a single linear projection to one logit.
+    score_pooling: Literal["last_token"] = "last_token"
+    # Sealed so downstream RL stages (S5c) read the reward direction instead of assuming it: a higher
+    # score means a better response.
+    output_direction: Literal["higher_is_better"] = "higher_is_better"
+    # The Bradley-Terry margin (0 = the plain chosen>rejected objective); a positive value demands a
+    # minimum score gap between chosen and rejected.
+    margin: float = Field(default=0.0, ge=0)
+
+
+class ResolvedRewardExecutionConfiguration(ContractModel):
+    """The hash-sealed configuration for a pairwise reward-model run - the sibling of
+    :class:`ResolvedExecutionConfiguration` for the ``reward_model`` execution variant (RL slice S5a-1).
+
+    Like the DPO seal, it reuses every shared execution sub-spec (placement / precision / attention /
+    adapter / optimizer / sequence / batching / checkpoint / schedule / trainer interface) and reuses the
+    :class:`PreferenceDataPolicy` (a reward model trains on the SAME chosen/rejected pairs), adding only
+    a :class:`RewardModelingSpec`. It binds the declared ``reward_model`` objective. Two things differ
+    from every policy config: the adapter task type is ``SEQ_CLS`` (a scalar score head, not
+    ``CAUSAL_LM``), and the export format is ``reward_model`` (a new artifact family, not an adapter).
+
+    Carried on ``RunPlan.resolved_reward_execution`` (a plan holds EXACTLY ONE execution config). The
+    contract + resolver are the control plane; EXECUTION (the reward-head trainer branch + a
+    workload-verified run + the promoting wheel) remains gated - ``reward_model`` stays
+    ``contract_validated`` until a measured run promotes it."""
+
+    contract_version: CONTRACT_VERSION_LITERAL = "1.0.0"
+    configuration_id: str = Field(pattern=_ID)
+    configuration_hash: str = Field(pattern=SHA256_PATTERN)
+    backend_ref: Ref
+    environment_ref: Ref
+    environment_binding: Literal["profile_snapshot", "managed_lock"]
+    capability_report_ref: Ref
+    inputs: ExecutionInputs
+    objective_ref: Ref
+    runtime_mode: Literal["training", "cpu_toy"]
+    precision: PrecisionExecutionPolicy
+    attention: AttentionExecutionPolicy
+    device_map: list[DeviceMapEntry] = Field(min_length=1)
+    adapter: AdapterSpec
+    optimizer: OptimizerSpec
+    sequence: SequenceSpec
+    batching: BatchingSpec
+    checkpoint_policy: CheckpointPolicy
+    schedule: TrainingSchedule
+    data: PreferenceDataPolicy
+    reward: RewardModelingSpec
+    trainer_interface: TrainerInterfacePolicy
+    export_format: ExportFormat
+    trust_remote_code: Literal[False] = False
+    use_safetensors: Literal[True] = True
+    bnb_4bit_use_double_quant: bool
+    # A reward model is a scalar SCORE HEAD over the base - a SEQ_CLS (num_labels=1) task, never the
+    # CAUSAL_LM policy task every other config locks.
+    adapter_task_type: Literal["SEQ_CLS"] = "SEQ_CLS"
+    save_strategy: Literal["no", "steps"] = "steps"
+    gradient_checkpointing: bool = True
+    output_dir: str = Field(min_length=1)
+    output_layout: Literal["run_scoped_v1"] = "run_scoped_v1"
+    seed: int = Field(default=42, ge=0)
+    data_seed: int = Field(default=42, ge=0)
+
+    @model_validator(mode="after")
+    def _validate_reward_configuration(self) -> ResolvedRewardExecutionConfiguration:
+        # Enforced independently of the byte-locked SFT/DPO validators so the seals stay decoupled.
+        for label, ref in (
+            ("backend_ref", self.backend_ref),
+            ("environment_ref", self.environment_ref),
+            ("capability_report_ref", self.capability_report_ref),
+            ("objective_ref", self.objective_ref),
+        ):
+            if not _is_pinned_ref(ref):
+                raise ValueError(f"resolved reward execution {label} must be hash-pinned")
+        if self.backend_ref.id != "corpus_studio":
+            raise ValueError(
+                "resolved reward execution requires the first-party corpus_studio worker backend"
+            )
+        # The only admitted reward shape is the pairwise Bradley-Terry reward model, so the seal binds
+        # the 'reward_model' objective; a config whose loss lineage disagrees is refused. Verifying
+        # objective_ref.hash against the sealed catalog is the resolver/runner's job.
+        if self.objective_ref.id != "reward_model":
+            raise ValueError(
+                "reward execution must bind the 'reward_model' objective (the only admitted reward shape)"
+            )
+        if self.export_format != ExportFormat.reward_model:
+            raise ValueError("reward execution must export the 'reward_model' artifact family")
+        # Restrict the seal to exactly the declared shape - a QLoRA (SEQ_CLS scalar head) over a 4-bit
+        # base - so a non-QLoRA / non-4-bit reward config is refused rather than left
+        # contract-valid-but-unadmittable (mirrors the DPO shape enforcement; the variant envelope
+        # declares requires_peft_adapter=True and no full-parameter shape).
+        if self.adapter.method != AdapterMethod.qlora:
+            raise ValueError("the reward model requires the qlora adapter method")
+        if self.precision.quantized_storage_format not in {
+            QuantizationMode.int4,
+            QuantizationMode.nf4,
+        }:
+            raise ValueError("the reward model requires a 4-bit quantized base (int4 or nf4)")
+        # A reward model scores discrete prompt+response pairs; it never packs sequences.
+        if self.sequence.packing:
+            raise ValueError("reward modeling does not pack sequences")
+        # The sealed reward length budget must fit the sealed sequence window (PreferenceDataPolicy
+        # already guarantees max_prompt_length < max_length).
+        if self.data.max_length > self.sequence.max_sequence_len:
+            raise ValueError("data.max_length must fit within the sealed sequence length")
+        # No-silent-truncation cross-check (same contradiction the SFT / DPO siblings refuse).
+        if not self.sequence.truncation_allowed and self.data.truncation_policy == "allow":
+            raise ValueError(
+                "sequence.truncation_allowed is False but data.truncation_policy is 'allow' - a config "
+                "that declares no truncation yet permits it at runtime would silently truncate"
+            )
+        # One reproducible sample order: the reward data policy's seed and the top-level execution data
+        # seed must agree, so a worker cannot honor two different orderings.
+        if self.data.data_seed != self.data_seed:
+            raise ValueError(
+                "the reward data_seed and the top-level data_seed must match for one reproducible "
+                "sample order"
+            )
+        environment_hash = self.environment_ref.hash
+        assert environment_hash is not None and environment_hash.value is not None
+        if (
+            self.environment_binding == "profile_snapshot"
+            and self.environment_ref.id != environment_hash.value
+        ):
+            raise ValueError(
+                "a profile_snapshot reward execution must name the environment by its own hash"
+            )
+        return self
+
+
 class ResolvedPreferenceExecutionConfiguration(ContractModel):
     """The hash-sealed configuration for an offline preference-optimization (DPO) run - the sibling of
     :class:`ResolvedExecutionConfiguration` for the ``preference_dpo`` execution variant.
@@ -5129,6 +5274,9 @@ class RunPlan(ContractModel):
     resolved_full_finetune_execution: ResolvedFullFinetuneExecutionConfiguration | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
+    resolved_reward_execution: ResolvedRewardExecutionConfiguration | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     # Pins the parameter evidence the planner consumed; it does not manufacture missing counts.
     parameter_accounting_ref: Ref | None = None
     # ``None`` identifies a legacy plan. The planner always emits a fully resolved spec for new plans.
@@ -5147,11 +5295,12 @@ class RunPlan(ContractModel):
             self.resolved_preference_execution,
             self.resolved_pretraining_execution,
             self.resolved_full_finetune_execution,
+            self.resolved_reward_execution,
         )
         if sum(1 for authority in _execution_authorities if authority is not None) > 1:
             raise ValueError(
-                "a RunPlan carries exactly one execution config (SFT, preference, pretraining, or "
-                "full-finetune), never more than one"
+                "a RunPlan carries exactly one execution config (SFT, preference, pretraining, "
+                "full-finetune, or reward), never more than one"
             )
         execution = self.resolved_execution
         if execution is not None:
@@ -5359,6 +5508,24 @@ class RunPlan(ContractModel):
             # produces the coherent RunPlan summary.
             if self.task_type != TaskType.sft:
                 raise ValueError("a resolved full-finetune execution requires an SFT RunPlan")
+        reward = self.resolved_reward_execution
+        if reward is not None:
+            expected_reward_hash = _canonical_contract_sha256(
+                reward.model_dump(mode="json", exclude={"configuration_hash"})
+            )
+            if reward.configuration_hash != expected_reward_hash:
+                raise ValueError(
+                    "resolved_reward_execution configuration_hash does not match its body"
+                )
+            if self.training_config_snapshot:
+                raise ValueError("new resolved plans cannot carry a second trainer-config authority")
+            if reward.backend_ref != self.backend_ref:
+                raise ValueError("resolved reward execution backend_ref must match the RunPlan")
+            if reward.environment_ref != self.environment_ref:
+                raise ValueError("resolved reward execution environment_ref must match the RunPlan")
+            # A reward model is a reward-modeling task, never SFT / preference / pretraining.
+            if self.task_type != TaskType.reward:
+                raise ValueError("a resolved reward execution requires a reward-task RunPlan")
         if self.physical_execution is None:
             return self
         if (

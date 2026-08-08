@@ -83,6 +83,15 @@ _VARIANT_ENVELOPE: dict[ExecutionVariantKind, VariantEnvelope] = {
         allows_full_parameter=False,
         allows_multiple_datasets=False,
     ),
+    # Pairwise reward model (RL slice S5a-1): a QLoRA SEQ_CLS scalar score head over a base, one
+    # chosen/rejected dataset. NOT causal-LM (a reward head, not generation), no full-parameter update.
+    ExecutionVariantKind.reward_model: VariantEnvelope(
+        task_type="SEQ_CLS",
+        requires_causal_lm=False,
+        requires_peft_adapter=True,
+        allows_full_parameter=False,
+        allows_multiple_datasets=False,
+    ),
 }
 
 # Derived from the enum's definition order (ascending support), so it cannot drift from the ladder:
@@ -155,6 +164,16 @@ def reference_execution_variants() -> tuple[BackendExecutionVariant, ...]:
             # follow-up, exactly as for pretraining. See docs/HOST_STATE.md.
             support=ExecutionVariantSupport.workload_verified,
         ),
+        BackendExecutionVariant(
+            backend_id="corpus_studio",
+            variant_kind=ExecutionVariantKind.reward_model,
+            # contract_validated (RL slice S5a-1): the pairwise reward-model shape - a QLoRA SEQ_CLS
+            # scalar score head over a base, trained on chosen/rejected pairs under a Bradley-Terry loss
+            # - is contract-expressible (ResolvedRewardExecutionConfiguration + resolver + admission), but
+            # NOT executable: the reward-head trainer branch, a workload-verified run, and the promoting
+            # wheel are the following slices. Admission stays fail-closed until then.
+            support=ExecutionVariantSupport.contract_validated,
+        ),
     )
 
 
@@ -202,6 +221,13 @@ _PREFERENCE_OBJECTIVE_TO_VARIANT: dict[str, ExecutionVariantKind] = {
     "dpo_qlora": ExecutionVariantKind.preference_dpo,
 }
 
+# The reward family is like the preference family: reward_model / process_supervision / verifier_training
+# are DISTINCT objectives, and only the pairwise reward_model has a built (contract) shape (S5a-1). Keyed
+# on the specific objective so the declared-only families are never mis-claimed; unrecognized -> refuse.
+_REWARD_OBJECTIVE_TO_VARIANT: dict[str, ExecutionVariantKind] = {
+    "reward_model": ExecutionVariantKind.reward_model,
+}
+
 
 def execution_variant_kind_for_task(
     task_type: TaskType, *, is_moe: bool = False, objective_id: str | None = None,
@@ -221,6 +247,13 @@ def execution_variant_kind_for_task(
         if is_moe or not objective_id:
             return None
         return _PREFERENCE_OBJECTIVE_TO_VARIANT.get(objective_id)
+    # A reward task, like preference, resolves by its specific objective (only the pairwise reward_model
+    # has a built shape); a MoE or unmapped reward objective refuses fail-closed rather than routing to
+    # the generic moe shape (there is no built MoE-reward shape).
+    if task_type == TaskType.reward:
+        if is_moe or not objective_id:
+            return None
+        return _REWARD_OBJECTIVE_TO_VARIANT.get(objective_id)
     if is_moe:
         return ExecutionVariantKind.moe
     # A dense SFT with all parameters trainable is the full-parameter shape, NOT the QLoRA-adapter one -

@@ -90,6 +90,10 @@
       "file": "ResolvedPreferenceExecutionConfiguration.schema.json"
     },
     {
+      "contract": "ResolvedRewardExecutionConfiguration",
+      "file": "ResolvedRewardExecutionConfiguration.schema.json"
+    },
+    {
       "contract": "ResolvedPretrainingExecutionConfiguration",
       "file": "ResolvedPretrainingExecutionConfiguration.schema.json"
     },

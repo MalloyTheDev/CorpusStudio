@@ -1,4 +1,4 @@
-/* GENERATED from docs/contracts/ResolvedFullFinetuneExecutionConfiguration.schema.json — do not edit. Run: npm run gen:contracts */
+/* GENERATED from docs/contracts/ResolvedRewardExecutionConfiguration.schema.json — do not edit. Run: npm run gen:contracts */
 
 export type Bias = ("none" | "all" | "lora_only") | null;
 export type LoraAlpha = number | null;
@@ -7,7 +7,7 @@ export type LoraR = number | null;
 export type AdapterMethod =
   "none" | "lora" | "qlora" | "dora" | "ia3" | "full_finetune" | "prompt_tuning" | "prefix_tuning";
 export type TargetModules = string[] | null;
-export type AdapterTaskType = "CAUSAL_LM";
+export type AdapterTaskType = "SEQ_CLS";
 /**
  * The exact attention implementation an execution policy permits at runtime.
  */
@@ -85,14 +85,18 @@ export type ConfigurationHash = string;
 export type ConfigurationId = string;
 export type ContractVersion = "1.0.0";
 export type ChatTemplateSha256 = string | null;
-export type DatasetFormat = "instruction" | "chat" | "trace";
-export type DatasetTextField = string;
+export type ContractVersion1 = "1.0.0";
+export type DataSeed = number;
 export type FormatterId = string;
 export type FormatterSha256 = string;
-export type Packing = boolean;
-export type TruncationAnalysis = "full_pinned_dataset";
+export type MaxLength = number;
+export type MaxPromptLength = number;
+export type PairSchema = "chosen_rejected" | "preference_pair";
+export type SchemaId = string;
+export type SchemaSha256 = string;
+export type SchemaVersion = string;
 export type TruncationPolicy = "refuse" | "allow";
-export type DataSeed = number;
+export type DataSeed1 = number;
 /**
  * @minItems 1
  */
@@ -108,7 +112,6 @@ export type Kind = "dataset" | "model" | "tokenizer";
 export type Location = string;
 export type ResolvedRevision = string | null;
 export type Source1 = "local_file" | "local_directory" | "huggingface";
-export type LossImpl = "cross_entropy" | "liger_fused_ce" | "chunked_ce" | "dpo" | "orpo" | "kto" | "ipo" | "reward_bt";
 export type AdamBeta1 = number;
 export type AdamBeta2 = number;
 export type AdamEpsilon = number;
@@ -134,6 +137,11 @@ export type PrecisionMode1 = "fp32" | "tf32" | "fp16" | "bf16" | "fp8" | "mixed_
 export type OptimizerStateDtype = PrecisionMode | QuantizationMode;
 export type QuantizationMode = "none" | "int8" | "int4" | "nf4" | "fp4" | "gptq" | "awq" | "hqq";
 export type QuantizationMode1 = "none" | "int8" | "int4" | "nf4" | "fp4" | "gptq" | "awq" | "hqq";
+export type Family = "pairwise";
+export type LossType = "bradley_terry";
+export type Margin = number;
+export type OutputDirection = "higher_is_better";
+export type ScorePooling = "last_token";
 export type RuntimeMode = "training" | "cpu_toy";
 export type SaveStrategy = "no" | "steps";
 export type MaxSteps = number | null;
@@ -141,7 +149,7 @@ export type NumTrainEpochs = number | null;
 export type Seed = number;
 export type Buckets = number[];
 export type MaxSequenceLen = number;
-export type Packing1 = boolean;
+export type Packing = boolean;
 export type TruncationAllowed = boolean;
 export type DisableTqdm = boolean;
 export type LoggingNanInfFilter = false | null;
@@ -162,14 +170,22 @@ export type TrustRemoteCode = false;
 export type UseSafetensors = true;
 
 /**
- * The hash-sealed configuration for a FULL-PARAMETER supervised fine-tune - the full-model sibling of
- * the adapter-only :class:`ResolvedExecutionConfiguration`. Same SFT data + objective path, but ALL model
- * parameters are trainable and the artifact is a full model (merged safetensors + full-state checkpoints),
- * so it is its OWN sealed config: the SFT config's validator hard-requires a PEFT adapter + adapter-only
- * export, which a full fine-tune cannot satisfy. Consumed directly by the first-party full-parameter
- * worker; refused at execution until dense_full_finetune is workload_verified.
+ * The hash-sealed configuration for a pairwise reward-model run - the sibling of
+ * :class:`ResolvedExecutionConfiguration` for the ``reward_model`` execution variant (RL slice S5a-1).
+ *
+ * Like the DPO seal, it reuses every shared execution sub-spec (placement / precision / attention /
+ * adapter / optimizer / sequence / batching / checkpoint / schedule / trainer interface) and reuses the
+ * :class:`PreferenceDataPolicy` (a reward model trains on the SAME chosen/rejected pairs), adding only
+ * a :class:`RewardModelingSpec`. It binds the declared ``reward_model`` objective. Two things differ
+ * from every policy config: the adapter task type is ``SEQ_CLS`` (a scalar score head, not
+ * ``CAUSAL_LM``), and the export format is ``reward_model`` (a new artifact family, not an adapter).
+ *
+ * Carried on ``RunPlan.resolved_reward_execution`` (a plan holds EXACTLY ONE execution config). The
+ * contract + resolver are the control plane; EXECUTION (the reward-head trainer branch + a
+ * workload-verified run + the promoting wheel) remains gated - ``reward_model`` stays
+ * ``contract_validated`` until a measured run promotes it.
  */
-export interface ResolvedFullFinetuneExecutionConfiguration {
+export interface ResolvedRewardExecutionConfiguration {
   adapter: AdapterSpec;
   adapter_task_type?: AdapterTaskType;
   attention: AttentionExecutionPolicy;
@@ -181,20 +197,20 @@ export interface ResolvedFullFinetuneExecutionConfiguration {
   configuration_hash: ConfigurationHash;
   configuration_id: ConfigurationId;
   contract_version?: ContractVersion;
-  data: TrainingDataPolicy;
-  data_seed?: DataSeed;
+  data: PreferenceDataPolicy;
+  data_seed?: DataSeed1;
   device_map: DeviceMap;
   environment_binding: EnvironmentBinding;
   environment_ref: Ref;
   export_format: ExportFormat;
   gradient_checkpointing?: GradientCheckpointing;
   inputs: ExecutionInputs;
-  loss_impl: LossImpl;
   objective_ref: Ref;
   optimizer: OptimizerSpec;
   output_dir: OutputDir;
   output_layout?: OutputLayout;
   precision: PrecisionExecutionPolicy;
+  reward: RewardModelingSpec;
   runtime_mode: RuntimeMode;
   save_strategy?: SaveStrategy;
   schedule: TrainingSchedule;
@@ -298,14 +314,29 @@ export interface CheckpointPolicy {
   keep_last?: KeepLast;
   reload_verify?: ReloadVerify;
 }
-export interface TrainingDataPolicy {
+/**
+ * Additive, dense/MoE-safe preference-pair data policy (S2 / DPO), PARALLEL to the SFT-only
+ * ``TrainingDataPolicy`` - never reuse the SFT contract for preference pairs. It seals the RESOLVED
+ * dataset schema identity - ``schema_id`` + ``schema_version`` + ``schema_sha256`` (the content digest
+ * of the resolved schema) - so a consumer fails closed on a row-layout change even when a project-local
+ * schema shadows the builtin and edits fields without bumping the version; plus the pair render layout,
+ * formatter + chat template, and the DPO prompt/response length budget - so a preference run formats
+ * every pair identically and refuses (never silently truncates) an over-length prompt or response. The
+ * reference model + DPO loss hyperparameters live on the DPO execution seal (a separate worker slice),
+ * not here - this is only the data contract.
+ */
+export interface PreferenceDataPolicy {
   chat_template_sha256?: ChatTemplateSha256;
-  dataset_format: DatasetFormat;
-  dataset_text_field?: DatasetTextField;
+  contract_version?: ContractVersion1;
+  data_seed?: DataSeed;
   formatter_id: FormatterId;
   formatter_sha256: FormatterSha256;
-  packing?: Packing;
-  truncation_analysis?: TruncationAnalysis;
+  max_length: MaxLength;
+  max_prompt_length: MaxPromptLength;
+  pair_schema?: PairSchema;
+  schema_id: SchemaId;
+  schema_sha256: SchemaSha256;
+  schema_version: SchemaVersion;
   truncation_policy?: TruncationPolicy;
 }
 export interface DeviceMapEntry {
@@ -359,6 +390,25 @@ export interface PrecisionExecutionPolicy {
   quantized_storage_format?: QuantizationMode1;
   weight_storage_dtype?: PrecisionMode | null;
 }
+/**
+ * The reward-model training shape for a PAIRWISE (Bradley-Terry) reward model - the sibling of
+ * :class:`PreferenceOptimizationSpec` for the ``reward_model`` execution variant. Kept off
+ * :class:`PreferenceDataPolicy` (reused verbatim as the chosen/rejected data contract) so the data
+ * policy stays method-agnostic. A reward model's output is a NEW artifact family: a scalar SCORE HEAD
+ * over the base (a SEQ_CLS ``num_labels=1`` projection), NOT a policy adapter and NOT causal-LM
+ * generation.
+ *
+ * Only the pairwise Bradley-Terry family is admitted here; scalar-pointwise / process / outcome /
+ * generative-verifier reward families are DISTINCT (different output artifacts + eval semantics) and are
+ * added as their own specs + objectives, never silently under this seal (each gates independently).
+ */
+export interface RewardModelingSpec {
+  family?: Family;
+  loss_type?: LossType;
+  margin?: Margin;
+  output_direction?: OutputDirection;
+  score_pooling?: ScorePooling;
+}
 export interface TrainingSchedule {
   max_steps?: MaxSteps;
   num_train_epochs?: NumTrainEpochs;
@@ -370,7 +420,7 @@ export interface TrainingSchedule {
 export interface SequenceSpec {
   buckets?: Buckets;
   max_sequence_len?: MaxSequenceLen;
-  packing?: Packing1;
+  packing?: Packing;
   truncation_allowed?: TruncationAllowed;
 }
 /**
