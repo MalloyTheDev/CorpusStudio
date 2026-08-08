@@ -1258,6 +1258,13 @@ def platform_plan(
         assess_dataset_file_conformance,
     )
 
+    # On-policy RL (grpo) draws chat PROMPTS: _resolve_rollout_execution seals the 'chat' schema +
+    # generation-prompt formatter UNCONDITIONALLY, so the conformance preflight (and the sealed
+    # dataset_format) must be 'chat' too. Leaving the default 'instruction' would validate instruction rows
+    # while the worker expects 'messages' - a plan that only fails deep in the worker. Force 'chat' so the
+    # preflight matches exactly what the resolver seals (a non-chat prompt dataset then fails closed here).
+    if task_type == "grpo":
+        dataset_format = "chat"
     # Pretraining consumes a sharded corpus (a PretrainingDataPolicy), NOT an instruction/chat dataset,
     # so the SFT/DPO row-conformance preflight does not apply to it (it stays None for a pretraining plan).
     dataset_conformance = None
