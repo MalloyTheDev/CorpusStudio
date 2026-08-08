@@ -70,8 +70,15 @@ from corpus_studio.platform.contracts import (
     ResolvedFullFinetuneExecutionConfiguration,
     ResolvedPreferenceExecutionConfiguration,
     ResolvedRewardExecutionConfiguration,
+    ResolvedRolloutExecutionConfiguration,
     RewardModelingSpec,
+    RewardSourceRef,
+    RolloutSpec,
+    ExperienceSource,
+    PolicyOptimizationSpec,
+    StabilityController,
     ResolvedPretrainingExecutionConfiguration,
+    RunManifest,
     RunPlan,
     StatePlacement,
     StorageProfile,
@@ -101,6 +108,7 @@ from corpus_studio.platform.enums import (
     TaskType,
 )
 from corpus_studio.platform.execution_config import (
+    ExecutionConfigurationError,
     canonical_sha256,
     capability_report_ref_for,
     execution_configuration_hash_for,
@@ -111,6 +119,9 @@ from corpus_studio.platform.execution_config import (
     reward_execution_configuration_hash_for,
     preference_formatter_identity,
     pretraining_execution_configuration_hash_for,
+    rollout_execution_configuration_hash_for,
+    run_scoped_training_output,
+    stable_file_sha256,
 )
 from corpus_studio.schemas.project_schemas import resolve_schema
 from corpus_studio.platform.host_platform import flash_sdpa_deadlocks
@@ -186,6 +197,10 @@ class PlannerConstraints:
     seed: int = 42
     data_seed: int | None = None
     output_dir: str = "output"
+    # On-policy RL (S5b) reward-source provenance binding: the reward run's RunManifest (the admitted-run
+    # proof) + its RunPlan (for the reward base model + adapter location). Required for a grpo plan.
+    reward_source_manifest: str | None = None
+    reward_source_plan: str | None = None
     supervised_token_accumulation_target: int | None = None
     attention_backend: str | None = None  # explicit override; else resolved from the host
     verification_requirement: str = "require_verified"
@@ -1069,6 +1084,145 @@ def _resolve_reward_execution(
     )
 
 
+def _resolve_reward_source(constraints: PlannerConstraints) -> RewardSourceRef:
+    """Bind the served reward source BY PROVENANCE (the chosen on-policy design, RL slice S5b): load the
+    reward run's ``RunManifest`` (whose supervisor-admitted ``reward_success_evidence`` PROVES it came from
+    an admitted reward run) + its ``RunPlan`` (for the reward base model + adapter location), cross-check
+    they pair, and seal a hash-pinned, loadable :class:`RewardSourceRef`. Fail-closed on a missing /
+    non-admitted / mismatched source - an unproven reward function must never silently drive an RL run."""
+    from pathlib import Path  # noqa: PLC0415
+
+    manifest_path = constraints.reward_source_manifest
+    plan_path = constraints.reward_source_plan
+    if not manifest_path or not plan_path:
+        raise PlannerError(
+            "an on-policy RL plan requires reward_source_manifest + reward_source_plan (the reward run's "
+            "RunManifest + RunPlan) to bind a provenance-verified reward source"
+        )
+    try:
+        manifest = RunManifest.model_validate_json(Path(manifest_path).read_bytes())
+    except (OSError, ValidationError) as exc:
+        raise PlannerError(f"the reward source RunManifest is unreadable or invalid: {exc}") from exc
+    if manifest.state != "succeeded" or manifest.reward_success_evidence is None:
+        raise PlannerError(
+            "the reward source RunManifest is not an admitted reward run (needs state='succeeded' + "
+            "supervisor-admitted reward_success_evidence)"
+        )
+    adapter_sha256 = manifest.reward_success_evidence.adapter_safetensors_sha256
+    manifest_sha256 = stable_file_sha256(manifest_path)
+    try:
+        source_plan = RunPlan.model_validate_json(Path(plan_path).read_bytes())
+    except (OSError, ValidationError) as exc:
+        raise PlannerError(f"the reward source RunPlan is unreadable or invalid: {exc}") from exc
+    reward_cfg = source_plan.resolved_reward_execution
+    if reward_cfg is None:
+        raise PlannerError("the reward source RunPlan carries no resolved reward execution")
+    # Integrity: the manifest + plan must be from the SAME reward run (the manifest names its plan).
+    if manifest.plan_ref is not None and manifest.plan_ref.id != source_plan.plan_id:
+        raise PlannerError(
+            "the reward source RunManifest and RunPlan are from different runs (plan_ref mismatch)"
+        )
+    try:
+        adapter_location = str(
+            run_scoped_training_output(reward_cfg, manifest.run_id, leaf="adapter")
+        )
+    except ExecutionConfigurationError as exc:
+        raise PlannerError(f"cannot resolve the reward adapter location: {exc}") from exc
+    return RewardSourceRef(
+        kind="served_reward_model",
+        reward_ref=Ref(
+            id=f"reward-adapter-{adapter_sha256[:12]}", hash=HashRef(value=adapter_sha256)
+        ),
+        reward_base_model=reward_cfg.inputs.model.location,
+        reward_adapter_location=adapter_location,
+        provenance_manifest_ref=Ref(
+            id=f"reward-run-{manifest.run_id}", hash=HashRef(value=manifest_sha256)
+        ),
+    )
+
+
+def _resolve_rollout_execution(
+    *,
+    plan_id: str,
+    shared_fields: dict[str, Any],
+    constraints: PlannerConstraints,
+    resolved_physical: PhysicalExecutionSpec,
+    chat_template_sha256: str | None,
+    project_dir: Path | str | None,
+) -> ResolvedRolloutExecutionConfiguration:
+    """Lower a grpo + on-policy RL plan into a SEALED :class:`ResolvedRolloutExecutionConfiguration` - the
+    on-policy sibling of the reward resolver (RL slice S5b). Reuses every shared execution sub-spec, binds
+    the sealed ``grpo`` objective, and adds the on-policy specs: an :class:`ExperienceSource` (chat prompt
+    stream), a :class:`RolloutSpec` (generation), a provenance-verified served :class:`RewardSourceRef`, a
+    :class:`StabilityController` (KL/entropy/clip), and a :class:`PolicyOptimizationSpec` (GRPO). Keeps the
+    CAUSAL_LM policy head + the ``adapter_peft`` policy export. Admitted at planning; the runner refuses it
+    at EXECUTION until the rollout+reward+GRPO worker + workload-verified evidence + wheel land. Hyperparameters
+    are sealed at sane GRPO defaults this slice (operator knobs are a follow-up, as reward/DPO initially did)."""
+    del plan_id  # signature parity with the sibling resolvers; the id is sealed via shared_fields
+    objective = get_objective("grpo")
+    if objective is None:  # pragma: no cover - sealed built-in catalog invariant
+        raise PlannerError("the grpo objective is absent from the sealed registry")
+    objective_ref = Ref(id=objective.objective_id, hash=HashRef(value=objective.objective_hash))
+
+    root_device = resolved_physical.resources[0].device_id
+    expected_device = "cpu" if root_device == "cpu:0" else root_device
+    mapped_devices = {entry["device"] for entry in shared_fields["device_map"]}
+    if expected_device is not None and mapped_devices != {expected_device}:
+        raise PlannerError(
+            f"rollout device_map {sorted(mapped_devices)} does not reconcile with the sealed physical "
+            f"execution device {expected_device!r}"
+        )
+
+    # On-policy RL draws PROMPTS (the model generates the completion); resolve + validate the 'chat' schema.
+    schema, _schema_source = resolve_schema(project_dir, "chat")
+    formatter_id, formatter_hash = formatter_identity("chat")
+    max_length = constraints.sequence_len
+    # The prompt cap + the generation budget must both fit the window; seal sane defaults (half the window
+    # for the prompt, a quarter for the generation) this slice.
+    max_prompt_length = max(1, max_length // 2)
+    max_new_tokens = max(1, max_length // 4)
+    experience = ExperienceSource(
+        schema_id=schema.id,
+        schema_version=schema.version,
+        schema_sha256=canonical_sha256(schema.model_dump(mode="json")),
+        formatter_id=formatter_id,
+        formatter_sha256=formatter_hash,
+        chat_template_sha256=chat_template_sha256,
+        max_prompt_length=max_prompt_length,
+        truncation_policy="allow" if constraints.truncation_allowed else "refuse",
+        data_seed=constraints.data_seed if constraints.data_seed is not None else constraints.seed,
+    )
+    rollout = RolloutSpec(
+        sampling_temperature=1.0,
+        sampling_top_p=0.95,
+        max_new_tokens=max_new_tokens,
+        rollouts_per_prompt=4,
+    )
+    stability = StabilityController(kl_coefficient=0.05, clip_range=0.2)
+    policy = PolicyOptimizationSpec(algorithm="grpo", use_critic=False)
+    reward_source = _resolve_reward_source(constraints)
+    try:
+        draft = ResolvedRolloutExecutionConfiguration.model_validate(
+            {
+                **shared_fields,
+                "configuration_hash": "0" * 64,
+                "objective_ref": objective_ref.model_dump(mode="json"),
+                "experience": experience.model_dump(mode="json"),
+                "rollout": rollout.model_dump(mode="json"),
+                "reward_source": reward_source.model_dump(mode="json"),
+                "stability": stability.model_dump(mode="json"),
+                "policy_optimization": policy.model_dump(mode="json"),
+                "export_format": ExportFormat.adapter_peft.value,
+                "adapter_task_type": "CAUSAL_LM",
+            }
+        )
+    except ValidationError as exc:
+        raise PlannerError(f"the resolved rollout execution configuration is invalid: {exc}") from exc
+    return draft.model_copy(
+        update={"configuration_hash": rollout_execution_configuration_hash_for(draft)}
+    )
+
+
 def _custom_code_spec(constraints: PlannerConstraints) -> CustomModelCodeSpec | None:
     """The ADMITTED custom-block spec when platform-plan verified + set its fields (all-or-nothing); else
     None. Any partial set trips the contract validators, surfaced as a PlannerError by the caller."""
@@ -1474,11 +1628,21 @@ def build_run_plan(
                 f"objective '{constraints.objective_id}' is a reward objective but task_type is "
                 f"'{constraints.task_type}' - a reward objective requires task_type='reward'"
             )
+    # The same guard for the on-policy RL family: a grpo (on_policy_rl) objective on a non-grpo task would
+    # silently lower to dense-SFT, keeping a misleading RL identity. Refuse the contradiction fail-closed.
+    if constraints.objective_id is not None and constraints.task_type != TaskType.grpo.value:
+        named_objective = get_objective(constraints.objective_id)
+        if named_objective is not None and named_objective.kind == ObjectiveKind.on_policy_rl:
+            raise PlannerError(
+                f"objective '{constraints.objective_id}' is an on-policy RL objective but task_type is "
+                f"'{constraints.task_type}' - an on-policy RL objective requires task_type='grpo'"
+            )
     # Preference AND reward are objective-keyed families (their specific objective selects the shape);
     # SFT / pretraining resolve by task alone.
     admission_objective_id = (
         constraints.objective_id
-        if constraints.task_type in (TaskType.preference.value, TaskType.reward.value)
+        if constraints.task_type
+        in (TaskType.preference.value, TaskType.reward.value, TaskType.grpo.value)
         else None
     )
     # QLoRA-DPO is admitted AT PLANNING (contract_validated) so the resolver can seal a reviewable
@@ -1496,6 +1660,14 @@ def build_run_plan(
     is_reward_model = (
         constraints.task_type == TaskType.reward.value
         and admission_objective_id == "reward_model"
+        and not plan_targets_moe
+    )
+    # On-policy RL (RL slice S5b): admitted AT PLANNING (contract_validated) so the resolver seals a
+    # reviewable ResolvedRolloutExecutionConfiguration; refused AT EXECUTION until the rollout+reward+GRPO
+    # worker + evidence + wheel land. Keyed on the specific on-policy objective (only grpo is built).
+    is_rollout = (
+        constraints.task_type == TaskType.grpo.value
+        and admission_objective_id == "grpo"
         and not plan_targets_moe
     )
     # Pretraining (from-scratch / continued) resolves by task alone (no objective_id); its dedicated
@@ -1521,7 +1693,13 @@ def build_run_plan(
             declared_variants=reference_execution_variants(),
             required_support=(
                 ExecutionVariantSupport.contract_validated
-                if (is_preference_dpo or is_pretraining or is_full_finetune or is_reward_model)
+                if (
+                    is_preference_dpo
+                    or is_pretraining
+                    or is_full_finetune
+                    or is_reward_model
+                    or is_rollout
+                )
                 else ExecutionVariantSupport.workload_verified
             ),
         )
@@ -1776,7 +1954,9 @@ def build_run_plan(
     # A preference plan's loss IS the DPO loss - fit-check that, not the SFT loss_impl, so the backend
     # capability evidence reflects the plan the resolver actually seals.
     fit_loss = (
-        "reward_bt" if is_reward_model else ("dpo" if is_preference_dpo else loss_impl)
+        "grpo"
+        if is_rollout
+        else ("reward_bt" if is_reward_model else ("dpo" if is_preference_dpo else loss_impl))
     )
     unmet = unmet_requirements(
         backend,
@@ -1810,6 +1990,16 @@ def build_run_plan(
         # into the byte-locked SFT config's backend_manifest_ref, so declaring either is coupled to a new
         # manifest + milestone wheel). A reward plan is admitted at planning despite exactly those
         # not-yet-declarable reasons (every OTHER fit-check applies); the runner refuses it at execution.
+        not_yet_declarable = {
+            f"task '{constraints.task_type}' not supported",
+            f"loss '{fit_loss}' not supported",
+        }
+        unmet = [reason for reason in unmet if reason not in not_yet_declarable]
+    if is_rollout:
+        # Same for on-policy RL (RL slice S5b): the manifest cannot yet DECLARE the grpo task OR the grpo
+        # loss (content-hashed into the byte-locked SFT config's backend_manifest_ref), so a rollout plan is
+        # admitted at planning despite exactly those not-yet-declarable reasons - every OTHER fit-check
+        # applies - and the runner refuses it at execution until the worker + wheel promote it.
         not_yet_declarable = {
             f"task '{constraints.task_type}' not supported",
             f"loss '{fit_loss}' not supported",
@@ -1986,7 +2176,7 @@ def build_run_plan(
     # so the SFT policy is neither representable nor used for preference. Build it only for the paths that
     # consume it (SFT adapter + full-parameter SFT). The conformance preflight already validated the pairs.
     data_policy: TrainingDataPolicy | None = None
-    if not is_preference_dpo and not is_reward_model:
+    if not is_preference_dpo and not is_reward_model and not is_rollout:
         formatter_id, formatter_hash = formatter_identity(constraints.dataset_format)
         data_policy = TrainingDataPolicy.model_validate(
             {
@@ -2056,6 +2246,7 @@ def build_run_plan(
     resolved_preference_field: dict[str, Any] | None = None
     resolved_full_finetune_field: dict[str, Any] | None = None
     resolved_reward_field: dict[str, Any] | None = None
+    resolved_rollout_field: dict[str, Any] | None = None
     if is_preference_dpo:
         preference_execution = _resolve_preference_execution(
             plan_id=plan_id,
@@ -2106,6 +2297,19 @@ def build_run_plan(
             project_dir=project_dir,
         )
         resolved_reward_field = reward_execution.model_dump(mode="json")
+    elif is_rollout:
+        # The on-policy RL sibling seal (RL slice S5b): the shared execution sub-specs carry the QLoRA
+        # CAUSAL_LM policy shape; the resolver adds the rollout/experience/stability/policy specs + binds the
+        # provenance-verified served reward source, and keeps the adapter_peft policy export.
+        rollout_execution = _resolve_rollout_execution(
+            plan_id=plan_id,
+            shared_fields=shared_fields,
+            constraints=constraints,
+            resolved_physical=resolved_physical,
+            chat_template_sha256=constraints.chat_template_sha256,
+            project_dir=project_dir,
+        )
+        resolved_rollout_field = rollout_execution.model_dump(mode="json")
     else:
         assert data_policy is not None  # built for every non-preference (SFT) path above
         try:
@@ -2140,7 +2344,9 @@ def build_run_plan(
         # A preference plan's loss summary IS the DPO loss (the supervised loss_impl would contradict the
         # preference seal the runner cross-checks); the SFT loss stays on the dense path.
         "loss_impl": (
-            "reward_bt" if is_reward_model else ("dpo" if is_preference_dpo else loss_impl)
+            "grpo"
+            if is_rollout
+            else ("reward_bt" if is_reward_model else ("dpo" if is_preference_dpo else loss_impl))
         ),
         "attention_backend": attention_backend,
         "sequence": sequence,
@@ -2158,6 +2364,7 @@ def build_run_plan(
         "resolved_preference_execution": resolved_preference_field,
         "resolved_full_finetune_execution": resolved_full_finetune_field,
         "resolved_reward_execution": resolved_reward_field,
+        "resolved_rollout_execution": resolved_rollout_field,
         "parameter_accounting_ref": (
             parameter_accounting_ref.model_dump(mode="json")
             if parameter_accounting_ref is not None

@@ -24,6 +24,7 @@ from .contracts import (
     ResolvedFullFinetuneExecutionConfiguration,
     ResolvedPreferenceExecutionConfiguration,
     ResolvedRewardExecutionConfiguration,
+    ResolvedRolloutExecutionConfiguration,
     ResolvedPretrainingExecutionConfiguration,
     RunPlan,
 )
@@ -93,6 +94,14 @@ REWARD_NOT_EXECUTABLE_REASON = (
     "dispatch it through platform-run so required_runner_lane selects the 'reward' lane. (The same refusal "
     "fires - as it does now - while the 'reward_model' execution variant is not workload_verified for this "
     "backend: the reward-head trainer branch + a measured run + the promoting wheel are the gated "
+    "milestone.)"
+)
+
+ROLLOUT_NOT_EXECUTABLE_REASON = (
+    "a sealed on-policy RL (rollout) plan runs on the first-party rollout lane, not the SFT/DPO adapter "
+    "runner: dispatch it through platform-run so required_runner_lane selects the 'rollout' lane. (The same "
+    "refusal fires - as it does now - while the 'on_policy_rl' execution variant is not workload_verified "
+    "for this backend: the rollout+reward+GRPO worker + a measured run + the promoting wheel are the gated "
     "milestone.)"
 )
 
@@ -195,6 +204,27 @@ def required_runner_lane(plan: RunPlan) -> str:
         except ExecutionVariantRefused as exc:
             raise ExecutionConfigurationError(REWARD_NOT_EXECUTABLE_REASON) from exc
         return "reward"
+    if plan.resolved_rollout_execution is not None:
+        # A sealed on-policy RL plan is admitted at planning; at EXECUTION it is admitted only once the
+        # on_policy_rl variant reaches workload_verified (the rollout+reward+GRPO worker + a measured run).
+        # Gate on the ladder, keyed by the specific on-policy objective (only grpo has a built shape), then
+        # route to the rollout lane - the adapter/DPO/reward lanes never sample + optimize on-policy rollouts.
+        from corpus_studio.platform.enums import TaskType  # noqa: PLC0415
+        from corpus_studio.platform.execution_variants import (  # noqa: PLC0415
+            ExecutionVariantRefused,
+            admit_task_execution_variant,
+            reference_execution_variants,
+        )
+
+        try:
+            admit_task_execution_variant(
+                TaskType.grpo,
+                declared_variants=reference_execution_variants(),
+                objective_id=plan.resolved_rollout_execution.objective_ref.id,
+            )
+        except ExecutionVariantRefused as exc:
+            raise ExecutionConfigurationError(ROLLOUT_NOT_EXECUTABLE_REASON) from exc
+        return "rollout"
     if plan.backend_ref.id == "echo":
         if plan.task_type.value != "evaluation":
             raise ExecutionConfigurationError(
@@ -260,6 +290,21 @@ def verify_reward_execution_configuration_hash(
     config: ResolvedRewardExecutionConfiguration,
 ) -> bool:
     return config.configuration_hash == reward_execution_configuration_hash_for(config)
+
+
+def rollout_execution_configuration_hash_for(
+    config: ResolvedRolloutExecutionConfiguration,
+) -> str:
+    """Seal an on-policy RL execution configuration exactly as the SFT/DPO/reward siblings are sealed
+    (canonical JSON over every field but ``configuration_hash``). A separate function keeps the seals
+    decoupled: the byte-locked SFT seal can never be perturbed by a rollout change."""
+    return canonical_sha256(config.model_dump(mode="json", exclude={"configuration_hash"}))
+
+
+def verify_rollout_execution_configuration_hash(
+    config: ResolvedRolloutExecutionConfiguration,
+) -> bool:
+    return config.configuration_hash == rollout_execution_configuration_hash_for(config)
 
 
 def pretraining_execution_configuration_hash_for(
