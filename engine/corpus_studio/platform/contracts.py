@@ -4458,15 +4458,18 @@ class ResolvedRolloutExecutionConfiguration(ContractModel):
                 "the experience data_seed and the top-level data_seed must match for one reproducible "
                 "sample order"
             )
+        # Fail-closed rather than assert (asserts strip under python -O): the earlier hash-pin loop already
+        # guarantees environment_ref is pinned, so this only guards the profile_snapshot value comparison.
         environment_hash = self.environment_ref.hash
-        assert environment_hash is not None and environment_hash.value is not None
-        if (
-            self.environment_binding == "profile_snapshot"
-            and self.environment_ref.id != environment_hash.value
-        ):
-            raise ValueError(
-                "a profile_snapshot rollout execution must name the environment by its own hash"
-            )
+        if self.environment_binding == "profile_snapshot":
+            if environment_hash is None or environment_hash.value is None:
+                raise ValueError(
+                    "a profile_snapshot rollout execution requires a hash-pinned environment_ref"
+                )
+            if self.environment_ref.id != environment_hash.value:
+                raise ValueError(
+                    "a profile_snapshot rollout execution must name the environment by its own hash"
+                )
         return self
 
 
