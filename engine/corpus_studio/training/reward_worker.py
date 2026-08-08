@@ -114,7 +114,11 @@ def run_reward(  # pragma: no cover - optional training-stack integration; prove
     if not rows:
         raise RewardWorkerError("the sealed preference dataset is empty")
     base_model = execution.inputs.model.location
-    tokenizer = AutoTokenizer.from_pretrained(base_model)
+    # SECURITY: honor the sealed trust_remote_code (Literal[False]) explicitly - never execute a downloaded
+    # repo's custom code - exactly as the SFT trainer + merge do; do not rely on the library default.
+    tokenizer = AutoTokenizer.from_pretrained(
+        base_model, trust_remote_code=execution.trust_remote_code
+    )
     if tokenizer.pad_token_id is None:
         tokenizer.pad_token = tokenizer.eos_token
     pairs = [format_preference_pair(row, tokenizer) for row in rows]
@@ -137,7 +141,11 @@ def run_reward(  # pragma: no cover - optional training-stack integration; prove
         bnb_4bit_use_double_quant=execution.bnb_4bit_use_double_quant,
     )
     model = AutoModelForSequenceClassification.from_pretrained(
-        base_model, num_labels=1, quantization_config=bnb, device_map={"": 0}
+        base_model,
+        num_labels=1,
+        quantization_config=bnb,
+        device_map={"": 0},
+        trust_remote_code=execution.trust_remote_code,
     )
     # SEQ_CLS models need a pad id on the config; we pool the score at the explicit last content token, so
     # this only guards any internal length bookkeeping.

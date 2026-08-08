@@ -103,8 +103,14 @@ def run_full_finetune(  # pragma: no cover - torch/transformers integration; pro
 
     # --- model + tokenizer: a real base at full precision, ALL parameters trainable (no adapter, no nf4) ---
     dtype = torch.bfloat16 if execution.precision.forward_compute_dtype.value == "bf16" else torch.float32
-    model = AutoModelForCausalLM.from_pretrained(base_model, torch_dtype=dtype)
-    tokenizer = AutoTokenizer.from_pretrained(base_model)
+    # SECURITY: honor the sealed trust_remote_code (Literal[False]) explicitly - never execute a downloaded
+    # repo's custom code - exactly as the SFT trainer + merge do; do not rely on the library default.
+    model = AutoModelForCausalLM.from_pretrained(
+        base_model, torch_dtype=dtype, trust_remote_code=execution.trust_remote_code
+    )
+    tokenizer = AutoTokenizer.from_pretrained(
+        base_model, trust_remote_code=execution.trust_remote_code
+    )
     if tokenizer.pad_token_id is None:
         tokenizer.pad_token = tokenizer.eos_token
     if tokenizer.pad_token_id is None:

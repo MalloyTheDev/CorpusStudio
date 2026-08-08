@@ -549,6 +549,23 @@ def test_on_policy_rl_requires_a_provenance_verified_reward_source():
         _plan(_profile(cc_major=8), _report(), task_type="grpo", objective_id="grpo")
 
 
+def test_on_policy_rl_refuses_a_tampered_provenance_plan(tmp_path):
+    # F4 hardening: the reward source is bound to the manifest's plan by CONTENT HASH, not just a plan_id
+    # string - a tampered plan (same manifest, edited plan body) is refused fail-closed.
+    import json
+
+    manifest = _REWARD_BRINGUP / "runs/run-reward-sealed-0001/RunManifest.json"
+    tampered = json.loads((_REWARD_BRINGUP / "reward-bringup.RunPlan.json").read_text())
+    tampered["plan_id"] = "tampered-plan"  # breaks self-consistency + the manifest plan_ref binding
+    tampered_path = tmp_path / "tampered.RunPlan.json"
+    tampered_path.write_text(json.dumps(tampered))
+    with pytest.raises(PlannerError, match="self-consistent|does not bind this exact RunPlan"):
+        _plan(
+            _profile(cc_major=8), _report(), task_type="grpo", objective_id="grpo",
+            reward_source_manifest=str(manifest), reward_source_plan=str(tampered_path),
+        )
+
+
 def test_execute_run_refuses_a_reward_plan_with_a_non_reward_runner():
     # A reward plan routes to the "reward" lane; execute_run additionally pins the RUNNER TYPE, so a
     # look-alike runner that merely names the reward lane is refused fail-closed before any training - the
