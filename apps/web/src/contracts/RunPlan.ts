@@ -40,7 +40,8 @@ export type ExportFormat =
   "adapter_peft" | "reward_model" | "merged_safetensors" | "merged_fp16" | "gguf" | "onnx" | "awq" | "gptq" | "mlx";
 export type OutputDir = string;
 export type GradientCheckpointing = boolean;
-export type LossImpl = "cross_entropy" | "liger_fused_ce" | "chunked_ce" | "dpo" | "orpo" | "kto" | "ipo" | "reward_bt";
+export type LossImpl =
+  "cross_entropy" | "liger_fused_ce" | "chunked_ce" | "dpo" | "orpo" | "kto" | "ipo" | "reward_bt" | "grpo";
 /**
  * The ``controlled_*`` values are the deliberate, planned counterparts of the accidental spills
  * in :class:`FitClass`.

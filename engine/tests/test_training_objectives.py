@@ -54,6 +54,7 @@ _EXPECTED_IDS = sorted(
         "kto",
         "orpo",
         "reward_model",
+        "grpo",
         "knowledge_distillation",
         "sequence_distillation",
         "logit_distillation",
@@ -139,10 +140,26 @@ def _expert_selective_objective() -> TrainingObjective:
     return draft.model_copy(update={"objective_hash": objective_hash_for(draft)})
 
 
+def test_grpo_objective_is_reward_sourced_on_policy_rl():
+    # The on-policy RL objective (RL slice S5b) models a REWARD-SOURCED policy update, not static-label
+    # supervision: a scalar reward on the generated completion, a group-relative policy-gradient loss, a
+    # frozen reference (for the KL bound), and the grpo backend loss impl.
+    grpo = get_objective("grpo")
+    assert grpo is not None
+    assert grpo.kind.value == "on_policy_rl"
+    assert grpo.coarse_task_type is not None and grpo.coarse_task_type.value == "grpo"
+    assert grpo.labels[0].kind.value == "scalar_reward"
+    assert grpo.loss_masks[0].kind.value == "completion_only"
+    assert grpo.loss_components[0].kind.value == "policy_gradient"
+    assert grpo.model_requirement.requires_reference_model
+    assert "grpo" in [loss.value for loss in grpo.backend_requirement.loss_impls]
+    assert "on_policy_grpo" in grpo.backend_requirement.objective_capabilities
+
+
 def test_builtin_catalog_covers_all_requested_objectives_and_is_sealed():
     objectives = builtin_objectives()
     assert [item.objective_id for item in objectives] == _EXPECTED_IDS
-    assert len(objectives) == 30
+    assert len(objectives) == 31
     assert all(item.objective_version == "1.0.0" for item in objectives)
     assert all(verify_objective_hash(item) for item in objectives)
     qlora = next(item for item in objectives if item.objective_id == "qlora")
@@ -640,7 +657,7 @@ def test_training_objective_check_cli_reports_independent_axes(tmp_path):
 def test_objective_registry_import_is_torch_free_in_a_fresh_process():
     code = (
         "import sys; import corpus_studio.platform.objectives as o; "
-        "assert len(o.builtin_objectives()) == 30; "
+        "assert len(o.builtin_objectives()) == 31; "
         "assert all(x not in sys.modules for x in "
         "('torch','transformers','trl','peft','bitsandbytes'))"
     )
