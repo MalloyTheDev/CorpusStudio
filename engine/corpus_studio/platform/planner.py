@@ -1117,10 +1117,20 @@ def _resolve_reward_source(constraints: PlannerConstraints) -> RewardSourceRef:
     reward_cfg = source_plan.resolved_reward_execution
     if reward_cfg is None:
         raise PlannerError("the reward source RunPlan carries no resolved reward execution")
-    # Integrity: the manifest + plan must be from the SAME reward run (the manifest names its plan).
-    if manifest.plan_ref is not None and manifest.plan_ref.id != source_plan.plan_id:
+    # Provenance integrity: the plan must be self-consistent (its body matches its own plan_hash) AND the
+    # manifest must name THIS plan by CONTENT HASH, not merely share a plan_id string. A same-id but
+    # content-swapped plan (a different base model / adapter location) is refused fail-closed.
+    if not verify_run_plan_hash(source_plan):
+        raise PlannerError("the reward source RunPlan is not self-consistent (plan_hash mismatch)")
+    plan_ref = manifest.plan_ref
+    if (
+        plan_ref is None
+        or plan_ref.id != source_plan.plan_id
+        or plan_ref.hash is None
+        or plan_ref.hash.value != source_plan.plan_hash
+    ):
         raise PlannerError(
-            "the reward source RunManifest and RunPlan are from different runs (plan_ref mismatch)"
+            "the reward source RunManifest does not bind this exact RunPlan (plan_ref id/hash mismatch)"
         )
     try:
         adapter_location = str(

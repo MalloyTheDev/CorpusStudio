@@ -187,7 +187,9 @@ def _load_imported_tokenizer(tokenizer_source: Any) -> Any:  # pragma: no cover
     from transformers import AutoTokenizer  # noqa: PLC0415
 
     location = Path(tokenizer_source.tokenizer_location)
-    tokenizer = AutoTokenizer.from_pretrained(str(location))
+    # SECURITY: never execute a downloaded tokenizer repo's custom code. The pretraining seal's
+    # trust_remote_code is Literal[False], so honor it explicitly here rather than relying on the default.
+    tokenizer = AutoTokenizer.from_pretrained(str(location), trust_remote_code=False)
     _verify_pinned_tokenizer_content(location, tokenizer_source.tokenizer_content_sha256)
     if tokenizer.pad_token is None and tokenizer.eos_token is not None:
         tokenizer.pad_token = tokenizer.eos_token
