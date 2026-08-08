@@ -114,3 +114,29 @@ def test_reward_seal_requires_the_first_party_backend():
         ResolvedRewardExecutionConfiguration(
             **_reward_fields(backend_ref=Ref(id="echo", hash=HashRef(value="b" * 64)))
         )
+
+
+def test_reward_requires_the_qlora_adapter_method():
+    sft = demo_training_plan().resolved_execution
+    assert sft is not None
+    with pytest.raises(ValueError, match="requires the qlora adapter method"):
+        ResolvedRewardExecutionConfiguration(
+            **_reward_fields(adapter=sft.adapter.model_copy(update={"method": AdapterMethod.lora}))
+        )
+
+
+def test_reward_refuses_a_length_budget_that_overflows_the_sequence_window():
+    sft = demo_training_plan().resolved_execution
+    assert sft is not None
+    overflow = PreferenceDataPolicy(
+        schema_id="preference",
+        schema_version="0.1.0",
+        schema_sha256="e" * 64,
+        formatter_id="corpus-studio:preference-chat-v1",
+        formatter_sha256="a" * 64,
+        max_prompt_length=sft.sequence.max_sequence_len,
+        max_length=sft.sequence.max_sequence_len + 128,  # overflows the sealed window
+        data_seed=sft.data_seed,
+    )
+    with pytest.raises(ValueError, match="must fit within the sealed sequence length"):
+        ResolvedRewardExecutionConfiguration(**_reward_fields(data=overflow))

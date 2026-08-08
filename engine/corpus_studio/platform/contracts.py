@@ -4210,6 +4210,37 @@ class ResolvedRewardExecutionConfiguration(ContractModel):
             )
         if self.export_format != ExportFormat.reward_model:
             raise ValueError("reward execution must export the 'reward_model' artifact family")
+        # Restrict the seal to exactly the declared shape - a QLoRA (SEQ_CLS scalar head) over a 4-bit
+        # base - so a non-QLoRA / non-4-bit reward config is refused rather than left
+        # contract-valid-but-unadmittable (mirrors the DPO shape enforcement; the variant envelope
+        # declares requires_peft_adapter=True and no full-parameter shape).
+        if self.adapter.method != AdapterMethod.qlora:
+            raise ValueError("the reward model requires the qlora adapter method")
+        if self.precision.quantized_storage_format not in {
+            QuantizationMode.int4,
+            QuantizationMode.nf4,
+        }:
+            raise ValueError("the reward model requires a 4-bit quantized base (int4 or nf4)")
+        # A reward model scores discrete prompt+response pairs; it never packs sequences.
+        if self.sequence.packing:
+            raise ValueError("reward modeling does not pack sequences")
+        # The sealed reward length budget must fit the sealed sequence window (PreferenceDataPolicy
+        # already guarantees max_prompt_length < max_length).
+        if self.data.max_length > self.sequence.max_sequence_len:
+            raise ValueError("data.max_length must fit within the sealed sequence length")
+        # No-silent-truncation cross-check (same contradiction the SFT / DPO siblings refuse).
+        if not self.sequence.truncation_allowed and self.data.truncation_policy == "allow":
+            raise ValueError(
+                "sequence.truncation_allowed is False but data.truncation_policy is 'allow' - a config "
+                "that declares no truncation yet permits it at runtime would silently truncate"
+            )
+        # One reproducible sample order: the reward data policy's seed and the top-level execution data
+        # seed must agree, so a worker cannot honor two different orderings.
+        if self.data.data_seed != self.data_seed:
+            raise ValueError(
+                "the reward data_seed and the top-level data_seed must match for one reproducible "
+                "sample order"
+            )
         environment_hash = self.environment_ref.hash
         assert environment_hash is not None and environment_hash.value is not None
         if (
