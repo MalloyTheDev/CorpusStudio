@@ -4294,19 +4294,41 @@ class RewardSourceRef(ContractModel):
     """The hash-pinned reference to what scores each rollout (S5b). A reward model produced by the S5a
     reward vertical is the primary source, served for inference-only scoring; rule / verifier rewards and
     an RLAIF judge (Evaluation Studio's judge under the provider policy) are the declared alternatives.
-    The reference is hash-pinned so a run cannot silently swap the reward function. Admissibility (e.g. a
-    served reward model must itself be ``workload_verified``) is enforced by the resolver + runner, not
-    here."""
+    ``reward_ref`` hash-pins the reward ADAPTER (its safetensors digest) so a run cannot silently swap the
+    reward function.
+
+    A ``served_reward_model`` additionally seals (a) the LOADABLE identity the worker reconstructs the
+    scorer from - ``reward_base_model`` (the base the SEQ_CLS reward adapter sits on) + ``reward_adapter_location``
+    (the reward adapter directory) - and (b) ``provenance_manifest_ref``, the reward run's ``RunManifest``
+    whose supervisor-admitted ``reward_success_evidence`` PROVES the source came from a workload_verified
+    reward run. The resolver / runner verify that provenance; this contract only requires it be present +
+    pinned. Non-served kinds leave the served-model fields unset."""
 
     contract_version: CONTRACT_VERSION_LITERAL = "1.0.0"
     kind: Literal["served_reward_model", "verifier", "process_reward", "rlaif_judge"]
     reward_ref: Ref
     higher_is_better: bool = True
+    reward_base_model: str | None = Field(default=None, exclude_if=lambda value: value is None)
+    reward_adapter_location: str | None = Field(default=None, exclude_if=lambda value: value is None)
+    provenance_manifest_ref: Ref | None = Field(default=None, exclude_if=lambda value: value is None)
 
     @model_validator(mode="after")
     def _validate_reward_source(self) -> RewardSourceRef:
         if not _is_pinned_ref(self.reward_ref):
             raise ValueError("reward source reference must be hash-pinned")
+        if self.kind == "served_reward_model":
+            # A served reward model must carry enough to be RECONSTRUCTED + must prove its provenance.
+            if not self.reward_base_model:
+                raise ValueError(
+                    "a served reward model must seal reward_base_model (to reconstruct the scorer)"
+                )
+            if not self.reward_adapter_location:
+                raise ValueError("a served reward model must seal reward_adapter_location")
+            if self.provenance_manifest_ref is None or not _is_pinned_ref(self.provenance_manifest_ref):
+                raise ValueError(
+                    "a served reward model must bind a hash-pinned provenance RunManifest (proving it "
+                    "came from an admitted reward run)"
+                )
         return self
 
 

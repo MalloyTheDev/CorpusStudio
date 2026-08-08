@@ -31,6 +31,20 @@ def _served_reward_ref() -> Ref:
     return Ref(id="reward-model-x", hash=HashRef(value="c" * 64))
 
 
+def _served_reward_source(**over) -> RewardSourceRef:
+    """A valid served reward source: the loadable identity (base + adapter dir) + the hash-pinned reward
+    RunManifest that proves it came from an admitted reward run (the provenance binding)."""
+    fields = dict(
+        kind="served_reward_model",
+        reward_ref=_served_reward_ref(),
+        reward_base_model="Qwen/Qwen2.5-0.5B-Instruct",
+        reward_adapter_location="/runs/reward/artifacts/adapter",
+        provenance_manifest_ref=Ref(id="reward-run-manifest", hash=HashRef(value="d" * 64)),
+    )
+    fields.update(over)
+    return RewardSourceRef(**fields)
+
+
 def _rollout_fields(**over) -> dict:
     """A valid on-policy RL execution config built by reusing the dense SFT demo config's shared execution
     sub-specs and swapping in the rollout/experience/reward-source/stability/policy seals (exactly how a
@@ -78,7 +92,7 @@ def _rollout_fields(**over) -> dict:
             max_new_tokens=window // 4,
             rollouts_per_prompt=4,
         ),
-        reward_source=RewardSourceRef(kind="served_reward_model", reward_ref=_served_reward_ref()),
+        reward_source=_served_reward_source(),
         stability=StabilityController(kl_coefficient=0.05, clip_range=0.2),
         policy_optimization=PolicyOptimizationSpec(algorithm="grpo"),
         trainer_interface=sft.trainer_interface,
@@ -178,6 +192,26 @@ def test_rollout_refuses_a_generation_budget_that_overflows_the_window():
 def test_reward_source_ref_must_be_hash_pinned():
     with pytest.raises(ValueError, match="reward source reference must be hash-pinned"):
         RewardSourceRef(kind="served_reward_model", reward_ref=Ref(id="unpinned"))
+
+
+def test_served_reward_source_requires_provenance_and_loadable_identity():
+    # the chosen binding: a served reward model must PROVE provenance (a pinned reward RunManifest) AND
+    # carry the loadable identity the worker reconstructs the scorer from.
+    _served_reward_source()  # the valid form round-trips
+    with pytest.raises(ValueError, match="hash-pinned provenance RunManifest"):
+        _served_reward_source(provenance_manifest_ref=None)
+    with pytest.raises(ValueError, match="hash-pinned provenance RunManifest"):
+        _served_reward_source(provenance_manifest_ref=Ref(id="unpinned-manifest"))
+    with pytest.raises(ValueError, match="reward_base_model"):
+        _served_reward_source(reward_base_model=None)
+    with pytest.raises(ValueError, match="reward_adapter_location"):
+        _served_reward_source(reward_adapter_location=None)
+
+
+def test_non_served_reward_source_omits_the_served_model_fields():
+    # a verifier / RLAIF reward source needs no base model or provenance manifest (those are served-only).
+    verifier = RewardSourceRef(kind="verifier", reward_ref=_served_reward_ref())
+    assert verifier.reward_base_model is None and verifier.provenance_manifest_ref is None
 
 
 def test_grpo_policy_optimization_refuses_a_critic():

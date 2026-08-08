@@ -3360,7 +3360,7 @@
     },
     "RewardSourceRef": {
       "additionalProperties": false,
-      "description": "The hash-pinned reference to what scores each rollout (S5b). A reward model produced by the S5a\nreward vertical is the primary source, served for inference-only scoring; rule / verifier rewards and\nan RLAIF judge (Evaluation Studio's judge under the provider policy) are the declared alternatives.\nThe reference is hash-pinned so a run cannot silently swap the reward function. Admissibility (e.g. a\nserved reward model must itself be ``workload_verified``) is enforced by the resolver + runner, not\nhere.",
+      "description": "The hash-pinned reference to what scores each rollout (S5b). A reward model produced by the S5a\nreward vertical is the primary source, served for inference-only scoring; rule / verifier rewards and\nan RLAIF judge (Evaluation Studio's judge under the provider policy) are the declared alternatives.\n``reward_ref`` hash-pins the reward ADAPTER (its safetensors digest) so a run cannot silently swap the\nreward function.\n\nA ``served_reward_model`` additionally seals (a) the LOADABLE identity the worker reconstructs the\nscorer from - ``reward_base_model`` (the base the SEQ_CLS reward adapter sits on) + ``reward_adapter_location``\n(the reward adapter directory) - and (b) ``provenance_manifest_ref``, the reward run's ``RunManifest``\nwhose supervisor-admitted ``reward_success_evidence`` PROVES the source came from a workload_verified\nreward run. The resolver / runner verify that provenance; this contract only requires it be present +\npinned. Non-served kinds leave the served-model fields unset.",
       "properties": {
         "contract_version": {
           "const": "1.0.0",
@@ -3382,6 +3382,41 @@
           ],
           "title": "Kind",
           "type": "string"
+        },
+        "provenance_manifest_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Ref"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "reward_adapter_location": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reward Adapter Location"
+        },
+        "reward_base_model": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reward Base Model"
         },
         "reward_ref": {
           "$ref": "#/$defs/Ref"

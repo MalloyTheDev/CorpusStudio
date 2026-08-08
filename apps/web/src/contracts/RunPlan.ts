@@ -465,6 +465,8 @@ export type UseCritic = boolean;
 export type ContractVersion11 = "1.0.0";
 export type HigherIsBetter = boolean;
 export type Kind1 = "served_reward_model" | "verifier" | "process_reward" | "rlaif_judge";
+export type RewardAdapterLocation = string | null;
+export type RewardBaseModel = string | null;
 export type ContractVersion12 = "1.0.0";
 export type DecodePolicy = "sanctioned_worker_decode";
 export type MaxNewTokens = number;
@@ -1337,14 +1339,23 @@ export interface PolicyOptimizationSpec {
  * The hash-pinned reference to what scores each rollout (S5b). A reward model produced by the S5a
  * reward vertical is the primary source, served for inference-only scoring; rule / verifier rewards and
  * an RLAIF judge (Evaluation Studio's judge under the provider policy) are the declared alternatives.
- * The reference is hash-pinned so a run cannot silently swap the reward function. Admissibility (e.g. a
- * served reward model must itself be ``workload_verified``) is enforced by the resolver + runner, not
- * here.
+ * ``reward_ref`` hash-pins the reward ADAPTER (its safetensors digest) so a run cannot silently swap the
+ * reward function.
+ *
+ * A ``served_reward_model`` additionally seals (a) the LOADABLE identity the worker reconstructs the
+ * scorer from - ``reward_base_model`` (the base the SEQ_CLS reward adapter sits on) + ``reward_adapter_location``
+ * (the reward adapter directory) - and (b) ``provenance_manifest_ref``, the reward run's ``RunManifest``
+ * whose supervisor-admitted ``reward_success_evidence`` PROVES the source came from a workload_verified
+ * reward run. The resolver / runner verify that provenance; this contract only requires it be present +
+ * pinned. Non-served kinds leave the served-model fields unset.
  */
 export interface RewardSourceRef {
   contract_version?: ContractVersion11;
   higher_is_better?: HigherIsBetter;
   kind: Kind1;
+  provenance_manifest_ref?: Ref | null;
+  reward_adapter_location?: RewardAdapterLocation;
+  reward_base_model?: RewardBaseModel;
   reward_ref: Ref;
 }
 /**
