@@ -3704,10 +3704,23 @@ def grpo_policy_loss(
             "exploration term"
         )
 
+    # Every completion must have >= 1 valid token: an empty/failed rollout (all-zero mask row) must be
+    # REFUSED, not silently diluted into the group mean (clamping its denominator to 1 would scale down the
+    # real completions + change the objective).
+    valid_tokens = completion_mask.to(policy_logprobs.dtype).sum(dim=-1)  # [G]
+    if bool((valid_tokens < 1).any()):
+        raise TrainerError(
+            "every rollout completion must have at least one valid (unmasked) token - refusing an "
+            "empty/failed rollout that would silently dilute the group objective"
+        )
+
     def _completion_mean(per_token: Any) -> Any:
-        # per-completion mean over VALID tokens, then group-mean (length-unbiased, padding-free).
-        mask = completion_mask.to(per_token.dtype)
-        per_completion = (per_token * mask).sum(dim=-1) / mask.sum(dim=-1).clamp(min=1.0)
+        # per-completion mean over VALID tokens, then group-mean (length-unbiased, padding-free). Use
+        # torch.where (NOT per_token * mask): a padded cell that went inf/NaN in a nonlinear term (e.g.
+        # expm1 of an extreme pad log-ratio) must be REPLACED by 0, since 0 * NaN/inf == NaN would poison
+        # the whole group's mean despite every valid token being healthy.
+        masked = torch.where(completion_mask > 0, per_token, torch.zeros_like(per_token))
+        per_completion = masked.sum(dim=-1) / valid_tokens.to(per_token.dtype)
         return per_completion.mean()
 
     adv = advantages.unsqueeze(-1)  # [G, 1] -> broadcast across each completion's tokens

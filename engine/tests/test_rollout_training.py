@@ -79,17 +79,30 @@ def test_grpo_policy_loss_clips_a_positive_advantage_when_the_ratio_grows() -> N
     assert float(loss) == pytest.approx(-1.2, abs=1e-4)
 
 
-def test_grpo_policy_loss_ignores_padding_via_the_mask() -> None:
+def test_grpo_policy_loss_masks_padding_without_nan_poisoning() -> None:
+    torch = pytest.importorskip("torch")
+    import math
+
+    # a pad position carries an EXTREME reference divergence (log-ratio 100 -> expm1 == inf); the mask must
+    # REPLACE it with 0, not multiply (0 * inf == NaN), so the group KL + loss stay FINITE and reflect only
+    # the valid tokens (ref == policy there -> KL 0; ratio 1 -> -mean(A) = -1.0).
+    policy = torch.tensor([[-0.5, -0.5, 0.0]])
+    old = torch.tensor([[-0.5, -0.5, 0.0]])
+    ref = torch.tensor([[-0.5, -0.5, 100.0]])  # pad log-ratio 100 -> expm1 overflows to inf
+    mask = torch.tensor([[1.0, 1.0, 0.0]])
+    loss, kl = grpo_policy_loss(policy, old, ref, torch.tensor([1.0]), mask, kl_coefficient=1.0)
+    assert math.isfinite(float(loss)) and math.isfinite(float(kl))
+    assert float(kl) == pytest.approx(0.0, abs=1e-6)
+    assert float(loss) == pytest.approx(-1.0, abs=1e-4)
+
+
+def test_grpo_policy_loss_refuses_an_empty_completion_row() -> None:
     torch = pytest.importorskip("torch")
 
-    # two pad positions carry a huge policy/old divergence; the mask must exclude them so the loss equals
-    # the valid-token-only value (ratio 1 on the valid tokens -> -mean(A) = -1.0), not a padded average.
-    policy = torch.tensor([[-0.5, -0.5, 5.0, -5.0]])
-    old = torch.tensor([[-0.5, -0.5, -5.0, 5.0]])
-    mask = torch.tensor([[1.0, 1.0, 0.0, 0.0]])
-    adv = torch.tensor([1.0])
-    loss, _ = grpo_policy_loss(policy, old, policy, adv, mask, kl_coefficient=0.0)
-    assert float(loss) == pytest.approx(-1.0, abs=1e-4)
+    logp = torch.tensor([[-0.5, -0.5], [-0.5, -0.5]])  # G=2
+    mask = torch.tensor([[1.0, 1.0], [0.0, 0.0]])  # the second completion has NO valid tokens
+    with pytest.raises(TrainerError, match="at least one valid"):
+        grpo_policy_loss(logp, logp, logp, torch.tensor([1.0, 1.0]), mask)
 
 
 def test_grpo_policy_loss_refuses_a_nonzero_bonus_without_an_entropy_tensor() -> None:
