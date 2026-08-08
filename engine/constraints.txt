@@ -22,4 +22,4 @@ pydantic==2.13.4
 # changes, where the same bump reported 928 findings against the unpinned set.
 #
 # Bump intentionally, in its own PR, and re-run the gate.
-ruff==0.16.0
+ruff==0.16.1
