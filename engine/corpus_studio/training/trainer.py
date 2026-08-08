@@ -3811,10 +3811,10 @@ def run_rollout_training(  # pragma: no cover - generation + optional training-s
     gradient_accumulation_steps: int = 1,
     max_grad_norm: float = float("inf"),
     optimizer: Any = None,
-    gradient_checkpointing: bool = True,
     stage_callback: StageCallback | None = None,
 ) -> dict[str, Any]:
-    """The harness's on-policy GRPO primitive (RL slice S5b). Each optimizer step, for each prompt in the
+    """The harness's on-policy GRPO primitive (RL slice S5b). Gradient checkpointing is configured on the
+    model by the worker (``prepare_model_for_kbit_training``), so this primitive does not toggle it. Each optimizer step, for each prompt in the
     accumulation window: SAMPLE a group of ``group_size`` completions from the current policy, SCORE each
     with ``reward_scorer`` (the served reward model), compute the group-relative advantage
     (:func:`grpo_group_advantage`), then update the policy with the clipped surrogate + KL-to-FROZEN-reference

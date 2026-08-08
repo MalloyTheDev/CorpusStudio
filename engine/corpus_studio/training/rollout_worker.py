@@ -233,7 +233,6 @@ def run_rollout(  # pragma: no cover - optional training-stack integration; prov
             gradient_accumulation_steps=execution.batching.fallback_grad_accumulation_steps or 1,
             max_grad_norm=opt.max_grad_norm,
             optimizer=optimizer,
-            gradient_checkpointing=execution.gradient_checkpointing,
         )
     except TrainerError as exc:
         raise RolloutWorkerError(f"the GRPO training primitive refused the run: {exc}") from exc
