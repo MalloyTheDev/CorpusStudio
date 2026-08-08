@@ -69,6 +69,8 @@ from corpus_studio.platform.contracts import (
     ResolvedExecutionConfiguration,
     ResolvedFullFinetuneExecutionConfiguration,
     ResolvedPreferenceExecutionConfiguration,
+    ResolvedRewardExecutionConfiguration,
+    RewardModelingSpec,
     ResolvedPretrainingExecutionConfiguration,
     RunPlan,
     StatePlacement,
@@ -106,6 +108,7 @@ from corpus_studio.platform.execution_config import (
     formatter_identity,
     huggingface_input_ref,
     preference_execution_configuration_hash_for,
+    reward_execution_configuration_hash_for,
     preference_formatter_identity,
     pretraining_execution_configuration_hash_for,
 )
@@ -978,6 +981,94 @@ def _resolve_preference_execution(
     )
 
 
+def _resolve_reward_execution(
+    *,
+    plan_id: str,
+    shared_fields: dict[str, Any],
+    constraints: PlannerConstraints,
+    resolved_physical: PhysicalExecutionSpec,
+    chat_template_sha256: str | None,
+    project_dir: Path | str | None,
+) -> ResolvedRewardExecutionConfiguration:
+    """Lower a reward + ``reward_model`` plan into a SEALED :class:`ResolvedRewardExecutionConfiguration`
+    - the reward sibling of the SFT/DPO resolvers (RL slice S5a-1). Reuses every shared execution sub-spec
+    already assembled in ``shared_fields``, reuses :class:`PreferenceDataPolicy` (a reward model trains on
+    the SAME chosen/rejected pairs), and adds a :class:`RewardModelingSpec` (pairwise Bradley-Terry), bound
+    to the sealed ``reward_model`` objective. Overrides the export family to ``reward_model`` and the head
+    to ``SEQ_CLS`` (a scalar score head, not the CAUSAL_LM policy). Admitted at planning; the runner refuses
+    it at EXECUTION until the reward-head trainer branch + workload-verified evidence + milestone wheel."""
+    del plan_id  # signature parity with the sibling resolvers; the id is sealed via shared_fields
+    objective = get_objective("reward_model")
+    if objective is None:  # pragma: no cover - sealed built-in catalog invariant
+        raise PlannerError("the reward_model objective is absent from the sealed registry")
+    objective_ref = Ref(id=objective.objective_id, hash=HashRef(value=objective.objective_hash))
+
+    # The resolved device_map must reconcile with the sealed physical execution (mirrors the DPO resolver).
+    root_device = resolved_physical.resources[0].device_id
+    expected_device = "cpu" if root_device == "cpu:0" else root_device
+    mapped_devices = {entry["device"] for entry in shared_fields["device_map"]}
+    if expected_device is not None and mapped_devices != {expected_device}:
+        raise PlannerError(
+            f"reward device_map {sorted(mapped_devices)} does not reconcile with the sealed physical "
+            f"execution device {expected_device!r}"
+        )
+
+    # A reward model scores prompt+chosen vs prompt+rejected - the SAME chosen_rejected pair layout as DPO,
+    # so it resolves + validates the 'preference' schema identically (a project-local schema shadows the
+    # builtin; the pair formatter requires prompt/chosen/rejected present, required, text/markdown).
+    schema, _schema_source = resolve_schema(project_dir, "preference")
+    _string_field_types = {"text", "markdown", "string"}
+    schema_fields = {field.name: field for field in schema.fields}
+    unusable = sorted(
+        name
+        for name in ("prompt", "chosen", "rejected")
+        if (field := schema_fields.get(name)) is None
+        or not getattr(field, "required", False)
+        or field.type not in _string_field_types
+    )
+    if unusable:
+        raise PlannerError(
+            f"the resolved 'preference' schema is incompatible with the chosen_rejected pair formatter: "
+            f"field(s) {unusable} must each be present, required, and text/markdown"
+        )
+    formatter_id, formatter_hash = preference_formatter_identity()
+    max_length = constraints.sequence_len
+    # The prompt cap is half the sealed window so the response has room; a reward-specific operator knob is
+    # a later follow-up (this slice seals the shape at defaults, as the DPO slice initially did).
+    max_prompt_length = max(1, max_length // 2)
+    data_policy = PreferenceDataPolicy(
+        schema_id=schema.id,
+        schema_version=schema.version,
+        schema_sha256=canonical_sha256(schema.model_dump(mode="json")),
+        pair_schema="chosen_rejected",
+        formatter_id=formatter_id,
+        formatter_sha256=formatter_hash,
+        chat_template_sha256=chat_template_sha256,
+        max_prompt_length=max_prompt_length,
+        max_length=max_length,
+        truncation_policy="allow" if constraints.truncation_allowed else "refuse",
+        data_seed=constraints.data_seed if constraints.data_seed is not None else constraints.seed,
+    )
+    reward_spec = RewardModelingSpec()
+    try:
+        draft = ResolvedRewardExecutionConfiguration.model_validate(
+            {
+                **shared_fields,
+                "configuration_hash": "0" * 64,
+                "objective_ref": objective_ref.model_dump(mode="json"),
+                "data": data_policy.model_dump(mode="json"),
+                "reward": reward_spec.model_dump(mode="json"),
+                "export_format": ExportFormat.reward_model.value,
+                "adapter_task_type": "SEQ_CLS",
+            }
+        )
+    except ValidationError as exc:
+        raise PlannerError(f"the resolved reward execution configuration is invalid: {exc}") from exc
+    return draft.model_copy(
+        update={"configuration_hash": reward_execution_configuration_hash_for(draft)}
+    )
+
+
 def _custom_code_spec(constraints: PlannerConstraints) -> CustomModelCodeSpec | None:
     """The ADMITTED custom-block spec when platform-plan verified + set its fields (all-or-nothing); else
     None. Any partial set trips the contract validators, surfaced as a PlannerError by the caller."""
@@ -1373,8 +1464,22 @@ def build_run_plan(
                 f"objective '{constraints.objective_id}' is a preference objective but task_type is "
                 f"'{constraints.task_type}' - a preference objective requires task_type='preference'"
             )
+    # The same guard for the reward family: a reward objective on a non-reward task would silently lower
+    # to dense-SFT (build_run_plan ignores objective_id off its family task), keeping a misleading reward
+    # identity. Refuse the contradiction fail-closed.
+    if constraints.objective_id is not None and constraints.task_type != TaskType.reward.value:
+        named_objective = get_objective(constraints.objective_id)
+        if named_objective is not None and named_objective.kind == ObjectiveKind.reward_modeling:
+            raise PlannerError(
+                f"objective '{constraints.objective_id}' is a reward objective but task_type is "
+                f"'{constraints.task_type}' - a reward objective requires task_type='reward'"
+            )
+    # Preference AND reward are objective-keyed families (their specific objective selects the shape);
+    # SFT / pretraining resolve by task alone.
     admission_objective_id = (
-        constraints.objective_id if constraints.task_type == TaskType.preference.value else None
+        constraints.objective_id
+        if constraints.task_type in (TaskType.preference.value, TaskType.reward.value)
+        else None
     )
     # QLoRA-DPO is admitted AT PLANNING (contract_validated) so the resolver can seal a reviewable
     # ResolvedPreferenceExecutionConfiguration; it is then refused AT EXECUTION by the runner (the
@@ -1383,6 +1488,14 @@ def build_run_plan(
     is_preference_dpo = (
         constraints.task_type == TaskType.preference.value
         and admission_objective_id == "dpo_qlora"
+        and not plan_targets_moe
+    )
+    # Pairwise reward model (RL slice S5a-1): admitted AT PLANNING (contract_validated) so the resolver
+    # seals a reviewable ResolvedRewardExecutionConfiguration; refused AT EXECUTION until the reward-head
+    # worker + evidence + wheel land. Keyed on the specific reward objective (only reward_model is built).
+    is_reward_model = (
+        constraints.task_type == TaskType.reward.value
+        and admission_objective_id == "reward_model"
         and not plan_targets_moe
     )
     # Pretraining (from-scratch / continued) resolves by task alone (no objective_id); its dedicated
@@ -1408,7 +1521,7 @@ def build_run_plan(
             declared_variants=reference_execution_variants(),
             required_support=(
                 ExecutionVariantSupport.contract_validated
-                if (is_preference_dpo or is_pretraining or is_full_finetune)
+                if (is_preference_dpo or is_pretraining or is_full_finetune or is_reward_model)
                 else ExecutionVariantSupport.workload_verified
             ),
         )
@@ -1662,7 +1775,9 @@ def build_run_plan(
     host_os = profile.host.os.value
     # A preference plan's loss IS the DPO loss - fit-check that, not the SFT loss_impl, so the backend
     # capability evidence reflects the plan the resolver actually seals.
-    fit_loss = "dpo" if is_preference_dpo else loss_impl
+    fit_loss = (
+        "reward_bt" if is_reward_model else ("dpo" if is_preference_dpo else loss_impl)
+    )
     unmet = unmet_requirements(
         backend,
         os=host_os,
@@ -1685,6 +1800,16 @@ def build_run_plan(
         # so declaring either is coupled to a new manifest + milestone wheel. A preference+dpo_qlora plan is
         # therefore admitted at planning despite exactly those not-yet-declarable reasons (every OTHER
         # fit-check still applies), and the runner refuses it at execution until the wheel promotes it.
+        not_yet_declarable = {
+            f"task '{constraints.task_type}' not supported",
+            f"loss '{fit_loss}' not supported",
+        }
+        unmet = [reason for reason in unmet if reason not in not_yet_declarable]
+    if is_reward_model:
+        # The manifest cannot yet DECLARE the reward task OR the reward_bt loss (both are content-hashed
+        # into the byte-locked SFT config's backend_manifest_ref, so declaring either is coupled to a new
+        # manifest + milestone wheel). A reward plan is admitted at planning despite exactly those
+        # not-yet-declarable reasons (every OTHER fit-check applies); the runner refuses it at execution.
         not_yet_declarable = {
             f"task '{constraints.task_type}' not supported",
             f"loss '{fit_loss}' not supported",
@@ -1861,7 +1986,7 @@ def build_run_plan(
     # so the SFT policy is neither representable nor used for preference. Build it only for the paths that
     # consume it (SFT adapter + full-parameter SFT). The conformance preflight already validated the pairs.
     data_policy: TrainingDataPolicy | None = None
-    if not is_preference_dpo:
+    if not is_preference_dpo and not is_reward_model:
         formatter_id, formatter_hash = formatter_identity(constraints.dataset_format)
         data_policy = TrainingDataPolicy.model_validate(
             {
@@ -1930,6 +2055,7 @@ def build_run_plan(
     resolved_execution_field: dict[str, Any] | None = None
     resolved_preference_field: dict[str, Any] | None = None
     resolved_full_finetune_field: dict[str, Any] | None = None
+    resolved_reward_field: dict[str, Any] | None = None
     if is_preference_dpo:
         preference_execution = _resolve_preference_execution(
             plan_id=plan_id,
@@ -1967,6 +2093,19 @@ def build_run_plan(
             }
         )
         resolved_full_finetune_field = full_finetune_execution.model_dump(mode="json")
+    elif is_reward_model:
+        # The reward sibling seal (RL slice S5a-1): the shared execution sub-specs carry the QLoRA shape;
+        # the resolver reuses the preference chosen/rejected data policy + adds the RewardModelingSpec and
+        # overrides the head (SEQ_CLS) + export family (reward_model).
+        reward_execution = _resolve_reward_execution(
+            plan_id=plan_id,
+            shared_fields=shared_fields,
+            constraints=constraints,
+            resolved_physical=resolved_physical,
+            chat_template_sha256=constraints.chat_template_sha256,
+            project_dir=project_dir,
+        )
+        resolved_reward_field = reward_execution.model_dump(mode="json")
     else:
         assert data_policy is not None  # built for every non-preference (SFT) path above
         try:
@@ -2000,7 +2139,9 @@ def build_run_plan(
         "optimizer": optimizer,
         # A preference plan's loss summary IS the DPO loss (the supervised loss_impl would contradict the
         # preference seal the runner cross-checks); the SFT loss stays on the dense path.
-        "loss_impl": "dpo" if is_preference_dpo else loss_impl,
+        "loss_impl": (
+            "reward_bt" if is_reward_model else ("dpo" if is_preference_dpo else loss_impl)
+        ),
         "attention_backend": attention_backend,
         "sequence": sequence,
         "batching": batching,
@@ -2016,6 +2157,7 @@ def build_run_plan(
         "resolved_execution": resolved_execution_field,
         "resolved_preference_execution": resolved_preference_field,
         "resolved_full_finetune_execution": resolved_full_finetune_field,
+        "resolved_reward_execution": resolved_reward_field,
         "parameter_accounting_ref": (
             parameter_accounting_ref.model_dump(mode="json")
             if parameter_accounting_ref is not None

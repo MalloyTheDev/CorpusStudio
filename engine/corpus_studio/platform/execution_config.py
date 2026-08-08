@@ -23,6 +23,7 @@ from .contracts import (
     ResolvedExecutionConfiguration,
     ResolvedFullFinetuneExecutionConfiguration,
     ResolvedPreferenceExecutionConfiguration,
+    ResolvedRewardExecutionConfiguration,
     ResolvedPretrainingExecutionConfiguration,
     RunPlan,
 )
@@ -84,6 +85,14 @@ FULL_FINETUNE_NOT_EXECUTABLE_REASON = (
     "runner: dispatch it through platform-run so required_runner_lane selects the 'full_finetune' lane. "
     "(The same refusal fires if the 'dense_full_finetune' execution variant is not workload_verified for "
     "this backend.)"
+)
+
+REWARD_NOT_EXECUTABLE_REASON = (
+    "a sealed reward-model plan runs on the first-party reward lane, not the SFT/DPO adapter runner: "
+    "dispatch it through platform-run so required_runner_lane selects the 'reward' lane. (The same refusal "
+    "fires - as it does now - while the 'reward_model' execution variant is not workload_verified for this "
+    "backend: the reward-head trainer branch + a measured run + the promoting wheel are the gated "
+    "milestone.)"
 )
 
 
@@ -163,6 +172,28 @@ def required_runner_lane(plan: RunPlan) -> str:
         except ExecutionVariantRefused as exc:
             raise ExecutionConfigurationError(FULL_FINETUNE_NOT_EXECUTABLE_REASON) from exc
         return "full_finetune"
+    if plan.resolved_reward_execution is not None:
+        # A sealed reward-model plan is admitted at planning; at EXECUTION it is admitted only once the
+        # reward_model variant reaches workload_verified (the reward-head worker + reload-verify + a
+        # measured run). Gate on the ladder, keyed by the specific reward objective (only the pairwise
+        # reward_model has a built shape), then route to the reward lane - the adapter/DPO lanes never
+        # train a scalar score head.
+        from corpus_studio.platform.enums import TaskType  # noqa: PLC0415
+        from corpus_studio.platform.execution_variants import (  # noqa: PLC0415
+            ExecutionVariantRefused,
+            admit_task_execution_variant,
+            reference_execution_variants,
+        )
+
+        try:
+            admit_task_execution_variant(
+                TaskType.reward,
+                declared_variants=reference_execution_variants(),
+                objective_id=plan.resolved_reward_execution.objective_ref.id,
+            )
+        except ExecutionVariantRefused as exc:
+            raise ExecutionConfigurationError(REWARD_NOT_EXECUTABLE_REASON) from exc
+        return "reward"
     if plan.backend_ref.id == "echo":
         if plan.task_type.value != "evaluation":
             raise ExecutionConfigurationError(
@@ -213,6 +244,21 @@ def verify_preference_execution_configuration_hash(
     config: ResolvedPreferenceExecutionConfiguration,
 ) -> bool:
     return config.configuration_hash == preference_execution_configuration_hash_for(config)
+
+
+def reward_execution_configuration_hash_for(
+    config: ResolvedRewardExecutionConfiguration,
+) -> str:
+    """Seal a reward-model execution configuration exactly as the SFT/DPO siblings are sealed (canonical
+    JSON over every field but ``configuration_hash``). A separate function keeps the seals decoupled: the
+    byte-locked SFT seal can never be perturbed by a reward change."""
+    return canonical_sha256(config.model_dump(mode="json", exclude={"configuration_hash"}))
+
+
+def verify_reward_execution_configuration_hash(
+    config: ResolvedRewardExecutionConfiguration,
+) -> bool:
+    return config.configuration_hash == reward_execution_configuration_hash_for(config)
 
 
 def pretraining_execution_configuration_hash_for(

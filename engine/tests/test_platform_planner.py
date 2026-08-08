@@ -465,6 +465,36 @@ def test_planner_admits_the_dense_qlora_sft_task_and_refuses_unexecutable_varian
     assert dpo_plan.resolved_preference_execution.objective_ref.id == "dpo_qlora"
 
 
+def test_reward_model_resolves_to_a_sealed_config_and_is_refused_at_execution():
+    from corpus_studio.platform.execution_config import (
+        ExecutionConfigurationError,
+        required_runner_lane,
+        reward_execution_configuration_hash_for,
+    )
+
+    # reward + the reward_model objective -> the reward_model variant (contract_validated) is ADMITTED at
+    # planning: the resolver seals a ResolvedRewardExecutionConfiguration (the plan carries it, not the SFT
+    # resolved_execution) and the plan's loss summary is the reward loss bound to the reward_model objective.
+    plan = _plan(_profile(cc_major=8), _report(), task_type="reward", objective_id="reward_model")
+    reward = plan.resolved_reward_execution
+    assert reward is not None and plan.resolved_execution is None
+    assert reward.configuration_hash == reward_execution_configuration_hash_for(reward)
+    assert reward.objective_ref.id == "reward_model"
+    assert reward.adapter_task_type == "SEQ_CLS"
+    assert reward.export_format.value == "reward_model"
+    assert plan.loss_impl.value == "reward_bt"
+    # ADMITTED at planning, REFUSED at execution: reward_model is contract_validated, not workload_verified
+    # (the reward-head worker + evidence + wheel are the gated milestone).
+    with pytest.raises(ExecutionConfigurationError, match="reward lane"):
+        required_runner_lane(plan)
+
+
+def test_reward_objective_requires_the_reward_task():
+    # a reward objective on a non-reward task is refused fail-closed (never silently lowered to SFT).
+    with pytest.raises(PlannerError, match="a reward objective requires task_type='reward'"):
+        _plan(_profile(cc_major=8), _report(), task_type="sft", objective_id="reward_model")
+
+
 def test_preference_dpo_resolves_to_a_sealed_config_and_routes_to_the_preference_lane():
     from corpus_studio.platform.execution_config import preference_execution_configuration_hash_for
 
