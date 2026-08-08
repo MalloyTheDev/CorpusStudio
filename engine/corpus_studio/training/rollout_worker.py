@@ -109,6 +109,14 @@ def run_rollout(  # pragma: no cover - optional training-stack integration; prov
     objective = get_objective(execution.objective_ref.id)
     if objective is None:
         raise RolloutWorkerError(f"unknown sealed rollout objective {execution.objective_ref.id!r}")
+    # The rollout loop processes ONE prompt per microbatch (a group of rollouts already fills memory); a
+    # larger per-device batch must be expressed via gradient accumulation, not silently ignored.
+    if execution.batching.micro_batch_size != 1:
+        raise RolloutWorkerError(
+            f"the rollout worker processes one prompt per microbatch (got micro_batch_size="
+            f"{execution.batching.micro_batch_size}); express a bigger effective batch via "
+            f"fallback_grad_accumulation_steps."
+        )
     out = Path(output_dir or execution.output_dir)
     seq_len = execution.sequence.max_sequence_len
     max_prompt_length = execution.experience.max_prompt_length
@@ -142,21 +150,47 @@ def run_rollout(  # pragma: no cover - optional training-stack integration; prov
 
     # --- served reward model: the provenance-bound nf4 SEQ_CLS reward model (inference-only scorer) ---
     reward_source = execution.reward_source
+    # The contract requires these for a served_reward_model; guard defensively (+ narrow for the worker).
+    if reward_source.reward_base_model is None or reward_source.reward_adapter_location is None:
+        raise RolloutWorkerError(
+            "the served reward source must seal a reward_base_model + reward_adapter_location"
+        )
+    reward_base_model = reward_source.reward_base_model
+    reward_adapter_location = reward_source.reward_adapter_location
     reward_bnb = BitsAndBytesConfig(
         load_in_4bit=True, bnb_4bit_quant_type="nf4", bnb_4bit_compute_dtype=torch.bfloat16,
         bnb_4bit_use_double_quant=execution.bnb_4bit_use_double_quant,
     )
     reward_tokenizer = AutoTokenizer.from_pretrained(
-        reward_source.reward_base_model, trust_remote_code=execution.trust_remote_code
+        reward_base_model, trust_remote_code=execution.trust_remote_code
     )
     if reward_tokenizer.pad_token_id is None:
         reward_tokenizer.pad_token = reward_tokenizer.eos_token
     reward_base = AutoModelForSequenceClassification.from_pretrained(
-        reward_source.reward_base_model, num_labels=1, quantization_config=reward_bnb,
+        reward_base_model, num_labels=1, quantization_config=reward_bnb,
         device_map={"": 0}, trust_remote_code=execution.trust_remote_code,
     )
     reward_base.config.pad_token_id = reward_tokenizer.pad_token_id
-    reward_model = PeftModel.from_pretrained(reward_base, reward_source.reward_adapter_location)
+    # Provenance integrity: the reward adapter ON DISK must match the sha256 the resolver pinned into
+    # reward_ref (bound from the reward run's admitted RunManifest). Verify before loading + trusting it.
+    import hashlib as _hashlib  # noqa: PLC0415
+
+    adapter_bytes_path = Path(reward_adapter_location) / "adapter_model.safetensors"
+    if not adapter_bytes_path.is_file():
+        raise RolloutWorkerError(
+            f"the served reward adapter has no adapter_model.safetensors at "
+            f"{reward_adapter_location!r}"
+        )
+    observed_sha = _hashlib.sha256(adapter_bytes_path.read_bytes()).hexdigest()
+    expected_sha = (
+        reward_source.reward_ref.hash.value if reward_source.reward_ref.hash is not None else None
+    )
+    if observed_sha != expected_sha:
+        raise RolloutWorkerError(
+            "the served reward adapter bytes do not match the provenance-pinned reward_ref hash - refusing "
+            "to score rollouts with an unverified reward model."
+        )
+    reward_model = PeftModel.from_pretrained(reward_base, reward_adapter_location)
     reward_model.eval()
     reward_backbone, reward_score_head = _seqcls_backbone_and_score_head(reward_model)
     reward_device = next(reward_model.parameters()).device
@@ -228,7 +262,10 @@ def run_rollout(  # pragma: no cover - optional training-stack integration; prov
             kl_coefficient=execution.stability.kl_coefficient,
             clip_range=execution.stability.clip_range,
             entropy_bonus=execution.stability.entropy_bonus,
+            advantage_normalization=execution.stability.advantage_normalization,
             max_prompt_length=max_prompt_length,
+            truncation_allowed=execution.sequence.truncation_allowed,
+            seed=execution.seed,
             learning_rate=opt.learning_rate,
             gradient_accumulation_steps=execution.batching.fallback_grad_accumulation_steps or 1,
             max_grad_norm=opt.max_grad_norm,
@@ -272,21 +309,33 @@ def run_rollout(  # pragma: no cover - optional training-stack integration; prov
     max_new_tokens = execution.rollout.max_new_tokens
     temperature = execution.rollout.sampling_temperature
     top_p = execution.rollout.sampling_top_p
+    truncation_allowed = execution.sequence.truncation_allowed
     try:
         policy_reward = evaluate_rollout_reward(
             policy, tokenizer, heldout_prompts, _reward_scorer, max_new_tokens=max_new_tokens,
             sampling_temperature=temperature, sampling_top_p=top_p,
-            max_prompt_length=max_prompt_length, use_reference=False)
+            max_prompt_length=max_prompt_length, truncation_allowed=truncation_allowed,
+            use_reference=False)
         baseline_reward = evaluate_rollout_reward(
             policy, tokenizer, heldout_prompts, _reward_scorer, max_new_tokens=max_new_tokens,
             sampling_temperature=temperature, sampling_top_p=top_p,
-            max_prompt_length=max_prompt_length, use_reference=True)
+            max_prompt_length=max_prompt_length, truncation_allowed=truncation_allowed,
+            use_reference=True)
         max_kl = evaluate_rollout_kl(
             policy, tokenizer, heldout_prompts, max_new_tokens=max_new_tokens,
             sampling_temperature=temperature, sampling_top_p=top_p,
-            max_prompt_length=max_prompt_length)
+            max_prompt_length=max_prompt_length, truncation_allowed=truncation_allowed)
     except TrainerError as exc:
         raise RolloutWorkerError(f"the held-out rollout evaluation refused the prompts: {exc}") from exc
+
+    # PROMOTION GATE: a non-improving RL bring-up is not a success - refuse a non-positive held-out lift.
+    lift = policy_reward["mean_reward"] - baseline_reward["mean_reward"]
+    if lift <= 0.0:
+        raise RolloutWorkerError(
+            f"the on-policy run did not improve held-out reward (policy {policy_reward['mean_reward']:.4f} "
+            f"vs reference {baseline_reward['mean_reward']:.4f}, lift {lift:.4f} <= 0); a non-improving "
+            f"rollout bring-up is not an admissible success."
+        )
 
     # The KL bound is the sealed adaptive target when set, else the sealed penalty coefficient's implied
     # ceiling; a success that exceeds it is refused by the RolloutSuccessEvidence validator (reward-hacking).

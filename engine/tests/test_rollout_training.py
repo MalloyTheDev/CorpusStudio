@@ -28,6 +28,13 @@ def test_grpo_group_advantage_uniform_group_teaches_nothing() -> None:
     assert all(a == pytest.approx(0.0, abs=1e-3) for a in adv)
 
 
+def test_grpo_group_advantage_centering_only_when_normalization_off() -> None:
+    # honoring a sealed advantage_normalization=False: center (r - mean) WITHOUT the std scaling.
+    adv = grpo_group_advantage([1.0, 3.0], normalize=False)
+    assert adv == pytest.approx([-1.0, 1.0])  # mean 2 -> [-1, +1], no /std
+    assert sum(adv) == pytest.approx(0.0)
+
+
 def test_grpo_group_advantage_refuses_a_degenerate_group() -> None:
     with pytest.raises(TrainerError, match="group of at least two rollouts"):
         grpo_group_advantage([1.0])

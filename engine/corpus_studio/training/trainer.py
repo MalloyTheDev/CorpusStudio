@@ -3650,13 +3650,16 @@ def evaluate_reward_accuracy(  # pragma: no cover - optional training-stack inte
 # --------------------------------------------------------------------------------------------------
 
 
-def grpo_group_advantage(rewards: Sequence[float], *, eps: float = 1e-6) -> list[float]:
+def grpo_group_advantage(
+    rewards: Sequence[float], *, eps: float = 1e-6, normalize: bool = True
+) -> list[float]:
     """Group-relative advantage for ONE GRPO prompt group (PURE, torch-free). GRPO has no critic: it
-    normalizes each rollout's scalar reward by the GROUP's own mean + std - ``A_i = (r_i - mean) / (std +
-    eps)``. A rollout scored above its group's average earns a positive advantage (reinforce it), below-
-    average negative (suppress it); a UNIFORM group (std 0 - the reward source could not separate the
-    rollouts) yields all-zero advantages, so an indistinguishable group teaches nothing. Requires a group
-    of at least two rollouts."""
+    centers each rollout's scalar reward on the GROUP mean and (when ``normalize``, the default + the sealed
+    ``advantage_normalization``) scales by the group std - ``A_i = (r_i - mean) / (std + eps)``. A rollout
+    scored above its group's average earns a positive advantage (reinforce it), below-average negative
+    (suppress it); a UNIFORM group (std 0 - the reward source could not separate the rollouts) yields
+    all-zero advantages, so an indistinguishable group teaches nothing. With ``normalize=False`` the sealed
+    config asked for CENTERING only (``r_i - mean``, no std scaling). Requires a group of >= 2 rollouts."""
     group = list(rewards)
     if len(group) < 2:
         raise TrainerError("GRPO needs a group of at least two rollouts to compute a relative advantage")
@@ -3664,6 +3667,8 @@ def grpo_group_advantage(rewards: Sequence[float], *, eps: float = 1e-6) -> list
         if isinstance(reward, bool) or not isinstance(reward, Real) or not math.isfinite(float(reward)):
             raise TrainerError("GRPO rewards must be finite numbers")
     mean = sum(group) / len(group)
+    if not normalize:
+        return [reward - mean for reward in group]
     std = math.sqrt(sum((reward - mean) ** 2 for reward in group) / len(group))
     return [(reward - mean) / (std + eps) for reward in group]
 
@@ -3763,12 +3768,19 @@ def token_logprobs_and_entropy(  # pragma: no cover - torch-only; verified by to
 
 
 def _encode_rollout_prompt(
-    tokenizer: Any, prompt: str, max_prompt_length: int | None
+    tokenizer: Any, prompt: str, max_prompt_length: int | None, *, truncation_allowed: bool = False
 ) -> list[int]:  # pragma: no cover - tokenizer integration; proven by a GPU run
-    """Tokenize a (chat-templated) rollout prompt, left-truncating to the sealed ``max_prompt_length``
-    (keep the most recent context) - the generation analog of the DPO branch encoder's prompt handling."""
+    """Tokenize a (chat-templated) rollout prompt. An over-length prompt is REFUSED unless a lossy policy
+    is sealed (the no-silent-truncation invariant, as in the SFT/DPO workers); when allowed it left-
+    truncates (keep the most recent context)."""
     prompt_ids = tokenizer(prompt, add_special_tokens=False)["input_ids"]
     if max_prompt_length is not None and len(prompt_ids) > max_prompt_length:
+        if not truncation_allowed:
+            raise TrainerError(
+                f"a rollout prompt exceeds the sealed max_prompt_length={max_prompt_length} "
+                f"({len(prompt_ids)} tokens); refusing to silently truncate - split/re-encode the prompt "
+                f"or seal a lossy truncation policy."
+            )
         prompt_ids = prompt_ids[-max_prompt_length:]
     return prompt_ids
 
@@ -3806,7 +3818,10 @@ def run_rollout_training(  # pragma: no cover - generation + optional training-s
     kl_coefficient: float = 0.05,
     clip_range: float = 0.2,
     entropy_bonus: float = 0.0,
+    advantage_normalization: bool = True,
     max_prompt_length: int | None = None,
+    truncation_allowed: bool = False,
+    seed: int = 42,
     learning_rate: float = 5e-5,
     gradient_accumulation_steps: int = 1,
     max_grad_norm: float = float("inf"),
@@ -3814,7 +3829,9 @@ def run_rollout_training(  # pragma: no cover - generation + optional training-s
     stage_callback: StageCallback | None = None,
 ) -> dict[str, Any]:
     """The harness's on-policy GRPO primitive (RL slice S5b). Gradient checkpointing is configured on the
-    model by the worker (``prepare_model_for_kbit_training``), so this primitive does not toggle it. Each optimizer step, for each prompt in the
+    model by the worker (``prepare_model_for_kbit_training``), so this primitive does not toggle it. The
+    sealed ``seed`` is applied before the stochastic rollout sampling so the run is reproducible, and an
+    over-length prompt is refused unless ``truncation_allowed`` (the no-silent-truncation invariant). Each optimizer step, for each prompt in the
     accumulation window: SAMPLE a group of ``group_size`` completions from the current policy, SCORE each
     with ``reward_scorer`` (the served reward model), compute the group-relative advantage
     (:func:`grpo_group_advantage`), then update the policy with the clipped surrogate + KL-to-FROZEN-reference
@@ -3861,7 +3878,9 @@ def run_rollout_training(  # pragma: no cover - generation + optional training-s
 
     _stage("training", f"GRPO at group_size={group_size}, max_new_tokens={max_new_tokens}")
     dropout_neutralized = disable_dropout(policy_model)  # deterministic ref + policy log-probs
+    torch.manual_seed(seed)  # honor the sealed seed so the stochastic rollout sampling is reproducible
     if cuda_device is not None:
+        torch.cuda.manual_seed_all(seed)
         torch.cuda.reset_peak_memory_stats(cuda_device)
     losses: list[float] = []
     mean_rewards: list[float] = []
@@ -3883,7 +3902,8 @@ def run_rollout_training(  # pragma: no cover - generation + optional training-s
         for _micro in range(gradient_accumulation_steps):
             prompt = prompts[prompt_cursor % len(prompts)]
             prompt_cursor += 1
-            prompt_ids = _encode_rollout_prompt(tokenizer, prompt, max_prompt_length)
+            prompt_ids = _encode_rollout_prompt(
+                tokenizer, prompt, max_prompt_length, truncation_allowed=truncation_allowed)
             prompt_len = len(prompt_ids)
             # --- SAMPLE a group of completions from the current policy (no grad, cache on) ---
             policy_model.eval()
@@ -3909,7 +3929,7 @@ def run_rollout_training(  # pragma: no cover - generation + optional training-s
                 )
                 for i in range(generated.shape[0])
             ]
-            advantages = grpo_group_advantage(rewards)  # verified group-relative advantage
+            advantages = grpo_group_advantage(rewards, normalize=advantage_normalization)
             adv_tensor = torch.tensor(advantages, device=device, dtype=torch.float32)
             # --- RECOMPUTE policy log-probs WITH grad + the frozen reference (disable_adapter) ---
             policy_model.train()
@@ -3988,6 +4008,7 @@ def evaluate_rollout_reward(  # pragma: no cover - generation + optional trainin
     sampling_temperature: float = 1.0,
     sampling_top_p: float = 0.95,
     max_prompt_length: int | None = None,
+    truncation_allowed: bool = False,
     use_reference: bool = False,
     stage_callback: StageCallback | None = None,
 ) -> dict[str, Any]:
@@ -4013,7 +4034,8 @@ def evaluate_rollout_reward(  # pragma: no cover - generation + optional trainin
     def _score_all() -> None:
         with torch.no_grad():
             for prompt in prompts:
-                prompt_ids = _encode_rollout_prompt(tokenizer, prompt, max_prompt_length)
+                prompt_ids = _encode_rollout_prompt(
+                    tokenizer, prompt, max_prompt_length, truncation_allowed=truncation_allowed)
                 prompt_tensor = torch.tensor([prompt_ids], device=device)
                 generated = policy_model.generate(
                     prompt_tensor, do_sample=True, temperature=sampling_temperature,
@@ -4045,6 +4067,7 @@ def evaluate_rollout_kl(  # pragma: no cover - generation + optional training-st
     sampling_temperature: float = 1.0,
     sampling_top_p: float = 0.95,
     max_prompt_length: int | None = None,
+    truncation_allowed: bool = False,
     stage_callback: StageCallback | None = None,
 ) -> float:
     """The MAX per-completion KL to the frozen reference over held-out prompts - the on-policy safety-rail
@@ -4068,7 +4091,8 @@ def evaluate_rollout_kl(  # pragma: no cover - generation + optional training-st
     try:
         with torch.no_grad():
             for prompt in prompts:
-                prompt_ids = _encode_rollout_prompt(tokenizer, prompt, max_prompt_length)
+                prompt_ids = _encode_rollout_prompt(
+                    tokenizer, prompt, max_prompt_length, truncation_allowed=truncation_allowed)
                 prompt_len = len(prompt_ids)
                 policy_model.config.use_cache = True
                 generated = policy_model.generate(
@@ -4084,9 +4108,16 @@ def evaluate_rollout_kl(  # pragma: no cover - generation + optional training-st
                     ref_logp, _r, _t = _rollout_completion_logprobs(
                         backbone, lm_head_weight, generated, attention_mask, prompt_len)
                 mask = (targets != pad_id).to(torch.float32)
-                log_ref_ratio = (ref_logp - policy_logp).float()
-                per_token_kl = torch.expm1(log_ref_ratio) - log_ref_ratio
-                kl = float((per_token_kl * mask).sum() / mask.sum().clamp(min=1.0))
+                valid = float(mask.sum())
+                if valid < 1.0:
+                    continue  # an empty (immediate-EOS) completion has no KL to contribute
+                # Mask the log-ratio BEFORE expm1 (same 0*inf=NaN guard as grpo_policy_loss): a padded cell
+                # with an extreme divergence must be replaced by 0, not multiplied.
+                raw = (ref_logp - policy_logp).float()
+                safe = torch.where(mask > 0, raw, torch.zeros_like(raw))
+                per_token_kl = torch.where(
+                    mask > 0, torch.expm1(safe) - safe, torch.zeros_like(safe))
+                kl = float(per_token_kl.sum() / valid)
                 max_kl = max(max_kl, kl)
     finally:
         if was_training:
