@@ -258,6 +258,32 @@ def test_reward_model_variant_is_workload_verified_and_admitted_at_execution():
     assert env.requires_peft_adapter and not env.allows_full_parameter
 
 
+def test_on_policy_rl_variant_is_contract_validated_and_refused_at_execution():
+    reference = {v.variant_kind: v for v in reference_execution_variants()}
+    rollout = reference[ExecutionVariantKind.on_policy_rl]
+    # The on-policy RL shape is contract-expressible but NOT executable (RL slice S5b, gated L1 #839) -
+    # below the workload_verified admission bar, so execution admission refuses it fail-closed.
+    assert rollout.support == ExecutionVariantSupport.contract_validated
+    with pytest.raises(ExecutionVariantRefused):
+        admit_execution_variant(rollout)
+    # An on-policy (grpo) task resolves by its SPECIFIC objective (only grpo has a built shape in S5b); an
+    # absent / unmapped objective, or a MoE on-policy request, refuses fail-closed rather than mis-claiming.
+    assert (
+        execution_variant_kind_for_task(TaskType.grpo, objective_id="grpo")
+        == ExecutionVariantKind.on_policy_rl
+    )
+    assert execution_variant_kind_for_task(TaskType.grpo, objective_id=None) is None
+    assert execution_variant_kind_for_task(TaskType.grpo, objective_id="ppo") is None
+    assert (
+        execution_variant_kind_for_task(TaskType.grpo, objective_id="grpo", is_moe=True) is None
+    )
+    # Its envelope: a CAUSAL_LM policy adapter (generation), a QLoRA adapter, one prompt dataset.
+    env = variant_envelope(ExecutionVariantKind.on_policy_rl)
+    assert env.task_type == "CAUSAL_LM"
+    assert env.requires_causal_lm
+    assert env.requires_peft_adapter and not env.allows_full_parameter
+
+
 def test_descriptor_is_not_the_sealed_worker_configuration():
     # the capability descriptor must never be usable as a worker configuration, and admission returns
     # None (admit/refuse) - never a ResolvedExecutionConfiguration.

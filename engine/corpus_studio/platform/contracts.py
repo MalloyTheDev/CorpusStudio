@@ -4253,6 +4253,223 @@ class ResolvedRewardExecutionConfiguration(ContractModel):
         return self
 
 
+class RolloutSpec(ContractModel):
+    """The GENERATION phase of an on-policy RL run (S5b): how completions are sampled from the current
+    policy to form the experience the update is computed over. Sampling MUST be stochastic (temperature > 0)
+    - a greedy rollout collapses the group and yields a zero-variance GRPO advantage. ``rollouts_per_prompt``
+    is the GRPO group size (>= 2 so the group-relative advantage is defined). Generation runs on the
+    sanctioned worker decode path, never an unsanctioned generation path."""
+
+    contract_version: CONTRACT_VERSION_LITERAL = "1.0.0"
+    sampling_temperature: float = Field(gt=0)
+    sampling_top_p: float = Field(gt=0, le=1)
+    max_new_tokens: int = Field(ge=1)
+    rollouts_per_prompt: int = Field(ge=2)
+    decode_policy: Literal["sanctioned_worker_decode"] = "sanctioned_worker_decode"
+
+
+class ExperienceSource(ContractModel):
+    """The on-policy experience buffer + the PROMPT dataset identity it draws from (S5b). ``mode`` is
+    ``on_policy``: completions are generated FRESH from the current policy each iteration (a streaming
+    source distinct from a static dataset - it ties to the G2 data-cursor gap), never replayed
+    (off-policy replay is a later variant). It seals the resolved PROMPT-dataset schema identity
+    (``schema_id`` + ``schema_version`` + ``schema_sha256``, the content digest) + the prompt formatter +
+    the prompt length budget, so an over-length prompt is refused (never silently truncated), exactly like
+    the preference / SFT data policies. Prompts only - NOT chosen/rejected pairs."""
+
+    contract_version: CONTRACT_VERSION_LITERAL = "1.0.0"
+    mode: Literal["on_policy"] = "on_policy"
+    schema_id: str = Field(min_length=1)
+    schema_version: str = Field(min_length=1)
+    schema_sha256: str = Field(pattern=SHA256_PATTERN)
+    formatter_id: str = Field(min_length=1)
+    formatter_sha256: str = Field(pattern=SHA256_PATTERN)
+    chat_template_sha256: str | None = Field(default=None, pattern=SHA256_PATTERN)
+    max_prompt_length: int = Field(ge=1)
+    truncation_policy: Literal["refuse", "allow"] = "refuse"
+    data_seed: int = Field(default=42, ge=0)
+
+
+class RewardSourceRef(ContractModel):
+    """The hash-pinned reference to what scores each rollout (S5b). A reward model produced by the S5a
+    reward vertical is the primary source, served for inference-only scoring; rule / verifier rewards and
+    an RLAIF judge (Evaluation Studio's judge under the provider policy) are the declared alternatives.
+    The reference is hash-pinned so a run cannot silently swap the reward function. Admissibility (e.g. a
+    served reward model must itself be ``workload_verified``) is enforced by the resolver + runner, not
+    here."""
+
+    contract_version: CONTRACT_VERSION_LITERAL = "1.0.0"
+    kind: Literal["served_reward_model", "verifier", "process_reward", "rlaif_judge"]
+    reward_ref: Ref
+    higher_is_better: bool = True
+
+    @model_validator(mode="after")
+    def _validate_reward_source(self) -> RewardSourceRef:
+        if not _is_pinned_ref(self.reward_ref):
+            raise ValueError("reward source reference must be hash-pinned")
+        return self
+
+
+class StabilityController(ContractModel):
+    """The sealed on-policy stability controls (S5b) - the guardrails that keep an on-policy update from
+    reward-hacking or collapsing. The KL-to-reference penalty anchors the policy to the frozen base; the
+    entropy bonus preserves exploration; advantage normalization stabilizes the group-relative signal; the
+    clip range bounds the per-step policy change. Sealed like any execution field - no silent defaults."""
+
+    contract_version: CONTRACT_VERSION_LITERAL = "1.0.0"
+    kl_coefficient: float = Field(ge=0)
+    kl_target: float | None = Field(default=None, gt=0)
+    entropy_bonus: float = Field(default=0.0, ge=0)
+    advantage_normalization: bool = True
+    clip_range: float = Field(gt=0)
+
+
+class PolicyOptimizationSpec(ContractModel):
+    """The on-policy optimization algorithm (S5b). GRPO (group-relative advantage) needs NO critic - it is
+    the cheaper shape that fits the 12 GB envelope like DPO/reward did; PPO (a clipped surrogate with a
+    value head) is the S5c follow-up. The reference model is the frozen base reached via
+    ``disable_adapter`` (the DPO pattern), so no separate reference weights are stored."""
+
+    contract_version: CONTRACT_VERSION_LITERAL = "1.0.0"
+    algorithm: Literal["grpo", "ppo"] = "grpo"
+    use_critic: bool = False
+
+    @model_validator(mode="after")
+    def _validate_policy_optimization(self) -> PolicyOptimizationSpec:
+        # GRPO's group-relative advantage replaces the value function, so it must NOT carry a critic; PPO
+        # requires one. Keeps the two shapes from being silently mixed.
+        if self.algorithm == "grpo" and self.use_critic:
+            raise ValueError("GRPO uses a group-relative advantage and must not carry a critic")
+        if self.algorithm == "ppo" and not self.use_critic:
+            raise ValueError("PPO requires a critic (value head)")
+        return self
+
+
+class ResolvedRolloutExecutionConfiguration(ContractModel):
+    """The hash-sealed configuration for an on-policy RL run - the sibling of
+    :class:`ResolvedExecutionConfiguration` for the ``on_policy_rl`` execution variant (RL slice S5b,
+    gated L1 design #839).
+
+    Like the reward seal, it reuses every shared execution sub-spec (placement / precision / attention /
+    adapter / optimizer / sequence / batching / checkpoint / schedule / trainer interface) and adds the
+    on-policy specs: a :class:`RolloutSpec` (generation), an :class:`ExperienceSource` (on-policy prompt
+    stream), a :class:`RewardSourceRef` (what scores rollouts), a :class:`StabilityController`
+    (KL/entropy/clip), and a :class:`PolicyOptimizationSpec` (GRPO now, PPO in S5c). Unlike reward it
+    trains a CAUSAL_LM POLICY adapter (``adapter_task_type='CAUSAL_LM'``) and exports an ``adapter_peft``
+    artifact - a policy, not a score head.
+
+    Carried on ``RunPlan.resolved_rollout_execution`` (a plan holds EXACTLY ONE execution config). The
+    contract is the control plane; EXECUTION (the rollout+reward+GRPO worker + a workload-verified run)
+    stays gated - ``on_policy_rl`` remains ``contract_validated`` until a measured run promotes it."""
+
+    contract_version: CONTRACT_VERSION_LITERAL = "1.0.0"
+    configuration_id: str = Field(pattern=_ID)
+    configuration_hash: str = Field(pattern=SHA256_PATTERN)
+    backend_ref: Ref
+    environment_ref: Ref
+    environment_binding: Literal["profile_snapshot", "managed_lock"]
+    capability_report_ref: Ref
+    inputs: ExecutionInputs
+    objective_ref: Ref
+    runtime_mode: Literal["training", "cpu_toy"]
+    precision: PrecisionExecutionPolicy
+    attention: AttentionExecutionPolicy
+    device_map: list[DeviceMapEntry] = Field(min_length=1)
+    adapter: AdapterSpec
+    optimizer: OptimizerSpec
+    sequence: SequenceSpec
+    batching: BatchingSpec
+    checkpoint_policy: CheckpointPolicy
+    schedule: TrainingSchedule
+    experience: ExperienceSource
+    rollout: RolloutSpec
+    reward_source: RewardSourceRef
+    stability: StabilityController
+    policy_optimization: PolicyOptimizationSpec
+    trainer_interface: TrainerInterfacePolicy
+    export_format: ExportFormat
+    trust_remote_code: Literal[False] = False
+    use_safetensors: Literal[True] = True
+    bnb_4bit_use_double_quant: bool
+    # On-policy RL trains a POLICY (a causal-LM PEFT adapter), never the reward model's SEQ_CLS score head.
+    adapter_task_type: Literal["CAUSAL_LM"] = "CAUSAL_LM"
+    save_strategy: Literal["no", "steps"] = "steps"
+    gradient_checkpointing: bool = True
+    output_dir: str = Field(min_length=1)
+    output_layout: Literal["run_scoped_v1"] = "run_scoped_v1"
+    seed: int = Field(default=42, ge=0)
+    data_seed: int = Field(default=42, ge=0)
+
+    @model_validator(mode="after")
+    def _validate_rollout_configuration(self) -> ResolvedRolloutExecutionConfiguration:
+        # Enforced independently of the byte-locked SFT/DPO/reward validators so the seals stay decoupled.
+        for label, ref in (
+            ("backend_ref", self.backend_ref),
+            ("environment_ref", self.environment_ref),
+            ("capability_report_ref", self.capability_report_ref),
+            ("objective_ref", self.objective_ref),
+        ):
+            if not _is_pinned_ref(ref):
+                raise ValueError(f"resolved rollout execution {label} must be hash-pinned")
+        if self.backend_ref.id != "corpus_studio":
+            raise ValueError(
+                "resolved rollout execution requires the first-party corpus_studio worker backend"
+            )
+        # The only admitted on-policy shape in S5b is GRPO bound to the 'grpo' objective; PPO + the other
+        # reward-source kinds are the S5c/later slices, refused here rather than left contract-valid-but-
+        # unadmittable.
+        if self.objective_ref.id != "grpo":
+            raise ValueError(
+                "on-policy RL execution must bind the 'grpo' objective (the only admitted shape in S5b)"
+            )
+        if self.policy_optimization.algorithm != "grpo":
+            raise ValueError("on-policy RL currently admits only the GRPO shape (PPO is the S5c slice)")
+        if self.reward_source.kind != "served_reward_model":
+            raise ValueError(
+                "on-policy RL currently admits only a served reward-model source (verifier / RLAIF later)"
+            )
+        # The policy is a QLoRA CAUSAL_LM adapter over a 4-bit base (mirrors the DPO/reward shape locks).
+        if self.export_format != ExportFormat.adapter_peft:
+            raise ValueError("on-policy RL exports a PEFT policy adapter ('adapter_peft')")
+        if self.adapter.method != AdapterMethod.qlora:
+            raise ValueError("on-policy RL requires the qlora adapter method")
+        if self.precision.quantized_storage_format not in {
+            QuantizationMode.int4,
+            QuantizationMode.nf4,
+        }:
+            raise ValueError("on-policy RL requires a 4-bit quantized base (int4 or nf4)")
+        # On-policy RL scores discrete prompt+completion sequences; it never packs.
+        if self.sequence.packing:
+            raise ValueError("on-policy RL does not pack sequences")
+        # The prompt budget + the generation budget must fit the sealed sequence window.
+        if self.experience.max_prompt_length + self.rollout.max_new_tokens > self.sequence.max_sequence_len:
+            raise ValueError(
+                "experience.max_prompt_length + rollout.max_new_tokens must fit the sealed sequence length"
+            )
+        # No-silent-truncation cross-check (same contradiction the SFT / DPO / reward siblings refuse).
+        if not self.sequence.truncation_allowed and self.experience.truncation_policy == "allow":
+            raise ValueError(
+                "sequence.truncation_allowed is False but experience.truncation_policy is 'allow' - a "
+                "config that declares no truncation yet permits it at runtime would silently truncate"
+            )
+        # One reproducible sample order: the experience seed and the top-level execution data seed agree.
+        if self.experience.data_seed != self.data_seed:
+            raise ValueError(
+                "the experience data_seed and the top-level data_seed must match for one reproducible "
+                "sample order"
+            )
+        environment_hash = self.environment_ref.hash
+        assert environment_hash is not None and environment_hash.value is not None
+        if (
+            self.environment_binding == "profile_snapshot"
+            and self.environment_ref.id != environment_hash.value
+        ):
+            raise ValueError(
+                "a profile_snapshot rollout execution must name the environment by its own hash"
+            )
+        return self
+
+
 class ResolvedPreferenceExecutionConfiguration(ContractModel):
     """The hash-sealed configuration for an offline preference-optimization (DPO) run - the sibling of
     :class:`ResolvedExecutionConfiguration` for the ``preference_dpo`` execution variant.
@@ -5277,6 +5494,12 @@ class RunPlan(ContractModel):
     resolved_reward_execution: ResolvedRewardExecutionConfiguration | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
+    # The on-policy RL (rollout + GRPO/PPO) sibling seal (S5b). A plan carries exactly one of the SFT /
+    # preference / pretraining / full-finetune / reward / rollout configs; excluded when unset so it never
+    # perturbs existing plan hashes.
+    resolved_rollout_execution: ResolvedRolloutExecutionConfiguration | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     # Pins the parameter evidence the planner consumed; it does not manufacture missing counts.
     parameter_accounting_ref: Ref | None = None
     # ``None`` identifies a legacy plan. The planner always emits a fully resolved spec for new plans.
@@ -5296,11 +5519,12 @@ class RunPlan(ContractModel):
             self.resolved_pretraining_execution,
             self.resolved_full_finetune_execution,
             self.resolved_reward_execution,
+            self.resolved_rollout_execution,
         )
         if sum(1 for authority in _execution_authorities if authority is not None) > 1:
             raise ValueError(
                 "a RunPlan carries exactly one execution config (SFT, preference, pretraining, "
-                "full-finetune, or reward), never more than one"
+                "full-finetune, reward, or rollout), never more than one"
             )
         execution = self.resolved_execution
         if execution is not None:
@@ -5526,6 +5750,24 @@ class RunPlan(ContractModel):
             # A reward model is a reward-modeling task, never SFT / preference / pretraining.
             if self.task_type != TaskType.reward:
                 raise ValueError("a resolved reward execution requires a reward-task RunPlan")
+        rollout = self.resolved_rollout_execution
+        if rollout is not None:
+            expected_rollout_hash = _canonical_contract_sha256(
+                rollout.model_dump(mode="json", exclude={"configuration_hash"})
+            )
+            if rollout.configuration_hash != expected_rollout_hash:
+                raise ValueError(
+                    "resolved_rollout_execution configuration_hash does not match its body"
+                )
+            if self.training_config_snapshot:
+                raise ValueError("new resolved plans cannot carry a second trainer-config authority")
+            if rollout.backend_ref != self.backend_ref:
+                raise ValueError("resolved rollout execution backend_ref must match the RunPlan")
+            if rollout.environment_ref != self.environment_ref:
+                raise ValueError("resolved rollout execution environment_ref must match the RunPlan")
+            # On-policy RL is a GRPO task, never SFT / preference / pretraining / reward.
+            if self.task_type != TaskType.grpo:
+                raise ValueError("a resolved rollout execution requires a grpo-task RunPlan")
         if self.physical_execution is None:
             return self
         if (

@@ -1,0 +1,1667 @@
+{
+  "$defs": {
+    "AdapterMethod": {
+      "enum": [
+        "none",
+        "lora",
+        "qlora",
+        "dora",
+        "ia3",
+        "full_finetune",
+        "prompt_tuning",
+        "prefix_tuning"
+      ],
+      "title": "AdapterMethod",
+      "type": "string"
+    },
+    "AdapterSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "bias": {
+          "anyOf": [
+            {
+              "enum": [
+                "none",
+                "all",
+                "lora_only"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Bias"
+        },
+        "lora_alpha": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Lora Alpha"
+        },
+        "lora_dropout": {
+          "anyOf": [
+            {
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Lora Dropout"
+        },
+        "lora_r": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Lora R"
+        },
+        "method": {
+          "$ref": "#/$defs/AdapterMethod"
+        },
+        "target_modules": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Target Modules"
+        }
+      },
+      "required": [
+        "method"
+      ],
+      "title": "AdapterSpec",
+      "type": "object"
+    },
+    "AttentionExecutionPolicy": {
+      "additionalProperties": false,
+      "description": "Exact model attention API plus the one runtime kernel that is permitted.",
+      "properties": {
+        "effective_backend_required": {
+          "$ref": "#/$defs/AttentionKernel"
+        },
+        "evidence_kind": {
+          "enum": [
+            "functional_probe",
+            "cpu_reference"
+          ],
+          "title": "Evidence Kind",
+          "type": "string"
+        },
+        "fallback_policy": {
+          "const": "refuse",
+          "default": "refuse",
+          "title": "Fallback Policy",
+          "type": "string"
+        },
+        "flash_attention_package": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PackageLock"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "flash_sdp_enabled": {
+          "title": "Flash Sdp Enabled",
+          "type": "boolean"
+        },
+        "kernel_probe_ref": {
+          "$ref": "#/$defs/Ref"
+        },
+        "math_sdp_enabled": {
+          "title": "Math Sdp Enabled",
+          "type": "boolean"
+        },
+        "mem_efficient_sdp_enabled": {
+          "title": "Mem Efficient Sdp Enabled",
+          "type": "boolean"
+        },
+        "model_attention_api": {
+          "$ref": "#/$defs/ModelAttentionApi"
+        },
+        "safety_mandate": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Safety Mandate"
+        },
+        "verification_requirement": {
+          "$ref": "#/$defs/ExecutionVerificationRequirement",
+          "default": "require_verified"
+        }
+      },
+      "required": [
+        "model_attention_api",
+        "effective_backend_required",
+        "flash_sdp_enabled",
+        "mem_efficient_sdp_enabled",
+        "math_sdp_enabled",
+        "kernel_probe_ref",
+        "evidence_kind"
+      ],
+      "title": "AttentionExecutionPolicy",
+      "type": "object"
+    },
+    "AttentionKernel": {
+      "description": "The exact attention implementation an execution policy permits at runtime.",
+      "enum": [
+        "eager",
+        "torch_sdpa_math",
+        "torch_sdpa_flash",
+        "torch_sdpa_mem_efficient",
+        "flash_attention_2",
+        "flash_attention_3",
+        "xformers"
+      ],
+      "title": "AttentionKernel",
+      "type": "string"
+    },
+    "BatchingSpec": {
+      "additionalProperties": false,
+      "description": "The accumulation TARGET is expressed in SUPERVISED TOKENS, not microbatch count. A\ntoken-target-CAPABLE backend accumulates until summed supervised tokens >= target and normalizes\nthe loss by supervised tokens across the window, so the effective batch is invariant to sequence\nlength + padding. The first-party ``corpus_studio`` reference trainer is NOT token-target-capable\ntoday \u2014 it honors ``fallback_grad_accumulation_steps`` (a fixed microbatch count); the token\ntarget is the contract a future token-aware backend would satisfy.",
+      "properties": {
+        "fallback_grad_accumulation_steps": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fallback Grad Accumulation Steps"
+        },
+        "micro_batch_size": {
+          "default": 1,
+          "minimum": 1,
+          "title": "Micro Batch Size",
+          "type": "integer"
+        },
+        "supervised_token_accumulation_target": {
+          "minimum": 1,
+          "title": "Supervised Token Accumulation Target",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "supervised_token_accumulation_target"
+      ],
+      "title": "BatchingSpec",
+      "type": "object"
+    },
+    "CheckpointImpl": {
+      "enum": [
+        "full_state",
+        "adapter_only",
+        "sharded",
+        "distcp",
+        "safetensors"
+      ],
+      "title": "CheckpointImpl",
+      "type": "string"
+    },
+    "CheckpointPolicy": {
+      "additionalProperties": false,
+      "properties": {
+        "cadence_optimizer_steps": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cadence Optimizer Steps"
+        },
+        "cadence_seconds": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cadence Seconds"
+        },
+        "impl": {
+          "$ref": "#/$defs/CheckpointImpl"
+        },
+        "keep_last": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Keep Last"
+        },
+        "reload_verify": {
+          "default": false,
+          "title": "Reload Verify",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "impl"
+      ],
+      "title": "CheckpointPolicy",
+      "type": "object"
+    },
+    "DeviceMapEntry": {
+      "additionalProperties": false,
+      "properties": {
+        "device": {
+          "minLength": 1,
+          "title": "Device",
+          "type": "string"
+        },
+        "module": {
+          "title": "Module",
+          "type": "string"
+        }
+      },
+      "required": [
+        "module",
+        "device"
+      ],
+      "title": "DeviceMapEntry",
+      "type": "object"
+    },
+    "ExecutionInputBinding": {
+      "additionalProperties": false,
+      "description": "One immutable input consumed by the worker.\n\nLocal inputs pin the exact bytes (a stable file or directory digest). Hugging Face inputs pin an\nimmutable repository commit; a branch or tag is never sufficient execution identity.",
+      "properties": {
+        "content_sha256": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Content Sha256"
+        },
+        "kind": {
+          "enum": [
+            "dataset",
+            "model",
+            "tokenizer"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "location": {
+          "minLength": 1,
+          "title": "Location",
+          "type": "string"
+        },
+        "ref": {
+          "$ref": "#/$defs/Ref"
+        },
+        "resolved_revision": {
+          "anyOf": [
+            {
+              "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Resolved Revision"
+        },
+        "source": {
+          "enum": [
+            "local_file",
+            "local_directory",
+            "huggingface"
+          ],
+          "title": "Source",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "ref",
+        "source",
+        "location"
+      ],
+      "title": "ExecutionInputBinding",
+      "type": "object"
+    },
+    "ExecutionInputs": {
+      "additionalProperties": false,
+      "properties": {
+        "dataset": {
+          "$ref": "#/$defs/ExecutionInputBinding"
+        },
+        "model": {
+          "$ref": "#/$defs/ExecutionInputBinding"
+        },
+        "tokenizer": {
+          "$ref": "#/$defs/ExecutionInputBinding"
+        }
+      },
+      "required": [
+        "dataset",
+        "model",
+        "tokenizer"
+      ],
+      "title": "ExecutionInputs",
+      "type": "object"
+    },
+    "ExecutionVerificationRequirement": {
+      "description": "Whether the planner may seal a capability that lacks functional evidence.",
+      "enum": [
+        "require_verified",
+        "allow_unverified"
+      ],
+      "title": "ExecutionVerificationRequirement",
+      "type": "string"
+    },
+    "ExperienceSource": {
+      "additionalProperties": false,
+      "description": "The on-policy experience buffer + the PROMPT dataset identity it draws from (S5b). ``mode`` is\n``on_policy``: completions are generated FRESH from the current policy each iteration (a streaming\nsource distinct from a static dataset - it ties to the G2 data-cursor gap), never replayed\n(off-policy replay is a later variant). It seals the resolved PROMPT-dataset schema identity\n(``schema_id`` + ``schema_version`` + ``schema_sha256``, the content digest) + the prompt formatter +\nthe prompt length budget, so an over-length prompt is refused (never silently truncated), exactly like\nthe preference / SFT data policies. Prompts only - NOT chosen/rejected pairs.",
+      "properties": {
+        "chat_template_sha256": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Chat Template Sha256"
+        },
+        "contract_version": {
+          "const": "1.0.0",
+          "default": "1.0.0",
+          "title": "Contract Version",
+          "type": "string"
+        },
+        "data_seed": {
+          "default": 42,
+          "minimum": 0,
+          "title": "Data Seed",
+          "type": "integer"
+        },
+        "formatter_id": {
+          "minLength": 1,
+          "title": "Formatter Id",
+          "type": "string"
+        },
+        "formatter_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Formatter Sha256",
+          "type": "string"
+        },
+        "max_prompt_length": {
+          "minimum": 1,
+          "title": "Max Prompt Length",
+          "type": "integer"
+        },
+        "mode": {
+          "const": "on_policy",
+          "default": "on_policy",
+          "title": "Mode",
+          "type": "string"
+        },
+        "schema_id": {
+          "minLength": 1,
+          "title": "Schema Id",
+          "type": "string"
+        },
+        "schema_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Schema Sha256",
+          "type": "string"
+        },
+        "schema_version": {
+          "minLength": 1,
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "truncation_policy": {
+          "default": "refuse",
+          "enum": [
+            "refuse",
+            "allow"
+          ],
+          "title": "Truncation Policy",
+          "type": "string"
+        }
+      },
+      "required": [
+        "schema_id",
+        "schema_version",
+        "schema_sha256",
+        "formatter_id",
+        "formatter_sha256",
+        "max_prompt_length"
+      ],
+      "title": "ExperienceSource",
+      "type": "object"
+    },
+    "ExportFormat": {
+      "enum": [
+        "adapter_peft",
+        "reward_model",
+        "merged_safetensors",
+        "merged_fp16",
+        "gguf",
+        "onnx",
+        "awq",
+        "gptq",
+        "mlx"
+      ],
+      "title": "ExportFormat",
+      "type": "string"
+    },
+    "HashRef": {
+      "additionalProperties": false,
+      "description": "An algorithm-tagged digest. The engine emits sha256 today; the algo tag makes a future\nmigration additive (cf. versions/version_registry.FINGERPRINT_ALGO).",
+      "properties": {
+        "algo": {
+          "default": "sha256",
+          "enum": [
+            "sha256",
+            "sha256-ordered-exact-v1",
+            "blake3",
+            "none"
+          ],
+          "title": "Algo",
+          "type": "string"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Value"
+        }
+      },
+      "title": "HashRef",
+      "type": "object"
+    },
+    "ModelAttentionApi": {
+      "description": "The model-loader API selected before execution.\n\nThis is deliberately separate from :class:`AttentionKernel`: ``sdpa`` is an API that can\ndispatch to several materially different PyTorch kernels.",
+      "enum": [
+        "eager",
+        "sdpa",
+        "flash_attention_2",
+        "flash_attention_3",
+        "xformers"
+      ],
+      "title": "ModelAttentionApi",
+      "type": "string"
+    },
+    "Optimizer": {
+      "enum": [
+        "adamw_torch",
+        "adamw_torch_fused",
+        "adamw_8bit",
+        "adamw_bnb_8bit",
+        "paged_adamw_8bit",
+        "paged_adamw_32bit",
+        "adafactor",
+        "lion",
+        "sgd"
+      ],
+      "title": "Optimizer",
+      "type": "string"
+    },
+    "OptimizerSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "adam_beta1": {
+          "default": 0.9,
+          "exclusiveMaximum": 1,
+          "minimum": 0,
+          "title": "Adam Beta1",
+          "type": "number"
+        },
+        "adam_beta2": {
+          "default": 0.999,
+          "exclusiveMaximum": 1,
+          "minimum": 0,
+          "title": "Adam Beta2",
+          "type": "number"
+        },
+        "adam_epsilon": {
+          "default": 1e-08,
+          "exclusiveMinimum": 0,
+          "title": "Adam Epsilon",
+          "type": "number"
+        },
+        "impl": {
+          "$ref": "#/$defs/Optimizer"
+        },
+        "learning_rate": {
+          "exclusiveMinimum": 0,
+          "title": "Learning Rate",
+          "type": "number"
+        },
+        "lr_scheduler": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Lr Scheduler"
+        },
+        "max_grad_norm": {
+          "default": 1.0,
+          "minimum": 0,
+          "title": "Max Grad Norm",
+          "type": "number"
+        },
+        "warmup_ratio": {
+          "anyOf": [
+            {
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Warmup Ratio"
+        },
+        "weight_decay": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Weight Decay"
+        }
+      },
+      "required": [
+        "impl",
+        "learning_rate"
+      ],
+      "title": "OptimizerSpec",
+      "type": "object"
+    },
+    "PackageLock": {
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "record_integrity": {
+                "const": "verified"
+              }
+            },
+            "required": [
+              "record_integrity"
+            ]
+          },
+          "then": {
+            "properties": {
+              "hash": {
+                "properties": {
+                  "algo": {
+                    "const": "sha256"
+                  },
+                  "value": {
+                    "pattern": "^[0-9a-f]{64}$",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "value"
+                ],
+                "type": "object"
+              },
+              "record_entries": {
+                "minimum": 1,
+                "type": "integer"
+              },
+              "record_failed_entries": {
+                "maxItems": 0
+              },
+              "record_verified_entries": {
+                "minimum": 1,
+                "type": "integer"
+              },
+              "version": {
+                "not": {
+                  "type": "null"
+                }
+              }
+            },
+            "required": [
+              "version",
+              "hash",
+              "record_entries",
+              "record_verified_entries",
+              "record_failed_entries"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "record_count_semantics": {
+                "const": "all_record_rows_v2"
+              }
+            },
+            "required": [
+              "record_count_semantics"
+            ]
+          },
+          "then": {
+            "properties": {
+              "installed_file_count": {
+                "minimum": 1,
+                "type": "integer"
+              },
+              "installed_files_hash": {
+                "properties": {
+                  "algo": {
+                    "const": "sha256"
+                  },
+                  "value": {
+                    "pattern": "^[0-9a-f]{64}$",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "value"
+                ],
+                "type": "object"
+              },
+              "record_integrity": {
+                "const": "verified"
+              }
+            },
+            "required": [
+              "record_integrity",
+              "installed_files_hash",
+              "installed_file_count"
+            ]
+          }
+        }
+      ],
+      "description": "A resolved dependency and its install provenance.\n\n``hash`` seals the installed distribution's RECORD metadata when that evidence is available; it\nis not mislabelled as the original wheel hash. ``direct_url`` and ``artifact`` preserve the\nstronger source identity pip exposes for direct/VCS/local installs. ``dependencies`` is the\ninstalled metadata dependency graph, not a second resolver.",
+      "properties": {
+        "artifact": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Artifact"
+        },
+        "artifact_hash": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HashRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "dependencies": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Dependencies",
+          "type": "array"
+        },
+        "direct": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Direct"
+        },
+        "direct_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Direct Url"
+        },
+        "editable": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Editable"
+        },
+        "hash": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HashRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "installed_file_count": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Number of files sealed by installed_files_hash; equals record_entries when record_integrity is verified.",
+          "title": "Installed File Count"
+        },
+        "installed_files_hash": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HashRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "installer": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Installer"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "normalized_name": {
+          "default": "",
+          "title": "Normalized Name",
+          "type": "string"
+        },
+        "record_count_semantics": {
+          "anyOf": [
+            {
+              "const": "all_record_rows_v2",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Explicit all-RECORD-row count meaning. Missing means preserved legacy hash-bearing-row counts and is not admissible for new health, planning, or execution.",
+          "title": "Record Count Semantics"
+        },
+        "record_entries": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Number of regular installed files named by the distribution RECORD; positive when record_integrity is verified.",
+          "title": "Record Entries"
+        },
+        "record_failed_entries": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Record Failed Entries",
+          "type": "array"
+        },
+        "record_integrity": {
+          "default": "unknown",
+          "enum": [
+            "verified",
+            "failed",
+            "missing",
+            "unknown"
+          ],
+          "title": "Record Integrity",
+          "type": "string"
+        },
+        "record_verified_entries": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Verified row count under record_count_semantics; manager <=1.2 counted only hash-bearing rows, while all_record_rows_v2 equals record_entries.",
+          "title": "Record Verified Entries"
+        },
+        "requested": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Requested"
+        },
+        "source": {
+          "default": "unknown",
+          "enum": [
+            "pypi",
+            "wheel",
+            "sdist",
+            "conda",
+            "vcs",
+            "local",
+            "unknown"
+          ],
+          "title": "Source",
+          "type": "string"
+        },
+        "source_evidence_reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Evidence Reason"
+        },
+        "source_index_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Index Url"
+        },
+        "vcs_commit": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Vcs Commit"
+        },
+        "vcs_repository": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Vcs Repository"
+        },
+        "version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Version"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "PackageLock",
+      "type": "object"
+    },
+    "PolicyOptimizationSpec": {
+      "additionalProperties": false,
+      "description": "The on-policy optimization algorithm (S5b). GRPO (group-relative advantage) needs NO critic - it is\nthe cheaper shape that fits the 12 GB envelope like DPO/reward did; PPO (a clipped surrogate with a\nvalue head) is the S5c follow-up. The reference model is the frozen base reached via\n``disable_adapter`` (the DPO pattern), so no separate reference weights are stored.",
+      "properties": {
+        "algorithm": {
+          "default": "grpo",
+          "enum": [
+            "grpo",
+            "ppo"
+          ],
+          "title": "Algorithm",
+          "type": "string"
+        },
+        "contract_version": {
+          "const": "1.0.0",
+          "default": "1.0.0",
+          "title": "Contract Version",
+          "type": "string"
+        },
+        "use_critic": {
+          "default": false,
+          "title": "Use Critic",
+          "type": "boolean"
+        }
+      },
+      "title": "PolicyOptimizationSpec",
+      "type": "object"
+    },
+    "PrecisionExecutionPolicy": {
+      "additionalProperties": false,
+      "description": "The numerical representation of each material training state.\n\n``weight_storage_dtype`` describes an unquantized frozen base; quantized bases use\n``quantized_storage_format`` instead. ``master_weight_dtype`` describes the trainable adapter\nparameters. An 8-bit optimizer may use quantized primary state plus FP32 auxiliary tensors.",
+      "properties": {
+        "dequantization_dtype": {
+          "$ref": "#/$defs/PrecisionMode"
+        },
+        "forward_compute_dtype": {
+          "$ref": "#/$defs/PrecisionMode"
+        },
+        "gradient_dtype": {
+          "$ref": "#/$defs/PrecisionMode"
+        },
+        "master_weight_dtype": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PrecisionMode"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "optimizer_auxiliary_dtype": {
+          "$ref": "#/$defs/PrecisionMode",
+          "default": "fp32"
+        },
+        "optimizer_state_dtype": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PrecisionMode"
+            },
+            {
+              "$ref": "#/$defs/QuantizationMode"
+            }
+          ],
+          "title": "Optimizer State Dtype"
+        },
+        "quantized_storage_format": {
+          "$ref": "#/$defs/QuantizationMode",
+          "default": "none"
+        },
+        "weight_storage_dtype": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PrecisionMode"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "dequantization_dtype",
+        "forward_compute_dtype",
+        "gradient_dtype",
+        "optimizer_state_dtype"
+      ],
+      "title": "PrecisionExecutionPolicy",
+      "type": "object"
+    },
+    "PrecisionMode": {
+      "enum": [
+        "fp32",
+        "tf32",
+        "fp16",
+        "bf16",
+        "fp8",
+        "mixed_bf16",
+        "mixed_fp16"
+      ],
+      "title": "PrecisionMode",
+      "type": "string"
+    },
+    "QuantizationMode": {
+      "enum": [
+        "none",
+        "int8",
+        "int4",
+        "nf4",
+        "fp4",
+        "gptq",
+        "awq",
+        "hqq"
+      ],
+      "title": "QuantizationMode",
+      "type": "string"
+    },
+    "Ref": {
+      "additionalProperties": false,
+      "description": "A stable reference to another contract instance by id, optionally pinned to a content hash so\nthe reference cannot silently re-point.",
+      "properties": {
+        "hash": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HashRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "id": {
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "title": "Ref",
+      "type": "object"
+    },
+    "RewardSourceRef": {
+      "additionalProperties": false,
+      "description": "The hash-pinned reference to what scores each rollout (S5b). A reward model produced by the S5a\nreward vertical is the primary source, served for inference-only scoring; rule / verifier rewards and\nan RLAIF judge (Evaluation Studio's judge under the provider policy) are the declared alternatives.\nThe reference is hash-pinned so a run cannot silently swap the reward function. Admissibility (e.g. a\nserved reward model must itself be ``workload_verified``) is enforced by the resolver + runner, not\nhere.",
+      "properties": {
+        "contract_version": {
+          "const": "1.0.0",
+          "default": "1.0.0",
+          "title": "Contract Version",
+          "type": "string"
+        },
+        "higher_is_better": {
+          "default": true,
+          "title": "Higher Is Better",
+          "type": "boolean"
+        },
+        "kind": {
+          "enum": [
+            "served_reward_model",
+            "verifier",
+            "process_reward",
+            "rlaif_judge"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "reward_ref": {
+          "$ref": "#/$defs/Ref"
+        }
+      },
+      "required": [
+        "kind",
+        "reward_ref"
+      ],
+      "title": "RewardSourceRef",
+      "type": "object"
+    },
+    "RolloutSpec": {
+      "additionalProperties": false,
+      "description": "The GENERATION phase of an on-policy RL run (S5b): how completions are sampled from the current\npolicy to form the experience the update is computed over. Sampling MUST be stochastic (temperature > 0)\n- a greedy rollout collapses the group and yields a zero-variance GRPO advantage. ``rollouts_per_prompt``\nis the GRPO group size (>= 2 so the group-relative advantage is defined). Generation runs on the\nsanctioned worker decode path, never an unsanctioned generation path.",
+      "properties": {
+        "contract_version": {
+          "const": "1.0.0",
+          "default": "1.0.0",
+          "title": "Contract Version",
+          "type": "string"
+        },
+        "decode_policy": {
+          "const": "sanctioned_worker_decode",
+          "default": "sanctioned_worker_decode",
+          "title": "Decode Policy",
+          "type": "string"
+        },
+        "max_new_tokens": {
+          "minimum": 1,
+          "title": "Max New Tokens",
+          "type": "integer"
+        },
+        "rollouts_per_prompt": {
+          "minimum": 2,
+          "title": "Rollouts Per Prompt",
+          "type": "integer"
+        },
+        "sampling_temperature": {
+          "exclusiveMinimum": 0,
+          "title": "Sampling Temperature",
+          "type": "number"
+        },
+        "sampling_top_p": {
+          "exclusiveMinimum": 0,
+          "maximum": 1,
+          "title": "Sampling Top P",
+          "type": "number"
+        }
+      },
+      "required": [
+        "sampling_temperature",
+        "sampling_top_p",
+        "max_new_tokens",
+        "rollouts_per_prompt"
+      ],
+      "title": "RolloutSpec",
+      "type": "object"
+    },
+    "SequenceSpec": {
+      "additionalProperties": false,
+      "description": "Sequence handling. Buckets let variable-length rows batch efficiently; the max bucket ==\nthe trainer's sequence_len (config_templates.sequence_len, default 4096).",
+      "properties": {
+        "buckets": {
+          "items": {
+            "type": "integer"
+          },
+          "title": "Buckets",
+          "type": "array"
+        },
+        "max_sequence_len": {
+          "default": 4096,
+          "minimum": 1,
+          "title": "Max Sequence Len",
+          "type": "integer"
+        },
+        "packing": {
+          "default": false,
+          "title": "Packing",
+          "type": "boolean"
+        },
+        "truncation_allowed": {
+          "default": true,
+          "title": "Truncation Allowed",
+          "type": "boolean"
+        }
+      },
+      "title": "SequenceSpec",
+      "type": "object"
+    },
+    "StabilityController": {
+      "additionalProperties": false,
+      "description": "The sealed on-policy stability controls (S5b) - the guardrails that keep an on-policy update from\nreward-hacking or collapsing. The KL-to-reference penalty anchors the policy to the frozen base; the\nentropy bonus preserves exploration; advantage normalization stabilizes the group-relative signal; the\nclip range bounds the per-step policy change. Sealed like any execution field - no silent defaults.",
+      "properties": {
+        "advantage_normalization": {
+          "default": true,
+          "title": "Advantage Normalization",
+          "type": "boolean"
+        },
+        "clip_range": {
+          "exclusiveMinimum": 0,
+          "title": "Clip Range",
+          "type": "number"
+        },
+        "contract_version": {
+          "const": "1.0.0",
+          "default": "1.0.0",
+          "title": "Contract Version",
+          "type": "string"
+        },
+        "entropy_bonus": {
+          "default": 0.0,
+          "minimum": 0,
+          "title": "Entropy Bonus",
+          "type": "number"
+        },
+        "kl_coefficient": {
+          "minimum": 0,
+          "title": "Kl Coefficient",
+          "type": "number"
+        },
+        "kl_target": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Kl Target"
+        }
+      },
+      "required": [
+        "kl_coefficient",
+        "clip_range"
+      ],
+      "title": "StabilityController",
+      "type": "object"
+    },
+    "TrainerInterfacePolicy": {
+      "additionalProperties": false,
+      "description": "Version- and field-exact adapter to the installed TRL/Transformers surface.",
+      "properties": {
+        "disable_tqdm": {
+          "default": true,
+          "title": "Disable Tqdm",
+          "type": "boolean"
+        },
+        "logging_nan_inf_filter": {
+          "anyOf": [
+            {
+              "const": false,
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Logging Nan Inf Filter"
+        },
+        "logging_steps": {
+          "const": 1,
+          "default": 1,
+          "title": "Logging Steps",
+          "type": "integer"
+        },
+        "logging_strategy": {
+          "anyOf": [
+            {
+              "const": "steps",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Logging Strategy"
+        },
+        "package_versions": {
+          "items": {
+            "$ref": "#/$defs/PackageLock"
+          },
+          "minItems": 1,
+          "title": "Package Versions",
+          "type": "array"
+        },
+        "report_to": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Report To",
+          "type": "array"
+        },
+        "required_sft_config_fields": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Required Sft Config Fields",
+          "type": "array"
+        },
+        "sequence_length_field": {
+          "enum": [
+            "max_seq_length",
+            "max_length"
+          ],
+          "title": "Sequence Length Field",
+          "type": "string"
+        },
+        "tokenizer_parameter": {
+          "enum": [
+            "tokenizer",
+            "processing_class"
+          ],
+          "title": "Tokenizer Parameter",
+          "type": "string"
+        }
+      },
+      "required": [
+        "package_versions",
+        "required_sft_config_fields",
+        "sequence_length_field",
+        "tokenizer_parameter"
+      ],
+      "title": "TrainerInterfacePolicy",
+      "type": "object"
+    },
+    "TrainingSchedule": {
+      "additionalProperties": false,
+      "properties": {
+        "max_steps": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Steps"
+        },
+        "num_train_epochs": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Num Train Epochs"
+        }
+      },
+      "title": "TrainingSchedule",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "The hash-sealed configuration for an on-policy RL run - the sibling of\n:class:`ResolvedExecutionConfiguration` for the ``on_policy_rl`` execution variant (RL slice S5b,\ngated L1 design #839).\n\nLike the reward seal, it reuses every shared execution sub-spec (placement / precision / attention /\nadapter / optimizer / sequence / batching / checkpoint / schedule / trainer interface) and adds the\non-policy specs: a :class:`RolloutSpec` (generation), an :class:`ExperienceSource` (on-policy prompt\nstream), a :class:`RewardSourceRef` (what scores rollouts), a :class:`StabilityController`\n(KL/entropy/clip), and a :class:`PolicyOptimizationSpec` (GRPO now, PPO in S5c). Unlike reward it\ntrains a CAUSAL_LM POLICY adapter (``adapter_task_type='CAUSAL_LM'``) and exports an ``adapter_peft``\nartifact - a policy, not a score head.\n\nCarried on ``RunPlan.resolved_rollout_execution`` (a plan holds EXACTLY ONE execution config). The\ncontract is the control plane; EXECUTION (the rollout+reward+GRPO worker + a workload-verified run)\nstays gated - ``on_policy_rl`` remains ``contract_validated`` until a measured run promotes it.",
+  "properties": {
+    "adapter": {
+      "$ref": "#/$defs/AdapterSpec"
+    },
+    "adapter_task_type": {
+      "const": "CAUSAL_LM",
+      "default": "CAUSAL_LM",
+      "title": "Adapter Task Type",
+      "type": "string"
+    },
+    "attention": {
+      "$ref": "#/$defs/AttentionExecutionPolicy"
+    },
+    "backend_ref": {
+      "$ref": "#/$defs/Ref"
+    },
+    "batching": {
+      "$ref": "#/$defs/BatchingSpec"
+    },
+    "bnb_4bit_use_double_quant": {
+      "title": "Bnb 4Bit Use Double Quant",
+      "type": "boolean"
+    },
+    "capability_report_ref": {
+      "$ref": "#/$defs/Ref"
+    },
+    "checkpoint_policy": {
+      "$ref": "#/$defs/CheckpointPolicy"
+    },
+    "configuration_hash": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Configuration Hash",
+      "type": "string"
+    },
+    "configuration_id": {
+      "pattern": "^[A-Za-z0-9._-]+$",
+      "title": "Configuration Id",
+      "type": "string"
+    },
+    "contract_version": {
+      "const": "1.0.0",
+      "default": "1.0.0",
+      "title": "Contract Version",
+      "type": "string"
+    },
+    "data_seed": {
+      "default": 42,
+      "minimum": 0,
+      "title": "Data Seed",
+      "type": "integer"
+    },
+    "device_map": {
+      "items": {
+        "$ref": "#/$defs/DeviceMapEntry"
+      },
+      "minItems": 1,
+      "title": "Device Map",
+      "type": "array"
+    },
+    "environment_binding": {
+      "enum": [
+        "profile_snapshot",
+        "managed_lock"
+      ],
+      "title": "Environment Binding",
+      "type": "string"
+    },
+    "environment_ref": {
+      "$ref": "#/$defs/Ref"
+    },
+    "experience": {
+      "$ref": "#/$defs/ExperienceSource"
+    },
+    "export_format": {
+      "$ref": "#/$defs/ExportFormat"
+    },
+    "gradient_checkpointing": {
+      "default": true,
+      "title": "Gradient Checkpointing",
+      "type": "boolean"
+    },
+    "inputs": {
+      "$ref": "#/$defs/ExecutionInputs"
+    },
+    "objective_ref": {
+      "$ref": "#/$defs/Ref"
+    },
+    "optimizer": {
+      "$ref": "#/$defs/OptimizerSpec"
+    },
+    "output_dir": {
+      "minLength": 1,
+      "title": "Output Dir",
+      "type": "string"
+    },
+    "output_layout": {
+      "const": "run_scoped_v1",
+      "default": "run_scoped_v1",
+      "title": "Output Layout",
+      "type": "string"
+    },
+    "policy_optimization": {
+      "$ref": "#/$defs/PolicyOptimizationSpec"
+    },
+    "precision": {
+      "$ref": "#/$defs/PrecisionExecutionPolicy"
+    },
+    "reward_source": {
+      "$ref": "#/$defs/RewardSourceRef"
+    },
+    "rollout": {
+      "$ref": "#/$defs/RolloutSpec"
+    },
+    "runtime_mode": {
+      "enum": [
+        "training",
+        "cpu_toy"
+      ],
+      "title": "Runtime Mode",
+      "type": "string"
+    },
+    "save_strategy": {
+      "default": "steps",
+      "enum": [
+        "no",
+        "steps"
+      ],
+      "title": "Save Strategy",
+      "type": "string"
+    },
+    "schedule": {
+      "$ref": "#/$defs/TrainingSchedule"
+    },
+    "seed": {
+      "default": 42,
+      "minimum": 0,
+      "title": "Seed",
+      "type": "integer"
+    },
+    "sequence": {
+      "$ref": "#/$defs/SequenceSpec"
+    },
+    "stability": {
+      "$ref": "#/$defs/StabilityController"
+    },
+    "trainer_interface": {
+      "$ref": "#/$defs/TrainerInterfacePolicy"
+    },
+    "trust_remote_code": {
+      "const": false,
+      "default": false,
+      "title": "Trust Remote Code",
+      "type": "boolean"
+    },
+    "use_safetensors": {
+      "const": true,
+      "default": true,
+      "title": "Use Safetensors",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "configuration_id",
+    "configuration_hash",
+    "backend_ref",
+    "environment_ref",
+    "environment_binding",
+    "capability_report_ref",
+    "inputs",
+    "objective_ref",
+    "runtime_mode",
+    "precision",
+    "attention",
+    "device_map",
+    "adapter",
+    "optimizer",
+    "sequence",
+    "batching",
+    "checkpoint_policy",
+    "schedule",
+    "experience",
+    "rollout",
+    "reward_source",
+    "stability",
+    "policy_optimization",
+    "trainer_interface",
+    "export_format",
+    "bnb_4bit_use_double_quant",
+    "output_dir"
+  ],
+  "title": "ResolvedRolloutExecutionConfiguration",
+  "type": "object"
+}

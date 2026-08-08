@@ -776,6 +776,12 @@ class ExecutionVariantKind(str, Enum):
     # trained on chosen/rejected pairs under a Bradley-Terry loss. NOT a policy adapter and NOT causal-LM
     # generation - a distinct artifact family (a reward model), the reward SOURCE later RL stages consume.
     reward_model = "reward_model"
+    # On-policy RL (S5b, gated L1 design #839): a QLoRA CAUSAL_LM POLICY adapter trained by sampling
+    # rollouts from the current policy, scoring them with a reward source (the reward_model above), and
+    # updating with a group-relative (GRPO) or clipped (PPO) objective under a KL-to-reference bound.
+    # Distinct from dense_qlora_sft/preference_dpo: it has a generation phase + an on-policy experience
+    # stream, and it NEVER mutates the byte-locked SFT seal (its own backend-scoped resolved config).
+    on_policy_rl = "on_policy_rl"
 
 
 class ExecutionVariantSupport(str, Enum):

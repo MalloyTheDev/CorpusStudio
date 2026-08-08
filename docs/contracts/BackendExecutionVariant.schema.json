@@ -8,7 +8,8 @@
         "pretraining",
         "moe",
         "preference_dpo",
-        "reward_model"
+        "reward_model",
+        "on_policy_rl"
       ],
       "title": "ExecutionVariantKind",
       "type": "string"

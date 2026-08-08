@@ -94,6 +94,10 @@
       "file": "ResolvedRewardExecutionConfiguration.schema.json"
     },
     {
+      "contract": "ResolvedRolloutExecutionConfiguration",
+      "file": "ResolvedRolloutExecutionConfiguration.schema.json"
+    },
+    {
       "contract": "ResolvedPretrainingExecutionConfiguration",
       "file": "ResolvedPretrainingExecutionConfiguration.schema.json"
     },
