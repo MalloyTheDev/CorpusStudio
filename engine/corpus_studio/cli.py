@@ -753,6 +753,20 @@ def platform_run(
 
             resume_manifest = verify_checkpoint_integrity(str(resume_from))
             verify_resumable_into(resume_manifest, plan)
+            # Parent-side worker-identity gate: a MANAGED checkpoint that does not carry its worker wheel
+            # sha256 cannot be proven exact lineage down to the worker BYTES (it may have been produced by
+            # pre-hardening, possibly repo-shadowed, source). Refuse it here, before dispatch - this fires
+            # even when the target environment still pins a legacy worker that would silently skip the
+            # in-worker gate. The worker re-checks a present pair (defense in depth).
+            if (
+                resume_manifest.bound.environment_lock_hash is not None
+                and resume_manifest.bound.worker_wheel_sha256 is None
+            ):
+                raise EnvironmentManagerError(
+                    "this managed checkpoint does not record the worker wheel it was produced by, so its "
+                    "worker bytes cannot be verified as exact lineage; refusing the resume (regenerate the "
+                    "checkpoint under a worker that seals its wheel identity)"
+                )
             resume_request = CheckpointResumeRequest(
                 checkpoint_id=resume_manifest.checkpoint_id,
                 checkpoint_manifest_hash=resume_manifest.checkpoint_manifest_hash,
