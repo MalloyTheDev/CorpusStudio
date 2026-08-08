@@ -39,6 +39,7 @@ from corpus_studio.platform.contracts import (
     OptimizerStepLossEvidence,
     PreferenceSuccessEvidence,
     PretrainingSuccessEvidence,
+    RewardSuccessEvidence,
     RunEvent,
     RunManifest,
     RunPlan,
@@ -216,6 +217,10 @@ class RunContext:
         # full-model shape); execute_run RE-VERIFIES it (reload model.safetensors, re-hash, compare) before
         # it may reach the manifest.
         self.full_finetune_success_evidence: PretrainingSuccessEvidence | None = None
+        # A reward-model runner reports the worker-proposed SEQ_CLS adapter (+ scalar score head) success
+        # evidence; execute_run RE-VERIFIES it (reload the saved adapter, re-hash, compare to the sealed
+        # trained state) before it may reach the manifest - the runner cannot self-admit a success.
+        self.reward_success_evidence: RewardSuccessEvidence | None = None
 
     @property
     def cancelled(self) -> bool:
@@ -644,6 +649,68 @@ def validate_preference_success_evidence(
     return proposed.model_copy(update={"measured_peak": measured_peak})
 
 
+def validate_reward_success_evidence(
+    plan: RunPlan,
+    proposed: RewardSuccessEvidence | None,
+    produced: Sequence[ProducedArtifact],
+    measured_peak: MemoryMetrics | None,
+) -> RewardSuccessEvidence:
+    """Independently re-verify a reward-model runner's PROPOSED adapter success before terminal PASS - the
+    SEQ_CLS sibling of :func:`validate_preference_success_evidence`. A reward model exports the same PEFT
+    artifact shape (a LoRA adapter, here carrying the trained scalar score head), so it reuses the same
+    reload-verify: confirm the completed steps match the sealed schedule, then reload the saved adapter and
+    assert it reproduces the sealed trained export state (and that the saved bytes match the proposal). Any
+    mismatch is fail-closed. The held-out pairwise accuracy gate lives on the proposed evidence itself and
+    is bound by the RewardSuccessEvidence contract; execute_run's job is byte re-verification, not
+    re-running the eval. Returns the admitted evidence carrying the supervisor-measured peak."""
+    execution = plan.resolved_reward_execution
+    if execution is None:  # pragma: no cover - caller restricts this to a resolved reward plan.
+        raise RunnerFailure(
+            "reward success evidence requires a resolved reward execution",
+            taxonomy=FailureTaxonomy.UNSUPPORTED_CONFIGURATION,
+            stage=StageMarker.process_start,
+        )
+    if proposed is None:
+        raise RunnerFailure(
+            "resolved reward returned without adapter success evidence",
+            taxonomy=FailureTaxonomy.UPDATE_FAILURE,
+            stage=StageMarker.optimizer_step,
+        )
+    if execution.schedule.max_steps is not None:
+        if proposed.execution.completed_optimizer_steps != execution.schedule.max_steps:
+            raise RunnerFailure(
+                "completed optimizer steps do not match the sealed schedule",
+                taxonomy=FailureTaxonomy.OPTIMIZER_FAILURE,
+                stage=StageMarker.optimizer_step,
+            )
+    elif proposed.execution.completed_optimizer_steps < 1:
+        raise RunnerFailure(
+            "epoch-scheduled reward admitted zero completed optimizer steps",
+            taxonomy=FailureTaxonomy.OPTIMIZER_FAILURE,
+            stage=StageMarker.optimizer_step,
+        )
+    adapter_artifact = next((item for item in produced if item.kind == "adapter"), None)
+    if adapter_artifact is None:
+        raise RunnerFailure(
+            "resolved reward produced no adapter artifact to admit",
+            taxonomy=FailureTaxonomy.ARTIFACT_FAILURE,
+            stage=StageMarker.export,
+        )
+    verified, reason = _reload_verify_adapter(
+        adapter_artifact.path,
+        expected_after_sha256=proposed.execution.adapter_export_state.after_sha256,
+        expected_adapter_sha256=proposed.adapter_safetensors_sha256,
+        expected_config_sha256=proposed.adapter_config_sha256,
+    )
+    if not verified:
+        raise RunnerFailure(
+            f"the reward adapter artifact failed independent re-verification: {reason}",
+            taxonomy=FailureTaxonomy.ARTIFACT_FAILURE,
+            stage=StageMarker.export,
+        )
+    return proposed.model_copy(update={"measured_peak": measured_peak})
+
+
 def validate_pretraining_success_evidence(
     plan: RunPlan,
     proposed: PretrainingSuccessEvidence | None,
@@ -859,6 +926,7 @@ def execute_run(
     pretraining_success_evidence: PretrainingSuccessEvidence | None = None
     preference_success_evidence: PreferenceSuccessEvidence | None = None
     full_finetune_success_evidence: PretrainingSuccessEvidence | None = None
+    reward_success_evidence: RewardSuccessEvidence | None = None
 
     try:
         # Defense in depth: callers can reach this public library boundary without going through the
@@ -992,6 +1060,13 @@ def execute_run(
                 produced,
                 ctx.measured_peak,
             )
+        if plan.resolved_reward_execution is not None:
+            reward_success_evidence = validate_reward_success_evidence(
+                plan,
+                ctx.reward_success_evidence,
+                produced,
+                ctx.measured_peak,
+            )
         if record_dir is not None:
             try:
                 for artifact_manifest in artifact_manifests:
@@ -1113,6 +1188,9 @@ def execute_run(
         ),
         full_finetune_success_evidence=(
             full_finetune_success_evidence if state == "succeeded" else None
+        ),
+        reward_success_evidence=(
+            reward_success_evidence if state == "succeeded" else None
         ),
         notes=(
             "event sink failures were isolated: " + ", ".join(sink_errors)

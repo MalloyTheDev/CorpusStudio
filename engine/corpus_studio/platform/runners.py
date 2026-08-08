@@ -981,6 +981,86 @@ class PreferenceRunner:
         return [artifact]
 
 
+class RewardRunner:
+    """Executes a sealed pairwise reward-model run through ``training.reward_worker.run_reward`` - the
+    SEQ_CLS sibling of ``PreferenceRunner``. It dispatches the config-consuming reward worker (a scalar
+    score head + Bradley-Terry loss; cheaper than DPO - no reference model), emits the run's stages,
+    samples the measured peak, and reports the worker-PROPOSED adapter success evidence on the context. It
+    NEVER self-admits: ``execute_run`` independently re-verifies the saved adapter before the evidence may
+    reach the manifest. Whether a reward plan is admitted is gated upstream (selected only once
+    ``reward_model`` is workload_verified)."""
+
+    def __init__(self, *, memory_sampler: MemorySampler = sample_gpu_memory) -> None:
+        self.memory_sampler = memory_sampler
+        self.name = "reward"
+
+    def run(self, ctx: RunContext) -> Sequence[ProducedArtifact]:
+        execution = ctx.plan.resolved_reward_execution
+        if execution is None:
+            raise RunnerFailure(
+                "the reward runner requires a resolved reward execution",
+                taxonomy=FailureTaxonomy.UNSUPPORTED_CONFIGURATION,
+                stage=StageMarker.process_start,
+            )
+        # A reward model exports a PEFT adapter (LoRA + score head), so it reuses the run-scoped output
+        # (leaf="adapter").
+        from corpus_studio.platform.execution_config import (  # noqa: PLC0415
+            ExecutionConfigurationError,
+            run_scoped_training_output,
+            verify_run_scoped_output_path,
+        )
+
+        scoped_output = run_scoped_training_output(execution, ctx.run_id)
+        ctx.emit_stage(
+            StageMarker.process_start,
+            f"reward-model run [{self.name}]: dispatching the config-consuming worker",
+        )
+        from corpus_studio.training.reward_worker import (  # noqa: PLC0415
+            RewardWorkerError,
+            run_reward,
+        )
+
+        try:
+            result = run_reward(execution, output_dir=str(scoped_output))
+        except RewardWorkerError as exc:
+            raise RunnerFailure(
+                str(exc),
+                taxonomy=FailureTaxonomy.UPDATE_FAILURE,
+                stage=StageMarker.optimizer_step,
+                remediation="preserve the failed run and inspect the first-party reward worker",
+            ) from exc
+
+        try:
+            verify_run_scoped_output_path(
+                execution, ctx.run_id, observed_path=result.output_dir, require_exists=True
+            )
+        except ExecutionConfigurationError as exc:
+            raise RunnerFailure(
+                str(exc),
+                taxonomy=FailureTaxonomy.ARTIFACT_FAILURE,
+                stage=StageMarker.export,
+                remediation="preserve the failed run and repair the reward run-scoped output layout",
+            ) from exc
+
+        # The runner REPORTS the worker-proposed success evidence; execute_run re-verifies before admit.
+        ctx.reward_success_evidence = result.success_evidence
+        try:
+            ctx.measured_peak = self.memory_sampler()
+        except Exception:  # noqa: BLE001 - observability only; a probe fault is not a run failure
+            ctx.measured_peak = None
+
+        artifact = ProducedArtifact(
+            artifact_id=(
+                f"{ctx.run_id}-adapter-{result.success_evidence.adapter_safetensors_sha256[:12]}"
+            ),
+            kind="adapter",
+            path=result.output_dir,
+        )
+        ctx.emit_stage(StageMarker.export, f"reward adapter saved: {result.output_dir}")
+        ctx.emit_artifact(artifact)
+        return [artifact]
+
+
 def build_lane_runner(
     runner_name: str, *, max_steps: int | None = None, corpus_root: str = "."
 ) -> Any:
@@ -995,6 +1075,8 @@ def build_lane_runner(
         return EchoRunner()
     if runner_name == "preference":
         return PreferenceRunner()
+    if runner_name == "reward":
+        return RewardRunner()
     if runner_name == "full_finetune":
         return FullFinetuneRunner()
     if runner_name in ("pretraining", "pretraining_cpu_toy"):
