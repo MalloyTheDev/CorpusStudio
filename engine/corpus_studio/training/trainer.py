@@ -3270,6 +3270,372 @@ def evaluate_preference_accuracy(  # pragma: no cover - optional training-stack 
     }
 
 
+# --------------------------------------------------------------------------------------------------
+# Pairwise reward modeling (RL slice S5a) - the ADAPTER sibling of the DPO primitives above. A reward
+# model scores a (prompt, response) DIRECTLY with a scalar SEQ_CLS head, so unlike DPO there is NO
+# reference model, NO sequence-chunked [seq x vocab] log-prob, and NO disable_adapter() - just a scalar
+# score per branch and a Bradley-Terry pairwise loss. The fail-closed data preflight (degenerate pairs,
+# max_prompt_length, no-silent-truncation), the sealed-optimizer + gradient/adapter evidence capture, and
+# the held-out ranking accuracy PROMOTION GATE are all reused unchanged from the DPO path.
+# --------------------------------------------------------------------------------------------------
+
+
+def reward_pairwise_loss(
+    chosen_score: Any, rejected_score: Any, *, margin: float = 0.0
+) -> tuple[Any, Any]:
+    """The Bradley-Terry pairwise reward loss and the score margin from the two scalar SEQ_CLS scores.
+    A reward model scores directly (no reference), so unlike DPO there is no implicit-reward log-ratio -
+    the margin IS ``score(chosen) - score(rejected)``. The sealed ``margin`` (default 0) requires the
+    chosen score to beat the rejected by at least that gap: ``-log sigmoid(s_c - s_r - margin)``. At an
+    equal-score, zero-margin pair the loss is exactly ``-log sigmoid(0) == log 2``, falling as the model
+    learns to rank chosen over rejected. The RETURNED margin is ``s_c - s_r`` WITHOUT the hyperparameter
+    subtracted, so it equals ``chosen - rejected`` exactly (the evidence tracker's margin-consistency
+    check holds); the ``margin`` only shifts the loss."""
+    import torch.nn.functional as F  # noqa: PLC0415
+
+    score_margin = chosen_score - rejected_score
+    loss = -F.logsigmoid(score_margin - margin)
+    return loss, score_margin
+
+
+def reward_heldout_split(
+    n: int, *, data_seed: int, heldout_ratio: float = 0.2
+) -> tuple[list[int], list[int]]:
+    """Deterministic seeded train / held-out index split for pairwise reward modeling (PURE + torch-free).
+    The reward promotion gate is HELD-OUT pairwise ranking accuracy, but the sealed config binds one
+    (train) preference dataset, so the worker carves a reproducible held-out ranking set from it: seed the
+    split with the sealed ``data_seed`` and hold out ``round(n * heldout_ratio)`` pairs (at least one, and
+    always leaving at least one training pair). Same (n, seed, ratio) -> same split, so the sealed run is
+    reproducible; the held-out COUNT is recorded as evidence, so the carve-out is never silent. Fails
+    closed below two pairs (cannot both hold out a ranking pair and keep a training pair)."""
+    import random  # noqa: PLC0415
+
+    if n < 2:
+        raise TrainerError(
+            f"pairwise reward modeling needs >= 2 preference pairs to hold out a ranking-eval pair while "
+            f"keeping a training pair (got {n}); held-out pairwise accuracy is the promotion gate."
+        )
+    if not 0.0 < heldout_ratio < 1.0:
+        raise TrainerError(f"reward held-out ratio must be in the open interval (0, 1) (got {heldout_ratio}).")
+    heldout_count = min(max(1, round(n * heldout_ratio)), n - 1)
+    heldout = sorted(random.Random(data_seed).sample(range(n), k=heldout_count))
+    heldout_set = set(heldout)
+    train = [index for index in range(n) if index not in heldout_set]
+    return train, heldout
+
+
+def _seqcls_backbone_and_score_head(model: Any) -> tuple[Any, Any]:
+    """Locate the decoder backbone + the scalar SEQ_CLS score head of a PEFT-wrapped reward model,
+    tolerant of architecture naming - ``.model`` (Llama/Qwen/Mistral), ``.transformer`` (GPT-2/Falcon),
+    ``.gpt_neox`` (NeoX) - and head naming (``.score`` for decoder SEQ_CLS, ``.classifier`` otherwise).
+    The backbone is called WITHOUT the head so the reward score is pooled at the EXPLICIT last content
+    token (never HF's internal ``pad_token_id`` last-token detection, which a pad==eos tokenizer fools).
+    Fails closed with a clear :class:`TrainerError` instead of an ``AttributeError`` on an unrecognized
+    layout."""
+    base = model.get_base_model()
+    backbone = next(
+        (getattr(base, attr) for attr in ("model", "transformer", "gpt_neox")
+         if getattr(base, attr, None) is not None),
+        None,
+    )
+    head = next(
+        (getattr(base, attr) for attr in ("score", "classifier")
+         if getattr(base, attr, None) is not None),
+        None,
+    )
+    if backbone is None or head is None:
+        raise TrainerError(
+            "reward worker could not locate a decoder backbone + scalar score head on this model "
+            "architecture; sequence-classification reward scoring needs a hidden-state backbone "
+            "(.model/.transformer/.gpt_neox) and a SEQ_CLS head (.score/.classifier)."
+        )
+    return backbone, head
+
+
+def _score_reward_branch(  # pragma: no cover - optional training-stack integration; proven by a GPU run
+    backbone: Any, score_head: Any, ids: list[int], content_len: int, device: Any
+) -> Any:
+    """Scalar reward score for one branch: forward the branch as its own batch-1 sequence at its true
+    content length (NO cross-branch padding, so the last position IS the last content token - the sealed
+    ``last_token`` pooling - with no pad==eos ambiguity), then apply the SEQ_CLS score head to the final
+    hidden state. Cheaper than DPO: one content-length forward and a scalar head, no [seq x vocab] matmul."""
+    import torch  # noqa: PLC0415
+
+    seq = torch.tensor([ids[:content_len]], device=device)
+    mask = torch.ones_like(seq)
+    hidden = backbone(input_ids=seq, attention_mask=mask).last_hidden_state
+    return score_head(hidden[0, -1]).squeeze(-1)
+
+
+def run_reward_training(  # pragma: no cover - optional training-stack integration; proven by a GPU run
+    model: Any,
+    tokenizer: Any,
+    pairs: list[dict[str, str]],
+    *,
+    seq_len: int,
+    margin: float = 0.0,
+    learning_rate: float = 5e-5,
+    max_steps: int,
+    gradient_accumulation_steps: int = 1,
+    pairs_per_microbatch: int = 1,
+    max_prompt_length: int | None = None,
+    gradient_checkpointing: bool = True,
+    max_grad_norm: float = float("inf"),
+    optimizer: Any = None,
+    checkpoint_callback: Callable[[int], None] | None = None,
+    checkpoint_every: int = 0,
+    truncation_allowed: bool = False,
+    stage_callback: StageCallback | None = None,
+) -> dict[str, Any]:
+    """The harness's pairwise reward-modeling primitive - the SEQ_CLS sibling of :func:`run_dpo_training`.
+    ``pairs`` are ``{"prompt","chosen","rejected"}`` (the prompt already chat-templated). Fail-closes on
+    degenerate pairs and truncation BEFORE touching the GPU, then trains a scalar SEQ_CLS score head + LoRA
+    with the Bradley-Terry loss ``-log sigmoid(score(chosen) - score(rejected) - margin)``. Reward is
+    CHEAPER than DPO - no reference model, no [seq x vocab] log-prob, no ``disable_adapter`` - so it scores
+    each branch as its own content-length forward and pools the last token explicitly.
+
+    Sealed execution semantics are HONORED, not silently defaulted: ``margin`` /
+    ``gradient_accumulation_steps`` come from the plan, and the caller passes the sealed ``optimizer`` (only
+    when it is ``None`` does this build a plain AdamW as a dev convenience). ``max_prompt_length`` /
+    ``gradient_checkpointing`` / ``max_grad_norm`` are threaded from the seal (the sealed ceiling clips each
+    step; the pre-clip norm is the evidence). ``max_steps`` is CONCRETE (the worker converts an epoch
+    schedule). The sealed checkpoint cadence is honored via ``checkpoint_callback``.
+
+    Constraints it REFUSES rather than silently violating: a sealed ``micro_batch_size > 1``
+    (``pairs_per_microbatch``) - express a bigger batch via ``gradient_accumulation_steps``; a base with no
+    trainable parameters; and a FROZEN score head (the randomly-initialized reward head MUST train - PEFT
+    keeps it trainable when the adapter is sealed ``task_type=SEQ_CLS``). Returns an evidence bundle
+    (per-step loss + score margin + the raw chosen/rejected scores, finiteness, grad norm, length/reward
+    correlation, peak VRAM)."""
+    import torch  # noqa: PLC0415
+
+    if not pairs:
+        raise TrainerError("reward training requires at least one preference pair (got an empty set).")
+    if max_steps < 1:
+        raise TrainerError(f"reward training requires max_steps >= 1 (got {max_steps}).")
+    if gradient_accumulation_steps < 1:
+        raise TrainerError(
+            f"gradient_accumulation_steps must be >= 1 (got {gradient_accumulation_steps}).")
+    if pairs_per_microbatch != 1:
+        raise TrainerError(
+            f"this reward primitive processes one pair per microbatch (got pairs_per_microbatch="
+            f"{pairs_per_microbatch}); express a bigger effective batch via gradient_accumulation_steps."
+        )
+
+    def _stage(name: str, message: str) -> None:
+        if stage_callback is not None:
+            stage_callback(name, message)
+
+    # Fail-closed data preflight over EVERY pair, before any GPU weights are touched - reused verbatim from
+    # the DPO path: (1) no degenerate pair (empty/identical/duplicate/contradiction), (2) the sealed
+    # max_prompt_length, (3) no silent truncation of either branch.
+    _stage("data_integrity", f"checking {len(pairs)} preference pairs for degenerate/duplicate rows")
+    integrity_issues = refuse_degenerate_preference_pairs(pairs)
+    _stage("truncation_analysis", f"tokenizing {len(pairs)} preference pairs for the coverage ledger")
+    lengths = [
+        PreferencePairTokens(
+            prompt_tokens=len(tokenizer(p["prompt"], add_special_tokens=False)["input_ids"]),
+            chosen_response_tokens=len(tokenizer(p["chosen"], add_special_tokens=False)["input_ids"]) + 1,
+            rejected_response_tokens=len(tokenizer(p["rejected"], add_special_tokens=False)["input_ids"]) + 1,
+        )
+        for p in pairs
+    ]
+    if max_prompt_length is not None:
+        over = [i for i, length in enumerate(lengths) if length.prompt_tokens > max_prompt_length]
+        if over and not truncation_allowed:
+            raise TrainerError(
+                f"{len(over)} pair(s) exceed the sealed max_prompt_length={max_prompt_length} "
+                f"(first at index {over[0]}); the prompt would be cut - split or re-encode the data, or "
+                f"seal a lossy policy."
+            )
+    ledger = refuse_preference_truncation(lengths, seq_len, truncation_allowed=truncation_allowed)
+
+    backbone, score_head = _seqcls_backbone_and_score_head(model)
+    if gradient_checkpointing:  # honor the sealed switch - it changes recomputation + memory behavior
+        backbone.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
+        model.enable_input_require_grads()
+    model.config.use_cache = False
+    trainable = [p for p in model.parameters() if p.requires_grad]
+    if not trainable:
+        raise TrainerError(
+            "reward policy has no trainable parameters - attach a PEFT adapter before training (a base "
+            "with no adapter and no trainable score head has nothing to optimize)."
+        )
+    # The randomly-initialized score head MUST train: an untrained head scores noise, so a frozen head
+    # would produce a meaningless (yet high-looking) training curve. PEFT keeps it trainable when the
+    # adapter is sealed task_type=SEQ_CLS; refuse rather than silently train a frozen reward head.
+    if not any(p.requires_grad for p in score_head.parameters()):
+        raise TrainerError(
+            "the SEQ_CLS score head is frozen - the randomly-initialized reward head must train. Seal the "
+            "adapter with adapter_task_type='SEQ_CLS' so PEFT keeps the score head trainable."
+        )
+    if optimizer is None:
+        optimizer = torch.optim.AdamW(trainable, lr=learning_rate)
+    device = next(model.parameters()).device
+    cuda_device = device if getattr(device, "type", None) == "cuda" else None
+
+    _stage("training", f"pairwise reward modeling at seq_len={seq_len} (Bradley-Terry, margin={margin})")
+    model.train()
+    if cuda_device is not None:
+        torch.cuda.reset_peak_memory_stats(cuda_device)
+    losses: list[float] = []
+    margins: list[float] = []
+    chosen_rewards: list[float] = []
+    rejected_rewards: list[float] = []
+    grad_norms: list[float] = []
+    length_deltas: list[float] = []
+    checked = False
+    pair_cursor = 0
+    for step in range(max_steps):
+        optimizer.zero_grad()
+        micro_loss = 0.0
+        micro_margin = 0.0
+        micro_chosen = 0.0
+        micro_rejected = 0.0
+        micro_delta = 0.0
+        for _micro in range(gradient_accumulation_steps):
+            row = pairs[pair_cursor % len(pairs)]
+            pair_cursor += 1
+            chosen_ids, _chosen_labels, chosen_len = _encode_preference_branch(
+                tokenizer, row["prompt"], row["chosen"], seq_len,
+                max_prompt_length=max_prompt_length, score_eos=True)
+            rejected_ids, _rejected_labels, rejected_len = _encode_preference_branch(
+                tokenizer, row["prompt"], row["rejected"], seq_len,
+                max_prompt_length=max_prompt_length, score_eos=True)
+            chosen_score = _score_reward_branch(backbone, score_head, chosen_ids, chosen_len, device)
+            rejected_score = _score_reward_branch(backbone, score_head, rejected_ids, rejected_len, device)
+            if not checked and not chosen_score.requires_grad:
+                raise TrainerError(
+                    "reward scores do not require grad - the adapter + score head are not trainable.")
+            loss, score_margin = reward_pairwise_loss(chosen_score, rejected_score, margin=margin)
+            if not bool(torch.isfinite(loss)) or not bool(torch.isfinite(score_margin)):
+                raise TrainerError(
+                    f"reward training produced a non-finite loss/margin at step {step} - refusing to "
+                    f"update the adapter (check data, precision, or margin)."
+                )
+            (loss / gradient_accumulation_steps).backward()
+            if not checked:
+                # No gradient may reach a frozen (base) parameter; only the adapter + score head train.
+                leaked = sum(1 for p in model.parameters() if p.grad is not None and not p.requires_grad)
+                if leaked:
+                    raise TrainerError(f"reward backward leaked gradient into {leaked} frozen parameter(s).")
+                checked = True
+            micro_loss += loss.item()  # .item() detaches; float() on a grad tensor warns
+            micro_margin += score_margin.item()
+            micro_chosen += chosen_score.item()
+            micro_rejected += rejected_score.item()
+            micro_delta += float(chosen_len - rejected_len)
+        # Honor the sealed max_grad_norm: clip_grad_norm_ RETURNS the pre-clip total norm (the evidence
+        # grad_norm) and clips in place at the sealed ceiling (default inf for direct callers).
+        grad_norms.append(float(torch.nn.utils.clip_grad_norm_(trainable, max_grad_norm)))
+        optimizer.step()
+        losses.append(micro_loss / gradient_accumulation_steps)
+        margins.append(micro_margin / gradient_accumulation_steps)
+        chosen_rewards.append(micro_chosen / gradient_accumulation_steps)
+        rejected_rewards.append(micro_rejected / gradient_accumulation_steps)
+        length_deltas.append(micro_delta / gradient_accumulation_steps)
+        if checkpoint_callback is not None and checkpoint_every > 0 and (step + 1) % checkpoint_every == 0:
+            checkpoint_callback(step + 1)
+    peak_gib = (
+        torch.cuda.max_memory_allocated(cuda_device) / (1024**3) if cuda_device is not None else 0.0
+    )
+    evidence = summarize_preference_evidence(losses, margins, length_deltas)
+    evidence.update({
+        "losses": losses,
+        "reward_margins": margins,
+        "chosen_rewards": chosen_rewards,
+        "rejected_rewards": rejected_rewards,
+        "grad_norms": grad_norms,
+        "final_grad_norm": grad_norms[-1] if grad_norms else 0.0,
+        "peak_gib": peak_gib,
+        "supervision_intact": ledger.supervision_intact,
+        "integrity_issues": [issue.model_dump() for issue in integrity_issues],
+    })
+    return evidence
+
+
+def evaluate_reward_accuracy(  # pragma: no cover - optional training-stack integration; proven by a GPU run
+    model: Any,
+    tokenizer: Any,
+    pairs: list[dict[str, str]],
+    *,
+    seq_len: int,
+    max_prompt_length: int | None = None,
+    truncation_allowed: bool = False,
+    stage_callback: StageCallback | None = None,
+) -> dict[str, Any]:
+    """Held-out pairwise ranking evaluation - the reward-model PROMOTION GATE. Under ``no_grad``, score
+    each held-out pair with the SAME sealed encoding + last-token pooling as training and report the
+    fraction the model ranks correctly (``score(chosen) > score(rejected)``), the mean score margin, and
+    finiteness. A falling TRAINING loss is never the promotion gate; a measured held-out ranking accuracy
+    is. Never mutates weights: eval mode (restored on exit), no optimizer, no backward.
+
+    Fail-closes on degenerate pairs, held-out truncation, AND the sealed ``max_prompt_length`` exactly
+    like training - a degenerate or silently cut held-out pair would corrupt the very metric the gate is
+    measured on."""
+    import torch  # noqa: PLC0415
+
+    def _stage(name: str, message: str) -> None:
+        if stage_callback is not None:
+            stage_callback(name, message)
+
+    if pairs:
+        refuse_degenerate_preference_pairs(pairs)
+        eval_lengths = [
+            PreferencePairTokens(
+                prompt_tokens=len(tokenizer(p["prompt"], add_special_tokens=False)["input_ids"]),
+                chosen_response_tokens=len(tokenizer(p["chosen"], add_special_tokens=False)["input_ids"]) + 1,
+                rejected_response_tokens=len(tokenizer(p["rejected"], add_special_tokens=False)["input_ids"]) + 1,
+            )
+            for p in pairs
+        ]
+        if max_prompt_length is not None:
+            over = [i for i, length in enumerate(eval_lengths) if length.prompt_tokens > max_prompt_length]
+            if over and not truncation_allowed:
+                raise TrainerError(
+                    f"{len(over)} held-out pair(s) exceed the sealed max_prompt_length={max_prompt_length} "
+                    f"(first at index {over[0]}); measuring the gate on cut prompts would corrupt it."
+                )
+        refuse_preference_truncation(eval_lengths, seq_len, truncation_allowed=truncation_allowed)
+
+    backbone, score_head = _seqcls_backbone_and_score_head(model)
+    was_training = model.training
+    prior_use_cache = getattr(model.config, "use_cache", None)
+    model.eval()  # eval() neutralizes dropout for the scoring forward without mutating its probabilities
+    model.config.use_cache = False
+    device = next(model.parameters()).device
+    margins: list[float] = []
+    correct = 0
+    _stage("held_out_eval", f"scoring {len(pairs)} held-out preference pairs")
+    try:
+        with torch.no_grad():
+            for row in pairs:
+                chosen_ids, _chosen_labels, chosen_len = _encode_preference_branch(
+                    tokenizer, row["prompt"], row["chosen"], seq_len,
+                    max_prompt_length=max_prompt_length, score_eos=True)
+                rejected_ids, _rejected_labels, rejected_len = _encode_preference_branch(
+                    tokenizer, row["prompt"], row["rejected"], seq_len,
+                    max_prompt_length=max_prompt_length, score_eos=True)
+                chosen_score = _score_reward_branch(backbone, score_head, chosen_ids, chosen_len, device)
+                rejected_score = _score_reward_branch(
+                    backbone, score_head, rejected_ids, rejected_len, device)
+                margin = float(chosen_score - rejected_score)
+                margins.append(margin)
+                correct += int(margin > 0.0)
+    finally:
+        if was_training:
+            model.train()
+        if prior_use_cache is not None:
+            model.config.use_cache = prior_use_cache
+    n = len(pairs)
+    return {
+        "n": n,
+        "preference_accuracy": (correct / n) if n else 0.0,
+        "mean_margin": (sum(margins) / n) if n else 0.0,
+        "all_finite": all(math.isfinite(m) for m in margins),
+    }
+
+
 def _prepare_training_texts(
     rows: list[dict[str, Any]],
     config: TrainRunConfig,
