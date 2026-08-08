@@ -3673,34 +3673,76 @@ def grpo_policy_loss(
     old_logprobs: Any,
     ref_logprobs: Any,
     advantages: Any,
+    completion_mask: Any,
     *,
     clip_range: float = 0.2,
     kl_coefficient: float = 0.05,
     entropy: Any = None,
     entropy_bonus: float = 0.0,
 ) -> tuple[Any, Any]:
-    """The GRPO surrogate loss + the mean KL-to-reference, from aligned per-token tensors. Returns
-    ``(loss, mean_kl)``.
+    """The GRPO surrogate loss + the mean KL-to-reference for one rollout GROUP, from per-completion token
+    tensors ``[G, T]`` (G rollouts padded to T tokens) with a ``completion_mask`` ``[G, T]`` (1 for valid
+    completion tokens, 0 for padding), and per-completion ``advantages`` ``[G]``. Returns ``(loss, mean_kl)``.
 
-    The policy-gradient term is the PPO-style CLIPPED surrogate over the importance ratio
-    ``exp(policy_logprob - old_logprob)`` times the group-relative ``advantages`` (broadcast to the token
-    grid by the caller): ``-mean(min(ratio*A, clip(ratio, 1-clip_range, 1+clip_range)*A))``. On the FIRST on-policy update
-    ``old == policy`` so ``ratio == 1`` and it reduces to ``-mean(A * logprob)``; the clip binds only once the
-    policy moves off the sampling distribution. The KL penalty keeps the policy anchored to the FROZEN
-    reference via Schulman's k3 estimator ``E[ref_ratio - log(ref_ratio) - 1]`` (``ref_ratio =
-    exp(ref_logprob - policy_logprob)``), which is always >= 0 and lower-variance than the naive log-ratio.
-    An optional entropy bonus preserves exploration. KL is the safety rail the success gate re-checks."""
+    Reduction is per-completion token-mean over VALID tokens, THEN group-mean - so a variable-length group
+    is NOT length-biased and padding never leaks into the objective (a flat ``.mean()`` would over-weight
+    long completions and average in pad positions). The policy-gradient term is the PPO-style CLIPPED
+    surrogate over the importance ratio ``exp(policy_logprob - old_logprob)`` times the advantage
+    (broadcast across that completion's tokens): ``-min(ratio*A, clip(ratio, 1-clip_range, 1+clip_range)*A)``.
+    On the FIRST on-policy update ``old == policy`` so ``ratio == 1`` and the surrogate VALUE is ``-mean(A)``
+    while its GRADIENT equals REINFORCE's ``-mean(A * grad logprob)`` (the ``A*logprob`` identity is the
+    gradient, not the value); the clip binds once the policy moves off the sampling distribution. The KL
+    penalty anchors the policy to the FROZEN reference via Schulman's k3 estimator, computed in FLOAT32
+    (``expm1(x) - x``, ``x = ref_logprob - policy_logprob``) - bf16 suffers catastrophic cancellation and
+    could silently under-report the KL safety rail. A nonzero entropy bonus REQUIRES an entropy tensor
+    (never silently drop a sealed exploration term). KL is the safety rail the success gate re-checks."""
     import torch  # noqa: PLC0415
 
-    ratio = torch.exp(policy_logprobs - old_logprobs)
-    unclipped = ratio * advantages
-    clipped = torch.clamp(ratio, 1.0 - clip_range, 1.0 + clip_range) * advantages
-    pg_loss = -torch.min(unclipped, clipped).mean()
-    log_ref_ratio = ref_logprobs - policy_logprobs
-    kl = (torch.exp(log_ref_ratio) - log_ref_ratio - 1.0).mean()
-    loss = pg_loss + kl_coefficient * kl
-    if entropy is not None and entropy_bonus:
-        loss = loss - entropy_bonus * entropy.mean()
+    if entropy_bonus and entropy is None:
+        raise TrainerError(
+            "a nonzero entropy_bonus requires an entropy tensor - refusing to silently drop the sealed "
+            "exploration term"
+        )
+
+    # Every completion must have >= 1 valid token: an empty/failed rollout (all-zero mask row) must be
+    # REFUSED, not silently diluted into the group mean (clamping its denominator to 1 would scale down the
+    # real completions + change the objective).
+    valid_tokens = completion_mask.to(policy_logprobs.dtype).sum(dim=-1)  # [G]
+    if bool((valid_tokens < 1).any()):
+        raise TrainerError(
+            "every rollout completion must have at least one valid (unmasked) token - refusing an "
+            "empty/failed rollout that would silently dilute the group objective"
+        )
+
+    valid = completion_mask > 0
+
+    def _completion_mean(per_token: Any) -> Any:
+        # per-completion mean over VALID tokens, then group-mean (length-unbiased, padding-free). Use
+        # torch.where (NOT per_token * mask) so a padded cell is REPLACED by 0, not multiplied
+        # (0 * NaN/inf == NaN would poison the whole group's mean).
+        masked = torch.where(valid, per_token, torch.zeros_like(per_token))
+        per_completion = masked.sum(dim=-1) / valid_tokens.to(per_token.dtype)
+        return per_completion.mean()
+
+    adv = advantages.unsqueeze(-1)  # [G, 1] -> broadcast across each completion's tokens
+    # Mask the log-ratios BEFORE the nonlinear exp / expm1: an overflowing PAD value keeps the FORWARD loss
+    # finite (via _completion_mean's output mask), but autograd would still flow 0 * exp'(pad) == 0 * inf ==
+    # NaN into the policy gradient and corrupt the update. Substituting 0 at masked positions (exp(0)=1,
+    # expm1(0)=0) keeps BOTH the forward and the gradient clean; the pad is then excluded from the mean.
+    safe_logratio = torch.where(
+        valid, policy_logprobs - old_logprobs, torch.zeros_like(policy_logprobs)
+    )
+    ratio = torch.exp(safe_logratio)
+    unclipped = ratio * adv
+    clipped = torch.clamp(ratio, 1.0 - clip_range, 1.0 + clip_range) * adv
+    pg_loss = _completion_mean(-torch.min(unclipped, clipped))
+    # k3 KL in float32: expm1(x) - x == exp(x) - 1 - x, cancellation-free even for a tiny log-ratio.
+    ref_logratio = (ref_logprobs - policy_logprobs).float()
+    safe_ref_logratio = torch.where(valid, ref_logratio, torch.zeros_like(ref_logratio))
+    kl = _completion_mean(torch.expm1(safe_ref_logratio) - safe_ref_logratio)
+    loss = pg_loss + kl_coefficient * kl.to(pg_loss.dtype)
+    if entropy_bonus:
+        loss = loss - entropy_bonus * _completion_mean(entropy)
     return loss, kl
 
 
