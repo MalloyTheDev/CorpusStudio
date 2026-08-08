@@ -354,7 +354,6 @@ def run_rollout(  # pragma: no cover - optional training-stack integration; prov
             use_reference=True)
         max_kl = evaluate_rollout_kl(
             policy, tokenizer, heldout_prompts, max_new_tokens=max_new_tokens,
-            sampling_temperature=temperature, sampling_top_p=top_p,
             max_prompt_length=max_prompt_length, truncation_allowed=truncation_allowed,
             seed=execution.seed)
     except TrainerError as exc:

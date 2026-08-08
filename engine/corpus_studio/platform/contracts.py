@@ -4367,21 +4367,22 @@ class PolicyOptimizationSpec(ContractModel):
         return self
 
 
-# The LR schedules the GRPO loop can construct via transformers.get_scheduler AND drive with a metric-free
-# scheduler.step() each optimizer step. An ALLOWLIST (not a reduce_lr_on_plateau blacklist): a typo or any
-# other unsupported value must fail closed at planning, not reach get_scheduler at runtime. reduce_lr_on_plateau
-# is excluded on purpose (ReduceLROnPlateau.step() needs a metric). Kept as literal strings so the dependency-
-# light contract needs no transformers import; extend it when the loop learns to drive a new schedule.
+# The LR schedules the GRPO loop can construct via transformers.get_scheduler with ONLY
+# (num_warmup_steps, num_training_steps) AND drive with a metric-free scheduler.step() each optimizer step.
+# An ALLOWLIST (not a reduce_lr_on_plateau blacklist): a typo or any other unsupported value must fail closed
+# at planning, not raise inside get_scheduler at runtime. Deliberately EXCLUDED: reduce_lr_on_plateau (its
+# step() needs a metric) and schedules that require scheduler_specific_kwargs the loop does not pass
+# (cosine_with_min_lr needs min_lr; warmup_stable_decay needs num_stable_steps/num_decay_steps). Kept as
+# literal strings so the dependency-light contract needs no transformers import; extend it (with the plumbing)
+# when the loop learns to seal + pass a new schedule's arguments.
 _ROLLOUT_LR_SCHEDULERS = frozenset({
     "constant",
     "constant_with_warmup",
     "linear",
     "cosine",
     "cosine_with_restarts",
-    "cosine_with_min_lr",
     "polynomial",
     "inverse_sqrt",
-    "warmup_stable_decay",
 })
 
 

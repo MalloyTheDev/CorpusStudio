@@ -4152,8 +4152,6 @@ def evaluate_rollout_kl(  # pragma: no cover - generation + optional training-st
     prompts: list[str],
     *,
     max_new_tokens: int,
-    sampling_temperature: float = 1.0,
-    sampling_top_p: float = 0.95,
     max_prompt_length: int | None = None,
     truncation_allowed: bool = False,
     seed: int = 42,
@@ -4161,11 +4159,13 @@ def evaluate_rollout_kl(  # pragma: no cover - generation + optional training-st
 ) -> float:
     """The MAX per-completion KL to the frozen reference over held-out prompts - the on-policy safety-rail
     signal the success gate re-checks (a policy that stayed within the KL bound has not reward-hacked /
-    collapsed). The k3 estimator is unbiased ONLY for actions drawn from the policy, so completions are
-    SAMPLED (do_sample) - not greedy - and the sealed ``seed`` makes that sampling reproducible; each is then
-    scored under BOTH the policy and the reference (``disable_adapter``) with the SAME float32 k3 KL the loss
-    uses. (Greedy tokens would report ~zero KL even when the policy moved mass off the argmax - it could
-    admit a collapsed policy.)"""
+    collapsed). The k3 estimator is unbiased ONLY for actions drawn from the SAME distribution its log-probs
+    score, so completions are sampled from the UNFILTERED policy (``temperature=1.0``, ``top_p=1.0``) - not
+    greedy, and not the training temperature/nucleus - with the sealed ``seed`` for reproducibility; each is
+    then scored under BOTH the policy and the reference (``disable_adapter``) with the SAME float32 k3 KL the
+    loss uses. (Greedy tokens report ~zero KL even when the policy moved mass off the argmax; a truncated/
+    tempered sample estimates the KL of the WRONG distribution and could hide tail divergence - either way the
+    bounded-KL gate could admit a collapsed or drifted policy.)"""
     import torch  # noqa: PLC0415
 
     def _stage(name: str, message: str) -> None:
@@ -4192,11 +4192,12 @@ def evaluate_rollout_kl(  # pragma: no cover - generation + optional training-st
                     tokenizer, prompt, max_prompt_length, truncation_allowed=truncation_allowed)
                 prompt_len = len(prompt_ids)
                 policy_model.config.use_cache = True
-                # SAMPLED (seeded), not greedy: the k3 estimator below is unbiased only for policy-drawn
-                # actions. One completion per prompt, then scored under BOTH policy and reference (matched).
+                # SAMPLED from the UNFILTERED policy (temperature=1.0, top_p=1.0), seeded: the k3 estimator
+                # below is unbiased only for actions drawn from the same distribution its log-probs score.
+                # One completion per prompt, then scored under BOTH policy and reference (matched).
                 generated = policy_model.generate(
                     torch.tensor([prompt_ids], device=device), do_sample=True,
-                    temperature=sampling_temperature, top_p=sampling_top_p,
+                    temperature=1.0, top_p=1.0,
                     max_new_tokens=max_new_tokens, pad_token_id=pad_id)
                 policy_model.config.use_cache = False
                 attention_mask = (generated != pad_id).long()
