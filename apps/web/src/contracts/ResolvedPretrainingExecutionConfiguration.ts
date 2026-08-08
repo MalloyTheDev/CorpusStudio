@@ -113,7 +113,8 @@ export type ResetDataCursor = boolean;
 export type ResetLrScheduler = boolean;
 export type ResetOptimizer = boolean;
 export type VocabSize = number | null;
-export type LossImpl = "cross_entropy" | "liger_fused_ce" | "chunked_ce" | "dpo" | "orpo" | "kto" | "ipo" | "reward_bt";
+export type LossImpl =
+  "cross_entropy" | "liger_fused_ce" | "chunked_ce" | "dpo" | "orpo" | "kto" | "ipo" | "reward_bt" | "grpo";
 export type AdamBeta1 = number;
 export type AdamBeta2 = number;
 export type AdamEpsilon = number;

@@ -87,7 +87,8 @@ export type FailureTaxonomy =
   | "ACCIDENTAL_SPILL"
   | "CONTROLLED_OFFLOAD";
 export type KnownFailureModes = KnownFailureMode[];
-export type LossImpl = "cross_entropy" | "liger_fused_ce" | "chunked_ce" | "dpo" | "orpo" | "kto" | "ipo" | "reward_bt";
+export type LossImpl =
+  "cross_entropy" | "liger_fused_ce" | "chunked_ce" | "dpo" | "orpo" | "kto" | "ipo" | "reward_bt" | "grpo";
 export type LossImpls = LossImpl[];
 export type ModelFamilies = string[];
 export type ObjectiveCapabilities = string[];

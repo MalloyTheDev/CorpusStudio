@@ -322,7 +322,8 @@
         "orpo",
         "kto",
         "ipo",
-        "reward_bt"
+        "reward_bt",
+        "grpo"
       ],
       "title": "LossImpl",
       "type": "string"

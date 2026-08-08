@@ -6,7 +6,8 @@ export type AdaptationMethods = AdapterMethod[];
 export type AdaptationMethods1 = AdapterMethod[];
 export type FunctionalProbeRequired = boolean;
 export type HardwareVerificationRequired = boolean;
-export type LossImpl = "cross_entropy" | "liger_fused_ce" | "chunked_ce" | "dpo" | "orpo" | "kto" | "ipo" | "reward_bt";
+export type LossImpl =
+  "cross_entropy" | "liger_fused_ce" | "chunked_ce" | "dpo" | "orpo" | "kto" | "ipo" | "reward_bt" | "grpo";
 export type LossImpls = LossImpl[];
 export type ObjectiveCapabilities = string[];
 export type QuantizationMode = "none" | "int8" | "int4" | "nf4" | "fp4" | "gptq" | "awq" | "hqq";
@@ -98,6 +99,7 @@ export type ObjectiveKind =
   | "supervised_fine_tuning"
   | "preference_optimization"
   | "reward_modeling"
+  | "on_policy_rl"
   | "distillation"
   | "process_supervision"
   | "verifier_training"
@@ -148,6 +150,7 @@ export type ObjectiveLossComponentKind =
   | "rationale_distillation"
   | "process_supervision"
   | "verifier"
+  | "policy_gradient"
   | "router_auxiliary"
   | "load_balancing"
   | "router_z_loss"

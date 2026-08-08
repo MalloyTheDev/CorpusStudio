@@ -674,6 +674,56 @@ def _special_training_objectives() -> list[TrainingObjective]:
         artifacts=_artifacts("checkpoint", "provenance_manifest", "reward_model"),
         evaluation=_evaluation("heldout_preference_accuracy", "reward_calibration", expert_metrics=False),
     )
+    grpo = _make(
+        objective_id="grpo",
+        display_name="On-policy RL (GRPO)",
+        description="Optimize a policy on rollouts scored by a reward source using group-relative policy optimization.",
+        kind="on_policy_rl",
+        execution_kind="training",
+        task_type="grpo",
+        # On-policy RL draws PROMPTS (the model generates the completion; there is no dataset response).
+        dataset_inputs=_dataset(
+            [_variant("chat", dataset_format="chat", messages="messages")], role="train"
+        ),
+        # The "label" is the scalar reward the reward SOURCE assigns to each rollout generated from the
+        # prompt - not a dataset field. On-policy RL is reward-sourced, so the construction makes that
+        # explicit while still declaring a concrete supervision shape.
+        labels=_label(
+            "scalar_reward",
+            ["messages"],
+            "Assign each rollout sampled from the prompt the scalar reward the reward source scores it "
+            "with (computed at rollout time, not read from the dataset).",
+        ),
+        masks=_mask(
+            "completion_only",
+            ["messages"],
+            "Apply the policy gradient to the generated completion tokens only, excluding the prompt.",
+        ),
+        losses=[
+            _loss(
+                "policy_gradient",
+                "Group-relative policy optimization: advantage = (reward - group mean) / group std, "
+                "maximized under a KL-to-reference bound.",
+            )
+        ],
+        # The policy is a causal LM; the frozen reference (reached via disable_adapter) anchors the KL.
+        model=_model(_CAUSAL_MODEL, reference=True),
+        adaptations=["qlora"],
+        update=_adapter_update(),
+        backend=_backend(
+            "grpo",
+            losses=["grpo"],
+            adapters=["qlora"],
+            quantizations=["nf4"],
+            capabilities=["on_policy_grpo"],
+        ),
+        artifacts=_artifacts("checkpoint", "adapter", "provenance_manifest"),
+        evaluation=_evaluation("heldout_mean_reward", "kl_to_reference", expert_metrics=False),
+        limitations=[
+            "Both built-in backend manifests currently declare SFT only.",
+            "Registry presence is not proof that any backend implements or supports this objective.",
+        ],
+    )
     process = _make(
         objective_id="process_supervision",
         display_name="Process supervision",
@@ -841,7 +891,9 @@ def _special_training_objectives() -> list[TrainingObjective]:
         artifacts=_artifacts("checkpoint", "multimodal_model", "provenance_manifest"),
         evaluation=_evaluation("caption_quality", "grounding", expert_metrics=False),
     )
-    return [reward, process, verifier, tool_use, embedding, reranker, classifier, multimodal]
+    return [
+        reward, grpo, process, verifier, tool_use, embedding, reranker, classifier, multimodal
+    ]
 
 
 def _non_training_objective(
@@ -1055,8 +1107,8 @@ def _build_catalog() -> tuple[TrainingObjective, ...]:
     keys = [(item.objective_id, item.objective_version) for item in ordered]
     if len(keys) != len(set(keys)):  # pragma: no cover - static catalog construction guard
         raise ValueError("duplicate objective id/version in built-in registry")
-    if len(ordered) != 30:  # pragma: no cover - guards the requested catalog surface
-        raise ValueError(f"expected 30 built-in objectives, got {len(ordered)}")
+    if len(ordered) != 31:  # pragma: no cover - guards the requested catalog surface
+        raise ValueError(f"expected 31 built-in objectives, got {len(ordered)}")
     return ordered
 
 

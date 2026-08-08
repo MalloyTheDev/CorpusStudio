@@ -108,7 +108,8 @@ export type Kind = "dataset" | "model" | "tokenizer";
 export type Location = string;
 export type ResolvedRevision = string | null;
 export type Source1 = "local_file" | "local_directory" | "huggingface";
-export type LossImpl = "cross_entropy" | "liger_fused_ce" | "chunked_ce" | "dpo" | "orpo" | "kto" | "ipo" | "reward_bt";
+export type LossImpl =
+  "cross_entropy" | "liger_fused_ce" | "chunked_ce" | "dpo" | "orpo" | "kto" | "ipo" | "reward_bt" | "grpo";
 export type AdamBeta1 = number;
 export type AdamBeta2 = number;
 export type AdamEpsilon = number;

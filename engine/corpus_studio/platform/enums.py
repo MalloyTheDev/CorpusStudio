@@ -147,6 +147,7 @@ class ObjectiveKind(str, Enum):
     supervised_fine_tuning = "supervised_fine_tuning"
     preference_optimization = "preference_optimization"
     reward_modeling = "reward_modeling"
+    on_policy_rl = "on_policy_rl"
     distillation = "distillation"
     process_supervision = "process_supervision"
     verifier_training = "verifier_training"
@@ -215,6 +216,7 @@ class ObjectiveLossComponentKind(str, Enum):
     rationale_distillation = "rationale_distillation"
     process_supervision = "process_supervision"
     verifier = "verifier"
+    policy_gradient = "policy_gradient"
     router_auxiliary = "router_auxiliary"
     load_balancing = "load_balancing"
     router_z_loss = "router_z_loss"
@@ -630,6 +632,7 @@ class LossImpl(str, Enum):
     kto = "kto"
     ipo = "ipo"
     reward_bt = "reward_bt"
+    grpo = "grpo"
 
 
 class Optimizer(str, Enum):
