@@ -92,6 +92,15 @@ _VARIANT_ENVELOPE: dict[ExecutionVariantKind, VariantEnvelope] = {
         allows_full_parameter=False,
         allows_multiple_datasets=False,
     ),
+    # On-policy RL (RL slice S5b): a QLoRA CAUSAL_LM POLICY adapter trained on rollouts sampled from the
+    # policy and scored by a reward source. Causal-LM generation, one prompt dataset, no full-parameter.
+    ExecutionVariantKind.on_policy_rl: VariantEnvelope(
+        task_type=_CAUSAL_LM,
+        requires_causal_lm=True,
+        requires_peft_adapter=True,
+        allows_full_parameter=False,
+        allows_multiple_datasets=False,
+    ),
 }
 
 # Derived from the enum's definition order (ascending support), so it cannot drift from the ladder:
@@ -181,6 +190,18 @@ def reference_execution_variants() -> tuple[BackendExecutionVariant, ...]:
             # docs/HOST_STATE.md.
             support=ExecutionVariantSupport.workload_verified,
         ),
+        BackendExecutionVariant(
+            backend_id="corpus_studio",
+            variant_kind=ExecutionVariantKind.on_policy_rl,
+            # contract_validated (RL slice S5b, gated L1 design #839): the on-policy RL shape - a QLoRA
+            # CAUSAL_LM policy adapter trained on rollouts sampled from the policy and scored by a served
+            # reward model, updated with a group-relative (GRPO) objective under a KL-to-reference bound -
+            # is contract-expressible (ResolvedRolloutExecutionConfiguration + the rollout/experience/
+            # reward-source/stability/policy specs), but NOT executable: the rollout+reward+GRPO worker, a
+            # workload-verified run, and the promoting wheel are the following slices. Admission stays
+            # fail-closed until then.
+            support=ExecutionVariantSupport.contract_validated,
+        ),
     )
 
 
@@ -235,6 +256,12 @@ _REWARD_OBJECTIVE_TO_VARIANT: dict[str, ExecutionVariantKind] = {
     "reward_model": ExecutionVariantKind.reward_model,
 }
 
+# On-policy RL, like preference/reward, resolves by its specific objective. Only GRPO has a built shape in
+# S5b (PPO is S5c); an unrecognized or absent on-policy objective maps to no shape and is refused.
+_ON_POLICY_OBJECTIVE_TO_VARIANT: dict[str, ExecutionVariantKind] = {
+    "grpo": ExecutionVariantKind.on_policy_rl,
+}
+
 
 def execution_variant_kind_for_task(
     task_type: TaskType, *, is_moe: bool = False, objective_id: str | None = None,
@@ -261,6 +288,12 @@ def execution_variant_kind_for_task(
         if is_moe or not objective_id:
             return None
         return _REWARD_OBJECTIVE_TO_VARIANT.get(objective_id)
+    # An on-policy RL (grpo) task resolves by its specific objective (only GRPO has a built shape in S5b);
+    # a MoE or unmapped on-policy objective refuses fail-closed rather than routing to the generic moe shape.
+    if task_type == TaskType.grpo:
+        if is_moe or not objective_id:
+            return None
+        return _ON_POLICY_OBJECTIVE_TO_VARIANT.get(objective_id)
     if is_moe:
         return ExecutionVariantKind.moe
     # A dense SFT with all parameters trainable is the full-parameter shape, NOT the QLoRA-adapter one -

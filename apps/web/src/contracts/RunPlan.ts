@@ -433,7 +433,55 @@ export type SaveStrategy3 = "no" | "steps";
 export type Seed4 = number;
 export type TrustRemoteCode5 = false;
 export type UseSafetensors4 = true;
+export type AdapterTaskType4 = "CAUSAL_LM";
+export type Bnb4BitUseDoubleQuant4 = boolean;
+export type ConfigurationHash5 = string;
+export type ConfigurationId5 = string;
+export type ContractVersion8 = "1.0.0";
+export type DataSeed7 = number;
+/**
+ * @minItems 1
+ */
+export type DeviceMap5 = [DeviceMapEntry, ...DeviceMapEntry[]];
+export type EnvironmentBinding5 = "profile_snapshot" | "managed_lock";
+export type ChatTemplateSha2562 = string | null;
+export type ContractVersion9 = "1.0.0";
+export type DataSeed8 = number;
+export type FormatterId2 = string;
+export type FormatterSha2562 = string;
+export type MaxPromptLength1 = number;
+export type Mode3 = "on_policy";
+export type SchemaId1 = string;
+export type SchemaSha2561 = string;
+export type SchemaVersion1 = string;
+export type TruncationPolicy2 = "refuse" | "allow";
+export type GradientCheckpointing6 = boolean;
+export type OutputDir6 = string;
+export type OutputLayout5 = "run_scoped_v1";
+export type Algorithm1 = "grpo" | "ppo";
+export type ContractVersion10 = "1.0.0";
+export type UseCritic = boolean;
+export type ContractVersion11 = "1.0.0";
+export type HigherIsBetter = boolean;
+export type Kind1 = "served_reward_model" | "verifier" | "process_reward" | "rlaif_judge";
+export type ContractVersion12 = "1.0.0";
+export type DecodePolicy = "sanctioned_worker_decode";
+export type MaxNewTokens = number;
+export type RolloutsPerPrompt = number;
+export type SamplingTemperature = number;
+export type SamplingTopP = number;
+export type RuntimeMode5 = "training" | "cpu_toy";
+export type SaveStrategy4 = "no" | "steps";
 export type Seed5 = number;
+export type AdvantageNormalization = boolean;
+export type ClipRange = number;
+export type ContractVersion13 = "1.0.0";
+export type EntropyBonus = number;
+export type KlCoefficient = number;
+export type KlTarget = number | null;
+export type TrustRemoteCode6 = false;
+export type UseSafetensors5 = true;
+export type Seed6 = number;
 export type TaskType =
   | "sft"
   | "pretraining"
@@ -484,7 +532,8 @@ export interface RunPlan {
   resolved_preference_execution?: ResolvedPreferenceExecutionConfiguration | null;
   resolved_pretraining_execution?: ResolvedPretrainingExecutionConfiguration | null;
   resolved_reward_execution?: ResolvedRewardExecutionConfiguration | null;
-  seed?: Seed5;
+  resolved_rollout_execution?: ResolvedRolloutExecutionConfiguration | null;
+  seed?: Seed6;
   sequence: SequenceSpec;
   task_type: TaskType;
   training_config_snapshot?: TrainingConfigSnapshot;
@@ -1194,6 +1243,137 @@ export interface RewardModelingSpec {
   margin?: Margin;
   output_direction?: OutputDirection;
   score_pooling?: ScorePooling;
+}
+/**
+ * The hash-sealed configuration for an on-policy RL run - the sibling of
+ * :class:`ResolvedExecutionConfiguration` for the ``on_policy_rl`` execution variant (RL slice S5b,
+ * gated L1 design #839).
+ *
+ * Like the reward seal, it reuses every shared execution sub-spec (placement / precision / attention /
+ * adapter / optimizer / sequence / batching / checkpoint / schedule / trainer interface) and adds the
+ * on-policy specs: a :class:`RolloutSpec` (generation), an :class:`ExperienceSource` (on-policy prompt
+ * stream), a :class:`RewardSourceRef` (what scores rollouts), a :class:`StabilityController`
+ * (KL/entropy/clip), and a :class:`PolicyOptimizationSpec` (GRPO now, PPO in S5c). Unlike reward it
+ * trains a CAUSAL_LM POLICY adapter (``adapter_task_type='CAUSAL_LM'``) and exports an ``adapter_peft``
+ * artifact - a policy, not a score head.
+ *
+ * Carried on ``RunPlan.resolved_rollout_execution`` (a plan holds EXACTLY ONE execution config). The
+ * contract is the control plane; EXECUTION (the rollout+reward+GRPO worker + a workload-verified run)
+ * stays gated - ``on_policy_rl`` remains ``contract_validated`` until a measured run promotes it.
+ */
+export interface ResolvedRolloutExecutionConfiguration {
+  adapter: AdapterSpec;
+  adapter_task_type?: AdapterTaskType4;
+  attention: AttentionExecutionPolicy;
+  backend_ref: Ref;
+  batching: BatchingSpec;
+  bnb_4bit_use_double_quant: Bnb4BitUseDoubleQuant4;
+  capability_report_ref: Ref;
+  checkpoint_policy: CheckpointPolicy;
+  configuration_hash: ConfigurationHash5;
+  configuration_id: ConfigurationId5;
+  contract_version?: ContractVersion8;
+  data_seed?: DataSeed7;
+  device_map: DeviceMap5;
+  environment_binding: EnvironmentBinding5;
+  environment_ref: Ref;
+  experience: ExperienceSource;
+  export_format: ExportFormat;
+  gradient_checkpointing?: GradientCheckpointing6;
+  inputs: ExecutionInputs;
+  objective_ref: Ref;
+  optimizer: OptimizerSpec;
+  output_dir: OutputDir6;
+  output_layout?: OutputLayout5;
+  policy_optimization: PolicyOptimizationSpec;
+  precision: PrecisionExecutionPolicy;
+  reward_source: RewardSourceRef;
+  rollout: RolloutSpec;
+  runtime_mode: RuntimeMode5;
+  save_strategy?: SaveStrategy4;
+  schedule: TrainingSchedule;
+  seed?: Seed5;
+  sequence: SequenceSpec;
+  stability: StabilityController;
+  trainer_interface: TrainerInterfacePolicy;
+  trust_remote_code?: TrustRemoteCode6;
+  use_safetensors?: UseSafetensors5;
+}
+/**
+ * The on-policy experience buffer + the PROMPT dataset identity it draws from (S5b). ``mode`` is
+ * ``on_policy``: completions are generated FRESH from the current policy each iteration (a streaming
+ * source distinct from a static dataset - it ties to the G2 data-cursor gap), never replayed
+ * (off-policy replay is a later variant). It seals the resolved PROMPT-dataset schema identity
+ * (``schema_id`` + ``schema_version`` + ``schema_sha256``, the content digest) + the prompt formatter +
+ * the prompt length budget, so an over-length prompt is refused (never silently truncated), exactly like
+ * the preference / SFT data policies. Prompts only - NOT chosen/rejected pairs.
+ */
+export interface ExperienceSource {
+  chat_template_sha256?: ChatTemplateSha2562;
+  contract_version?: ContractVersion9;
+  data_seed?: DataSeed8;
+  formatter_id: FormatterId2;
+  formatter_sha256: FormatterSha2562;
+  max_prompt_length: MaxPromptLength1;
+  mode?: Mode3;
+  schema_id: SchemaId1;
+  schema_sha256: SchemaSha2561;
+  schema_version: SchemaVersion1;
+  truncation_policy?: TruncationPolicy2;
+}
+/**
+ * The on-policy optimization algorithm (S5b). GRPO (group-relative advantage) needs NO critic - it is
+ * the cheaper shape that fits the 12 GB envelope like DPO/reward did; PPO (a clipped surrogate with a
+ * value head) is the S5c follow-up. The reference model is the frozen base reached via
+ * ``disable_adapter`` (the DPO pattern), so no separate reference weights are stored.
+ */
+export interface PolicyOptimizationSpec {
+  algorithm?: Algorithm1;
+  contract_version?: ContractVersion10;
+  use_critic?: UseCritic;
+}
+/**
+ * The hash-pinned reference to what scores each rollout (S5b). A reward model produced by the S5a
+ * reward vertical is the primary source, served for inference-only scoring; rule / verifier rewards and
+ * an RLAIF judge (Evaluation Studio's judge under the provider policy) are the declared alternatives.
+ * The reference is hash-pinned so a run cannot silently swap the reward function. Admissibility (e.g. a
+ * served reward model must itself be ``workload_verified``) is enforced by the resolver + runner, not
+ * here.
+ */
+export interface RewardSourceRef {
+  contract_version?: ContractVersion11;
+  higher_is_better?: HigherIsBetter;
+  kind: Kind1;
+  reward_ref: Ref;
+}
+/**
+ * The GENERATION phase of an on-policy RL run (S5b): how completions are sampled from the current
+ * policy to form the experience the update is computed over. Sampling MUST be stochastic (temperature > 0)
+ * - a greedy rollout collapses the group and yields a zero-variance GRPO advantage. ``rollouts_per_prompt``
+ * is the GRPO group size (>= 2 so the group-relative advantage is defined). Generation runs on the
+ * sanctioned worker decode path, never an unsanctioned generation path.
+ */
+export interface RolloutSpec {
+  contract_version?: ContractVersion12;
+  decode_policy?: DecodePolicy;
+  max_new_tokens: MaxNewTokens;
+  rollouts_per_prompt: RolloutsPerPrompt;
+  sampling_temperature: SamplingTemperature;
+  sampling_top_p: SamplingTopP;
+}
+/**
+ * The sealed on-policy stability controls (S5b) - the guardrails that keep an on-policy update from
+ * reward-hacking or collapsing. The KL-to-reference penalty anchors the policy to the frozen base; the
+ * entropy bonus preserves exploration; advantage normalization stabilizes the group-relative signal; the
+ * clip range bounds the per-step policy change. Sealed like any execution field - no silent defaults.
+ */
+export interface StabilityController {
+  advantage_normalization?: AdvantageNormalization;
+  clip_range: ClipRange;
+  contract_version?: ContractVersion13;
+  entropy_bonus?: EntropyBonus;
+  kl_coefficient: KlCoefficient;
+  kl_target?: KlTarget;
 }
 export interface TrainingConfigSnapshot {
   [k: string]: unknown;

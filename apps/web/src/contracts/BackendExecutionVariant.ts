@@ -18,7 +18,13 @@ export type ExecutionVariantSupport = "declared" | "contract_validated" | "worke
  * measured, and admitted. The set is deliberately small - only variants justified by current scope.
  */
 export type ExecutionVariantKind =
-  "dense_qlora_sft" | "dense_full_finetune" | "pretraining" | "moe" | "preference_dpo" | "reward_model";
+  | "dense_qlora_sft"
+  | "dense_full_finetune"
+  | "pretraining"
+  | "moe"
+  | "preference_dpo"
+  | "reward_model"
+  | "on_policy_rl";
 
 /**
  * A control-plane CAPABILITY DESCRIPTOR: a backend's support for one execution variant of the

@@ -2592,6 +2592,92 @@
       "title": "ExecutionVerificationRequirement",
       "type": "string"
     },
+    "ExperienceSource": {
+      "additionalProperties": false,
+      "description": "The on-policy experience buffer + the PROMPT dataset identity it draws from (S5b). ``mode`` is\n``on_policy``: completions are generated FRESH from the current policy each iteration (a streaming\nsource distinct from a static dataset - it ties to the G2 data-cursor gap), never replayed\n(off-policy replay is a later variant). It seals the resolved PROMPT-dataset schema identity\n(``schema_id`` + ``schema_version`` + ``schema_sha256``, the content digest) + the prompt formatter +\nthe prompt length budget, so an over-length prompt is refused (never silently truncated), exactly like\nthe preference / SFT data policies. Prompts only - NOT chosen/rejected pairs.",
+      "properties": {
+        "chat_template_sha256": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Chat Template Sha256"
+        },
+        "contract_version": {
+          "const": "1.0.0",
+          "default": "1.0.0",
+          "title": "Contract Version",
+          "type": "string"
+        },
+        "data_seed": {
+          "default": 42,
+          "minimum": 0,
+          "title": "Data Seed",
+          "type": "integer"
+        },
+        "formatter_id": {
+          "minLength": 1,
+          "title": "Formatter Id",
+          "type": "string"
+        },
+        "formatter_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Formatter Sha256",
+          "type": "string"
+        },
+        "max_prompt_length": {
+          "minimum": 1,
+          "title": "Max Prompt Length",
+          "type": "integer"
+        },
+        "mode": {
+          "const": "on_policy",
+          "default": "on_policy",
+          "title": "Mode",
+          "type": "string"
+        },
+        "schema_id": {
+          "minLength": 1,
+          "title": "Schema Id",
+          "type": "string"
+        },
+        "schema_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Schema Sha256",
+          "type": "string"
+        },
+        "schema_version": {
+          "minLength": 1,
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "truncation_policy": {
+          "default": "refuse",
+          "enum": [
+            "refuse",
+            "allow"
+          ],
+          "title": "Truncation Policy",
+          "type": "string"
+        }
+      },
+      "required": [
+        "schema_id",
+        "schema_version",
+        "schema_sha256",
+        "formatter_id",
+        "formatter_sha256",
+        "max_prompt_length"
+      ],
+      "title": "ExperienceSource",
+      "type": "object"
+    },
     "ExportCompatibilityEntry": {
       "additionalProperties": false,
       "properties": {
@@ -5058,6 +5144,34 @@
       "title": "PlannedStorageBinding",
       "type": "object"
     },
+    "PolicyOptimizationSpec": {
+      "additionalProperties": false,
+      "description": "The on-policy optimization algorithm (S5b). GRPO (group-relative advantage) needs NO critic - it is\nthe cheaper shape that fits the 12 GB envelope like DPO/reward did; PPO (a clipped surrogate with a\nvalue head) is the S5c follow-up. The reference model is the frozen base reached via\n``disable_adapter`` (the DPO pattern), so no separate reference weights are stored.",
+      "properties": {
+        "algorithm": {
+          "default": "grpo",
+          "enum": [
+            "grpo",
+            "ppo"
+          ],
+          "title": "Algorithm",
+          "type": "string"
+        },
+        "contract_version": {
+          "const": "1.0.0",
+          "default": "1.0.0",
+          "title": "Contract Version",
+          "type": "string"
+        },
+        "use_critic": {
+          "default": false,
+          "title": "Use Critic",
+          "type": "boolean"
+        }
+      },
+      "title": "PolicyOptimizationSpec",
+      "type": "object"
+    },
     "PrecisionExecutionPolicy": {
       "additionalProperties": false,
       "description": "The numerical representation of each material training state.\n\n``weight_storage_dtype`` describes an unquantized frozen base; quantized bases use\n``quantized_storage_format`` instead. ``master_weight_dtype`` describes the trainable adapter\nparameters. An 8-bit optimizer may use quantized primary state plus FP32 auxiliary tensors.",
@@ -6707,6 +6821,202 @@
       "title": "ResolvedRewardExecutionConfiguration",
       "type": "object"
     },
+    "ResolvedRolloutExecutionConfiguration": {
+      "additionalProperties": false,
+      "description": "The hash-sealed configuration for an on-policy RL run - the sibling of\n:class:`ResolvedExecutionConfiguration` for the ``on_policy_rl`` execution variant (RL slice S5b,\ngated L1 design #839).\n\nLike the reward seal, it reuses every shared execution sub-spec (placement / precision / attention /\nadapter / optimizer / sequence / batching / checkpoint / schedule / trainer interface) and adds the\non-policy specs: a :class:`RolloutSpec` (generation), an :class:`ExperienceSource` (on-policy prompt\nstream), a :class:`RewardSourceRef` (what scores rollouts), a :class:`StabilityController`\n(KL/entropy/clip), and a :class:`PolicyOptimizationSpec` (GRPO now, PPO in S5c). Unlike reward it\ntrains a CAUSAL_LM POLICY adapter (``adapter_task_type='CAUSAL_LM'``) and exports an ``adapter_peft``\nartifact - a policy, not a score head.\n\nCarried on ``RunPlan.resolved_rollout_execution`` (a plan holds EXACTLY ONE execution config). The\ncontract is the control plane; EXECUTION (the rollout+reward+GRPO worker + a workload-verified run)\nstays gated - ``on_policy_rl`` remains ``contract_validated`` until a measured run promotes it.",
+      "properties": {
+        "adapter": {
+          "$ref": "#/$defs/AdapterSpec"
+        },
+        "adapter_task_type": {
+          "const": "CAUSAL_LM",
+          "default": "CAUSAL_LM",
+          "title": "Adapter Task Type",
+          "type": "string"
+        },
+        "attention": {
+          "$ref": "#/$defs/AttentionExecutionPolicy"
+        },
+        "backend_ref": {
+          "$ref": "#/$defs/Ref"
+        },
+        "batching": {
+          "$ref": "#/$defs/BatchingSpec"
+        },
+        "bnb_4bit_use_double_quant": {
+          "title": "Bnb 4Bit Use Double Quant",
+          "type": "boolean"
+        },
+        "capability_report_ref": {
+          "$ref": "#/$defs/Ref"
+        },
+        "checkpoint_policy": {
+          "$ref": "#/$defs/CheckpointPolicy"
+        },
+        "configuration_hash": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Configuration Hash",
+          "type": "string"
+        },
+        "configuration_id": {
+          "pattern": "^[A-Za-z0-9._-]+$",
+          "title": "Configuration Id",
+          "type": "string"
+        },
+        "contract_version": {
+          "const": "1.0.0",
+          "default": "1.0.0",
+          "title": "Contract Version",
+          "type": "string"
+        },
+        "data_seed": {
+          "default": 42,
+          "minimum": 0,
+          "title": "Data Seed",
+          "type": "integer"
+        },
+        "device_map": {
+          "items": {
+            "$ref": "#/$defs/DeviceMapEntry"
+          },
+          "minItems": 1,
+          "title": "Device Map",
+          "type": "array"
+        },
+        "environment_binding": {
+          "enum": [
+            "profile_snapshot",
+            "managed_lock"
+          ],
+          "title": "Environment Binding",
+          "type": "string"
+        },
+        "environment_ref": {
+          "$ref": "#/$defs/Ref"
+        },
+        "experience": {
+          "$ref": "#/$defs/ExperienceSource"
+        },
+        "export_format": {
+          "$ref": "#/$defs/ExportFormat"
+        },
+        "gradient_checkpointing": {
+          "default": true,
+          "title": "Gradient Checkpointing",
+          "type": "boolean"
+        },
+        "inputs": {
+          "$ref": "#/$defs/ExecutionInputs"
+        },
+        "objective_ref": {
+          "$ref": "#/$defs/Ref"
+        },
+        "optimizer": {
+          "$ref": "#/$defs/OptimizerSpec"
+        },
+        "output_dir": {
+          "minLength": 1,
+          "title": "Output Dir",
+          "type": "string"
+        },
+        "output_layout": {
+          "const": "run_scoped_v1",
+          "default": "run_scoped_v1",
+          "title": "Output Layout",
+          "type": "string"
+        },
+        "policy_optimization": {
+          "$ref": "#/$defs/PolicyOptimizationSpec"
+        },
+        "precision": {
+          "$ref": "#/$defs/PrecisionExecutionPolicy"
+        },
+        "reward_source": {
+          "$ref": "#/$defs/RewardSourceRef"
+        },
+        "rollout": {
+          "$ref": "#/$defs/RolloutSpec"
+        },
+        "runtime_mode": {
+          "enum": [
+            "training",
+            "cpu_toy"
+          ],
+          "title": "Runtime Mode",
+          "type": "string"
+        },
+        "save_strategy": {
+          "default": "steps",
+          "enum": [
+            "no",
+            "steps"
+          ],
+          "title": "Save Strategy",
+          "type": "string"
+        },
+        "schedule": {
+          "$ref": "#/$defs/TrainingSchedule"
+        },
+        "seed": {
+          "default": 42,
+          "minimum": 0,
+          "title": "Seed",
+          "type": "integer"
+        },
+        "sequence": {
+          "$ref": "#/$defs/SequenceSpec"
+        },
+        "stability": {
+          "$ref": "#/$defs/StabilityController"
+        },
+        "trainer_interface": {
+          "$ref": "#/$defs/TrainerInterfacePolicy"
+        },
+        "trust_remote_code": {
+          "const": false,
+          "default": false,
+          "title": "Trust Remote Code",
+          "type": "boolean"
+        },
+        "use_safetensors": {
+          "const": true,
+          "default": true,
+          "title": "Use Safetensors",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "configuration_id",
+        "configuration_hash",
+        "backend_ref",
+        "environment_ref",
+        "environment_binding",
+        "capability_report_ref",
+        "inputs",
+        "objective_ref",
+        "runtime_mode",
+        "precision",
+        "attention",
+        "device_map",
+        "adapter",
+        "optimizer",
+        "sequence",
+        "batching",
+        "checkpoint_policy",
+        "schedule",
+        "experience",
+        "rollout",
+        "reward_source",
+        "stability",
+        "policy_optimization",
+        "trainer_interface",
+        "export_format",
+        "bnb_4bit_use_double_quant",
+        "output_dir"
+      ],
+      "title": "ResolvedRolloutExecutionConfiguration",
+      "type": "object"
+    },
     "ResumeLineage": {
       "additionalProperties": false,
       "description": "Recorded on a resumed run's :class:`RunManifest` so a resumed run always shows the exact parent\nrun and parent checkpoint it continued from - a fresh run identity with explicit provenance, never\na silent reuse of the parent run.",
@@ -6837,6 +7147,42 @@
       "title": "RewardModelingSpec",
       "type": "object"
     },
+    "RewardSourceRef": {
+      "additionalProperties": false,
+      "description": "The hash-pinned reference to what scores each rollout (S5b). A reward model produced by the S5a\nreward vertical is the primary source, served for inference-only scoring; rule / verifier rewards and\nan RLAIF judge (Evaluation Studio's judge under the provider policy) are the declared alternatives.\nThe reference is hash-pinned so a run cannot silently swap the reward function. Admissibility (e.g. a\nserved reward model must itself be ``workload_verified``) is enforced by the resolver + runner, not\nhere.",
+      "properties": {
+        "contract_version": {
+          "const": "1.0.0",
+          "default": "1.0.0",
+          "title": "Contract Version",
+          "type": "string"
+        },
+        "higher_is_better": {
+          "default": true,
+          "title": "Higher Is Better",
+          "type": "boolean"
+        },
+        "kind": {
+          "enum": [
+            "served_reward_model",
+            "verifier",
+            "process_reward",
+            "rlaif_judge"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "reward_ref": {
+          "$ref": "#/$defs/Ref"
+        }
+      },
+      "required": [
+        "kind",
+        "reward_ref"
+      ],
+      "title": "RewardSourceRef",
+      "type": "object"
+    },
     "RewardSuccessEvidence": {
       "additionalProperties": false,
       "description": "All gates required before a resolved pairwise reward-model run may be called successful. The reward\nsibling of :class:`PreferenceSuccessEvidence` - it verifies the exported reward artifact (a SEQ_CLS\nLoRA adapter + scalar score head) AND the PROMOTION GATE: held-out pairwise ranking accuracy. A falling\ntraining loss is never the gate - a reward model must RANK held-out chosen>rejected pairs correctly.",
@@ -6903,6 +7249,53 @@
         "heldout_pairs_evaluated"
       ],
       "title": "RewardSuccessEvidence",
+      "type": "object"
+    },
+    "RolloutSpec": {
+      "additionalProperties": false,
+      "description": "The GENERATION phase of an on-policy RL run (S5b): how completions are sampled from the current\npolicy to form the experience the update is computed over. Sampling MUST be stochastic (temperature > 0)\n- a greedy rollout collapses the group and yields a zero-variance GRPO advantage. ``rollouts_per_prompt``\nis the GRPO group size (>= 2 so the group-relative advantage is defined). Generation runs on the\nsanctioned worker decode path, never an unsanctioned generation path.",
+      "properties": {
+        "contract_version": {
+          "const": "1.0.0",
+          "default": "1.0.0",
+          "title": "Contract Version",
+          "type": "string"
+        },
+        "decode_policy": {
+          "const": "sanctioned_worker_decode",
+          "default": "sanctioned_worker_decode",
+          "title": "Decode Policy",
+          "type": "string"
+        },
+        "max_new_tokens": {
+          "minimum": 1,
+          "title": "Max New Tokens",
+          "type": "integer"
+        },
+        "rollouts_per_prompt": {
+          "minimum": 2,
+          "title": "Rollouts Per Prompt",
+          "type": "integer"
+        },
+        "sampling_temperature": {
+          "exclusiveMinimum": 0,
+          "title": "Sampling Temperature",
+          "type": "number"
+        },
+        "sampling_top_p": {
+          "exclusiveMinimum": 0,
+          "maximum": 1,
+          "title": "Sampling Top P",
+          "type": "number"
+        }
+      },
+      "required": [
+        "sampling_temperature",
+        "sampling_top_p",
+        "max_new_tokens",
+        "rollouts_per_prompt"
+      ],
+      "title": "RolloutSpec",
       "type": "object"
     },
     "RouteMissAction": {
@@ -7686,6 +8079,17 @@
           ],
           "default": null
         },
+        "resolved_rollout_execution": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ResolvedRolloutExecutionConfiguration"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "seed": {
           "default": 42,
           "minimum": 0,
@@ -7861,6 +8265,58 @@
         }
       },
       "title": "SequenceSpec",
+      "type": "object"
+    },
+    "StabilityController": {
+      "additionalProperties": false,
+      "description": "The sealed on-policy stability controls (S5b) - the guardrails that keep an on-policy update from\nreward-hacking or collapsing. The KL-to-reference penalty anchors the policy to the frozen base; the\nentropy bonus preserves exploration; advantage normalization stabilizes the group-relative signal; the\nclip range bounds the per-step policy change. Sealed like any execution field - no silent defaults.",
+      "properties": {
+        "advantage_normalization": {
+          "default": true,
+          "title": "Advantage Normalization",
+          "type": "boolean"
+        },
+        "clip_range": {
+          "exclusiveMinimum": 0,
+          "title": "Clip Range",
+          "type": "number"
+        },
+        "contract_version": {
+          "const": "1.0.0",
+          "default": "1.0.0",
+          "title": "Contract Version",
+          "type": "string"
+        },
+        "entropy_bonus": {
+          "default": 0.0,
+          "minimum": 0,
+          "title": "Entropy Bonus",
+          "type": "number"
+        },
+        "kl_coefficient": {
+          "minimum": 0,
+          "title": "Kl Coefficient",
+          "type": "number"
+        },
+        "kl_target": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Kl Target"
+        }
+      },
+      "required": [
+        "kl_coefficient",
+        "clip_range"
+      ],
+      "title": "StabilityController",
       "type": "object"
     },
     "StageMarker": {
