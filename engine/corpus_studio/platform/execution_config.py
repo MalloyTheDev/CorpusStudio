@@ -35,6 +35,7 @@ _FORMATTER_IDENTITIES = {
     "chat": "corpus-studio:tokenizer-chat-template-v1",
     "trace": "corpus-studio:structured-trace-renderer-v1",
     "preference": "corpus-studio:preference-pair-v1",
+    "rollout": "corpus-studio:rollout-generation-prompt-v1",
 }
 _RUNTIME_ID = re.compile(r"^[A-Za-z0-9._-]+$")
 
@@ -388,6 +389,25 @@ def preference_formatter_identity() -> tuple[str, str]:
     except (ImportError, OSError, TypeError) as exc:
         raise ExecutionConfigurationError(
             f"cannot inspect the sealed preference formatter implementation: {exc}"
+        ) from exc
+    return formatter_id, canonical_sha256({"formatter_id": formatter_id, "sources": sources})
+
+
+def rollout_formatter_identity() -> tuple[str, str]:
+    """The sealed identity of the on-policy RL prompt formatter, DISTINCT from :func:`formatter_identity`'s
+    SFT ``format_example_text`` (which renders a full instruction/chat/trace EXAMPLE including the response).
+    On-policy RL formats a PROMPT the policy then generates a completion from - the model's chat template
+    WITH a generation prompt (``add_generation_prompt=True``). Returns the id + a content digest of
+    ``format_rollout_prompt``'s source, so the rollout worker formats every prompt identically to what the
+    seal names (a formatter change fails closed) and the run is reproducible from its sealed configuration."""
+    formatter_id = _FORMATTER_IDENTITIES["rollout"]
+    try:
+        from corpus_studio.training.trainer import format_rollout_prompt  # noqa: PLC0415
+
+        sources = [inspect.getsource(format_rollout_prompt)]
+    except (ImportError, OSError, TypeError) as exc:
+        raise ExecutionConfigurationError(
+            f"cannot inspect the sealed rollout formatter implementation: {exc}"
         ) from exc
     return formatter_id, canonical_sha256({"formatter_id": formatter_id, "sources": sources})
 

@@ -2277,6 +2277,29 @@ def format_preference_pair(row: dict, tokenizer: Any | None = None) -> dict[str,
     return {"prompt": prompt, "chosen": chosen, "rejected": rejected}
 
 
+def format_rollout_prompt(row: dict, tokenizer: Any | None = None) -> str:
+    """Render one on-policy RL prompt row (the ``chat`` schema: a ``messages`` list) into the prompt string
+    the policy generates a completion from - the on-policy analog of :func:`format_preference_pair`. Applies
+    the model's chat template WITH a generation prompt (``add_generation_prompt=True``), so the model
+    continues as the assistant. The sealed formatter identity
+    (``execution_config.rollout_formatter_identity``) hashes THIS function's source, so the rollout worker
+    must call it for the run to be reproducible from its seal. Fails closed on a row missing a non-empty
+    ``messages`` list or a tokenizer without a chat template (on-policy RL prompts require one)."""
+    messages = row.get("messages")
+    if not messages:
+        raise TrainerError("each rollout prompt row requires a non-empty 'messages' list")
+    if tokenizer is None or not getattr(tokenizer, "chat_template", None):
+        raise TrainerError(
+            "formatting an on-policy RL prompt requires a tokenizer with a chat template"
+        )
+    try:
+        return str(
+            tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+        )
+    except Exception as exc:  # noqa: BLE001 - normalize third-party template exceptions.
+        raise TrainerError(f"the tokenizer chat template failed: {exc}") from exc
+
+
 def build_lora_kwargs(config: TrainRunConfig) -> dict[str, Any]:
     """peft ``LoraConfig`` kwargs. ``target_modules='all-linear'`` targets every linear layer, so it
     works across architectures (tiny Llama toy → real Qwen) without a per-model module list."""

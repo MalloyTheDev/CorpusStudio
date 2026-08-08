@@ -579,6 +579,32 @@ def test_on_policy_rl_refuses_a_checkpoint_cadence():
         )
 
 
+def test_on_policy_rl_seals_the_generation_prompt_formatter():
+    # The rollout worker formats prompts with add_generation_prompt=True (format_rollout_prompt), which is
+    # NOT the SFT 'chat' formatter (format_example_text renders a full example). The resolver must seal the
+    # rollout formatter identity so experience.formatter_sha256 names what the worker actually runs -
+    # reproducible-from-seal.
+    from corpus_studio.platform.execution_config import (
+        formatter_identity,
+        rollout_formatter_identity,
+    )
+
+    plan = _plan(
+        _profile(cc_major=8), _report(), task_type="grpo", objective_id="grpo",
+        reward_source_manifest=str(_REWARD_BRINGUP / "runs/run-reward-sealed-0001/RunManifest.json"),
+        reward_source_plan=str(_REWARD_BRINGUP / "reward-bringup.RunPlan.json"),
+    )
+    rollout = plan.resolved_rollout_execution
+    assert rollout is not None
+    rollout_id, rollout_hash = rollout_formatter_identity()
+    assert rollout.experience.formatter_id == rollout_id
+    assert rollout.experience.formatter_sha256 == rollout_hash
+    # It is a DISTINCT identity from the SFT 'chat' formatter (a mismatched seal would be unreproducible).
+    sft_id, sft_hash = formatter_identity("chat")
+    assert rollout.experience.formatter_id != sft_id
+    assert rollout.experience.formatter_sha256 != sft_hash
+
+
 def test_execute_run_refuses_a_reward_plan_with_a_non_reward_runner():
     # A reward plan routes to the "reward" lane; execute_run additionally pins the RUNNER TYPE, so a
     # look-alike runner that merely names the reward lane is refused fail-closed before any training - the

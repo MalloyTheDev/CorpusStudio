@@ -114,6 +114,7 @@ from corpus_studio.platform.execution_config import (
     execution_configuration_hash_for,
     full_finetune_execution_configuration_hash_for,
     formatter_identity,
+    rollout_formatter_identity,
     huggingface_input_ref,
     preference_execution_configuration_hash_for,
     reward_execution_configuration_hash_for,
@@ -1184,8 +1185,11 @@ def _resolve_rollout_execution(
         )
 
     # On-policy RL draws PROMPTS (the model generates the completion); resolve + validate the 'chat' schema.
+    # Seal the ROLLOUT prompt formatter (add_generation_prompt=True), NOT the SFT 'chat' formatter that
+    # renders a full example - the worker generates from a prompt, so its sealed identity must hash the
+    # generation-prompt formatter it actually runs (reproducible-from-seal).
     schema, _schema_source = resolve_schema(project_dir, "chat")
-    formatter_id, formatter_hash = formatter_identity("chat")
+    formatter_id, formatter_hash = rollout_formatter_identity()
     max_length = constraints.sequence_len
     # The prompt cap + the generation budget must both fit the window; seal sane defaults (half the window
     # for the prompt, a quarter for the generation) this slice.
