@@ -7329,6 +7329,9 @@ class TrainingPlanParameters(ContractModel):
     seed: int = 42
     data_seed: int | None = None
     output_dir: str = "output"
+    # On-policy RL (S5b) reward-source provenance binding - mirrors PlannerConstraints field-for-field.
+    reward_source_manifest: str | None = None
+    reward_source_plan: str | None = None
     supervised_token_accumulation_target: int | None = None
     attention_backend: str | None = None
     verification_requirement: str = "require_verified"

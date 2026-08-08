@@ -4,6 +4,8 @@ cc_major, proven-only precision/quant, sequence_len flows, cpu_toy never a silen
 sha256 plan-hash that excludes the volatile stamp). The rendered snapshot is round-tripped through
 the actual TrainRunConfig the runner replays."""
 
+from pathlib import Path
+
 import pytest
 from pydantic import ValidationError
 
@@ -492,6 +494,59 @@ def test_reward_objective_requires_the_reward_task():
     # a reward objective on a non-reward task is refused fail-closed (never silently lowered to SFT).
     with pytest.raises(PlannerError, match="a reward objective requires task_type='reward'"):
         _plan(_profile(cc_major=8), _report(), task_type="sft", objective_id="reward_model")
+
+
+_REWARD_BRINGUP = (
+    Path(__file__).resolve().parent.parent / "examples/wbg/runs/reward-bringup-qwen05b"
+)
+
+
+def test_on_policy_rl_resolves_to_a_sealed_config_and_is_refused_at_execution():
+    from corpus_studio.platform.execution_config import (
+        ExecutionConfigurationError,
+        required_runner_lane,
+        rollout_execution_configuration_hash_for,
+    )
+
+    # grpo + the grpo objective -> the on_policy_rl variant (contract_validated) is ADMITTED at planning: the
+    # resolver seals a ResolvedRolloutExecutionConfiguration (the plan carries it, not the SFT resolved_execution)
+    # and binds the reward source BY PROVENANCE from the real reward bring-up RunManifest + RunPlan.
+    plan = _plan(
+        _profile(cc_major=8), _report(), task_type="grpo", objective_id="grpo",
+        reward_source_manifest=str(_REWARD_BRINGUP / "runs/run-reward-sealed-0001/RunManifest.json"),
+        reward_source_plan=str(_REWARD_BRINGUP / "reward-bringup.RunPlan.json"),
+    )
+    rollout = plan.resolved_rollout_execution
+    assert rollout is not None and plan.resolved_execution is None
+    assert rollout.configuration_hash == rollout_execution_configuration_hash_for(rollout)
+    assert rollout.objective_ref.id == "grpo"
+    assert rollout.adapter_task_type == "CAUSAL_LM"
+    assert rollout.export_format.value == "adapter_peft"
+    assert rollout.policy_optimization.algorithm == "grpo"
+    assert plan.loss_impl.value == "grpo"
+    # the reward source is bound BY PROVENANCE: a served reward model + its admitted RunManifest + the
+    # loadable identity the worker reconstructs the scorer from.
+    source = rollout.reward_source
+    assert source.kind == "served_reward_model"
+    assert source.provenance_manifest_ref is not None
+    assert source.reward_base_model == "Qwen/Qwen2.5-0.5B-Instruct"
+    assert source.reward_adapter_location and source.reward_ref.hash is not None
+    # ADMITTED at planning, REFUSED at execution: on_policy_rl is contract_validated, not workload_verified.
+    with pytest.raises(ExecutionConfigurationError, match="rollout lane"):
+        required_runner_lane(plan)
+
+
+def test_on_policy_rl_objective_requires_the_grpo_task():
+    # a grpo (on_policy_rl) objective on a non-grpo task is refused fail-closed (never lowered to SFT).
+    with pytest.raises(PlannerError, match="an on-policy RL objective requires task_type='grpo'"):
+        _plan(_profile(cc_major=8), _report(), task_type="sft", objective_id="grpo")
+
+
+def test_on_policy_rl_requires_a_provenance_verified_reward_source():
+    # a grpo plan without the reward-source RunManifest + RunPlan cannot bind a provenance-verified reward
+    # source, so it is refused fail-closed - an unproven reward function never silently drives an RL run.
+    with pytest.raises(PlannerError, match="reward_source_manifest"):
+        _plan(_profile(cc_major=8), _report(), task_type="grpo", objective_id="grpo")
 
 
 def test_execute_run_refuses_a_reward_plan_with_a_non_reward_runner():

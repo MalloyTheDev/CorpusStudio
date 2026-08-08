@@ -68,6 +68,8 @@ export type PreferenceBeta = number;
 export type PreferenceLabelSmoothing = number;
 export type PreferenceMaxPromptLength = number | null;
 export type Quantization = string | null;
+export type RewardSourceManifest = string | null;
+export type RewardSourcePlan = string | null;
 export type Seed = number;
 export type SequenceLen = number;
 export type SourceCheckpointRefId = string | null;
@@ -183,6 +185,8 @@ export interface TrainingPlanParameters {
   preference_label_smoothing?: PreferenceLabelSmoothing;
   preference_max_prompt_length?: PreferenceMaxPromptLength;
   quantization?: Quantization;
+  reward_source_manifest?: RewardSourceManifest;
+  reward_source_plan?: RewardSourcePlan;
   seed?: Seed;
   sequence_len?: SequenceLen;
   source_checkpoint_ref_id?: SourceCheckpointRefId;

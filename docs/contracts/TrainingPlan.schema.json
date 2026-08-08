@@ -619,6 +619,30 @@
           "default": null,
           "title": "Quantization"
         },
+        "reward_source_manifest": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reward Source Manifest"
+        },
+        "reward_source_plan": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reward Source Plan"
+        },
         "seed": {
           "default": 42,
           "title": "Seed",
