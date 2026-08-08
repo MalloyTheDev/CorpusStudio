@@ -3684,7 +3684,7 @@ def grpo_policy_loss(
 
     The policy-gradient term is the PPO-style CLIPPED surrogate over the importance ratio
     ``exp(policy_logprob - old_logprob)`` times the group-relative ``advantages`` (broadcast to the token
-    grid by the caller): ``-mean(min(ratio*A, clip(ratio, 1-eps, 1+eps)*A))``. On the FIRST on-policy update
+    grid by the caller): ``-mean(min(ratio*A, clip(ratio, 1-clip_range, 1+clip_range)*A))``. On the FIRST on-policy update
     ``old == policy`` so ``ratio == 1`` and it reduces to ``-mean(A * logprob)``; the clip binds only once the
     policy moves off the sampling distribution. The KL penalty keeps the policy anchored to the FROZEN
     reference via Schulman's k3 estimator ``E[ref_ratio - log(ref_ratio) - 1]`` (``ref_ratio =
