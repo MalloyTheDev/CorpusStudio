@@ -6507,6 +6507,142 @@ class RewardSuccessEvidence(ContractModel):
     measured_peak: MemoryMetrics | None = None
 
 
+class RolloutStepEvidence(ContractModel):
+    """One optimizer step's on-policy RL signal (RL slice S5b): the GROUP of rollouts sampled from the
+    current policy, their mean reward (from the served reward source), the KL divergence to the FROZEN
+    reference (the safety rail - a blown-up KL is reward-hacking / collapse), the policy entropy, and the
+    mean group-relative advantage the GRPO update was built from. Recording these proves the step was
+    on-policy + reward-driven, not a degenerate SFT loss."""
+
+    optimizer_step: int = Field(ge=1)
+    rollouts_sampled: int = Field(ge=2)
+    mean_reward: float
+    kl_to_reference: float = Field(ge=0.0)
+    entropy: float
+    mean_advantage: float
+
+    @field_validator("mean_reward", "kl_to_reference", "entropy", "mean_advantage", mode="before")
+    @classmethod
+    def _strict_numeric(cls, value: object) -> object:
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ValueError("rollout step evidence must be JSON numbers")
+        return value
+
+    @field_validator("mean_reward", "kl_to_reference", "entropy", "mean_advantage")
+    @classmethod
+    def _finite(cls, value: float) -> float:
+        if not math.isfinite(value):
+            raise ValueError("rollout step evidence must be finite")
+        return value
+
+
+class RolloutExecutionEvidence(ContractModel):
+    """Trainer-side proof for an on-policy RL (GRPO) run before its policy adapter is admitted a success
+    (RL slice S5b). The on-policy sibling of :class:`RewardExecutionEvidence`: it REUSES the generic
+    adapter evidence pieces (:class:`TrainableStateChangeEvidence`, :class:`AdapterExportStateEvidence`,
+    :class:`GradientCoverageEvidence`, :class:`OptimizerStepLossEvidence`) and adds the on-policy honesty
+    signals: the KL reference model was FROZEN, real rollouts were sampled, and every completed step carries
+    its rollout stats (group size, mean reward, KL, entropy, advantage). None of these are part of the
+    sealed execution config, so the reuse cannot perturb the byte-locked SFT / pretraining / preference /
+    reward / rollout seals."""
+
+    trainable_state: TrainableStateChangeEvidence
+    adapter_export_state: AdapterExportStateEvidence
+    gradient_coverage: GradientCoverageEvidence
+    optimizer_created: Literal[True]
+    completed_optimizer_steps: int = Field(ge=1)
+    step_losses: list[OptimizerStepLossEvidence] = Field(min_length=1)
+    reference_model_frozen: Literal[True]
+    total_rollouts_sampled: int = Field(ge=2)
+    step_rollout_stats: list[RolloutStepEvidence] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _one_loss_and_rollout_per_completed_step(self) -> RolloutExecutionEvidence:
+        expected_steps = list(range(1, self.completed_optimizer_steps + 1))
+        if [item.optimizer_step for item in self.step_losses] != expected_steps:
+            raise ValueError(
+                "step_losses must contain exactly one ordered finite loss for every completed step"
+            )
+        if [item.optimizer_step for item in self.step_rollout_stats] != expected_steps:
+            raise ValueError(
+                "step_rollout_stats must contain exactly one ordered rollout record for every completed "
+                "optimizer step"
+            )
+        changed = set(self.trainable_state.changed_tensor_names)
+        observed_gradients = set(self.gradient_coverage.observed_tensor_names)
+        if (
+            self.gradient_coverage.eligible_tensor_names
+            != self.trainable_state.trainable_tensor_names
+        ):
+            raise ValueError(
+                "gradient eligibility must equal the complete trainable-state inventory"
+            )
+        if not changed.intersection(observed_gradients):
+            raise ValueError(
+                "at least one changed trainable tensor must have an observed materialized gradient"
+            )
+        if self.adapter_export_state.tensor_count != self.trainable_state.trainable_tensor_count:
+            raise ValueError(
+                "adapter export tensor count must equal the complete trainable-state inventory"
+            )
+        return self
+
+
+class RolloutSuccessEvidence(ContractModel):
+    """All gates required before a resolved on-policy RL (GRPO) run may be called successful (RL slice S5b).
+    The on-policy sibling of :class:`RewardSuccessEvidence` - it verifies the exported policy adapter AND
+    the PROMOTION GATE: a MEASURED held-out mean-reward LIFT while the KL to the reference stayed within
+    bound. A falling training loss is never the gate; training reward alone is not either (it reward-hacks).
+    A run that blew the KL bound is NOT an admissible on-policy success - the frozen reference is the safety
+    rail."""
+
+    execution: RolloutExecutionEvidence
+    output_path_verified: Literal[True]
+    adapter_bytes_verified: Literal[True]
+    artifact_integrity_verified: Literal[True]
+    adapter_safetensors_sha256: str = Field(pattern=SHA256_PATTERN)
+    adapter_config_sha256: str = Field(pattern=SHA256_PATTERN)
+    # The promotion gate: a held-out mean-reward LIFT (policy - baseline/reference) while KL stays bounded.
+    heldout_prompts_evaluated: int = Field(ge=1)
+    heldout_baseline_mean_reward: float
+    heldout_policy_mean_reward: float
+    heldout_mean_reward_lift: float
+    heldout_max_kl_to_reference: float = Field(ge=0.0)
+    kl_bound: float = Field(gt=0.0)
+    measured_peak: MemoryMetrics | None = None
+
+    @field_validator(
+        "heldout_baseline_mean_reward",
+        "heldout_policy_mean_reward",
+        "heldout_mean_reward_lift",
+        "heldout_max_kl_to_reference",
+    )
+    @classmethod
+    def _finite(cls, value: float) -> float:
+        if not math.isfinite(value):
+            raise ValueError("held-out reward evidence must be finite")
+        return value
+
+    @model_validator(mode="after")
+    def _lift_consistent_and_kl_bounded(self) -> RolloutSuccessEvidence:
+        if not math.isclose(
+            self.heldout_mean_reward_lift,
+            self.heldout_policy_mean_reward - self.heldout_baseline_mean_reward,
+            rel_tol=1e-6,
+            abs_tol=1e-6,
+        ):
+            raise ValueError(
+                "heldout_mean_reward_lift must equal heldout_policy_mean_reward - "
+                "heldout_baseline_mean_reward"
+            )
+        # KL is the hard safety rail: a success that diverged past the bound is reward-hacking / collapse.
+        if self.heldout_max_kl_to_reference > self.kl_bound:
+            raise ValueError(
+                "an admissible on-policy success must keep the held-out KL to the reference within kl_bound"
+            )
+        return self
+
+
 class RunManifest(ContractModel):
     """A single run INSTANCE: the crash-safe durable record of one execution of a RunPlan.
     Formalizes run_registry.TrainingRunRecord almost field-for-field + its state machine (terminal =
@@ -6552,6 +6688,8 @@ class RunManifest(ContractModel):
     full_finetune_success_evidence: PretrainingSuccessEvidence | None = None
     # The pairwise reward-model sibling (RL slice S5a): present on a succeeded reward run, absent otherwise.
     reward_success_evidence: RewardSuccessEvidence | None = None
+    # The on-policy RL (GRPO) sibling (RL slice S5b): present on a succeeded rollout run, absent otherwise.
+    rollout_success_evidence: RolloutSuccessEvidence | None = None
     # Present only on a run that resumed from a parent checkpoint - explicit parent-run + parent-
     # checkpoint provenance for a fresh run identity (#440). Absent for an ordinary from-scratch run.
     resume_lineage: ResumeLineage | None = None
@@ -6569,6 +6707,7 @@ class RunManifest(ContractModel):
             self.preference_success_evidence is not None,
             self.full_finetune_success_evidence is not None,
             self.reward_success_evidence is not None,
+            self.rollout_success_evidence is not None,
         )
         if sum(families) > 1:
             raise ValueError(
@@ -6577,7 +6716,8 @@ class RunManifest(ContractModel):
                 "(pretraining_success_evidence) XOR preference/DPO adapter "
                 "(preference_success_evidence) XOR full-parameter SFT "
                 "(full_finetune_success_evidence) XOR pairwise reward model "
-                "(reward_success_evidence)"
+                "(reward_success_evidence) XOR on-policy RL policy "
+                "(rollout_success_evidence)"
             )
         return self
 
@@ -6608,6 +6748,8 @@ class RunManifest(ContractModel):
             raise ValueError("only a succeeded run may carry full-finetune success evidence")
         if self.state != "succeeded" and self.reward_success_evidence is not None:
             raise ValueError("only a succeeded run may carry reward success evidence")
+        if self.state != "succeeded" and self.rollout_success_evidence is not None:
+            raise ValueError("only a succeeded run may carry rollout success evidence")
         if (
             self.state != "succeeded"
             and self.final_fit is not None
@@ -6622,6 +6764,7 @@ class RunManifest(ContractModel):
             and self.preference_success_evidence is None
             and self.full_finetune_success_evidence is None
             and self.reward_success_evidence is None
+            and self.rollout_success_evidence is None
         ):
             # A proven native fit is earned by an SFT adapter, a full-model pretraining, a DPO adapter, a
             # full-parameter SFT, or a reward-model success - never none. The one-family XOR guard keeps them

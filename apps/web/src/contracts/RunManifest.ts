@@ -235,22 +235,51 @@ export type StepRewardMargins1 = [PreferenceRewardMarginEvidence, ...PreferenceR
 export type HeldoutPairsEvaluated = number;
 export type HeldoutPairwiseAccuracy = number;
 export type OutputPathVerified2 = true;
-export type RunId1 = string;
-export type StartedAt = string | null;
-export type State = "prepared" | "running" | "succeeded" | "failed" | "cancelled" | "interrupted";
-export type Target = string;
 export type AdapterBytesVerified2 = true;
 export type AdapterConfigSha2562 = string;
 export type AdapterSafetensorsSha2562 = string;
 export type ArtifactIntegrityVerified3 = true;
 export type CompletedOptimizerSteps3 = number;
 export type OptimizerCreated3 = true;
-export type ResumedFromOptimizerStep = number;
+export type ReferenceModelFrozen1 = true;
 /**
  * @minItems 1
  */
 export type StepLosses3 = [OptimizerStepLossEvidence, ...OptimizerStepLossEvidence[]];
+/**
+ * @minItems 1
+ */
+export type StepRolloutStats = [RolloutStepEvidence, ...RolloutStepEvidence[]];
+export type Entropy = number;
+export type KlToReference = number;
+export type MeanAdvantage = number;
+export type MeanReward = number;
+export type OptimizerStep2 = number;
+export type RolloutsSampled = number;
+export type TotalRolloutsSampled = number;
+export type HeldoutBaselineMeanReward = number;
+export type HeldoutMaxKlToReference = number;
+export type HeldoutMeanRewardLift = number;
+export type HeldoutPolicyMeanReward = number;
+export type HeldoutPromptsEvaluated = number;
+export type KlBound = number;
 export type OutputPathVerified3 = true;
+export type RunId1 = string;
+export type StartedAt = string | null;
+export type State = "prepared" | "running" | "succeeded" | "failed" | "cancelled" | "interrupted";
+export type Target = string;
+export type AdapterBytesVerified3 = true;
+export type AdapterConfigSha2563 = string;
+export type AdapterSafetensorsSha2563 = string;
+export type ArtifactIntegrityVerified4 = true;
+export type CompletedOptimizerSteps4 = number;
+export type OptimizerCreated4 = true;
+export type ResumedFromOptimizerStep = number;
+/**
+ * @minItems 1
+ */
+export type StepLosses4 = [OptimizerStepLossEvidence, ...OptimizerStepLossEvidence[]];
+export type OutputPathVerified4 = true;
 export type UpdatedAt = string;
 
 /**
@@ -282,6 +311,7 @@ export interface RunManifest {
   reproducibility?: RunReproducibility | null;
   resume_lineage?: ResumeLineage | null;
   reward_success_evidence?: RewardSuccessEvidence | null;
+  rollout_success_evidence?: RolloutSuccessEvidence | null;
   run_id: RunId1;
   started_at?: StartedAt;
   state?: State;
@@ -574,26 +604,85 @@ export interface RewardExecutionEvidence {
   trainable_state: TrainableStateChangeEvidence;
 }
 /**
- * All gates required before a resolved run or measured fit may be called successful.
+ * All gates required before a resolved on-policy RL (GRPO) run may be called successful (RL slice S5b).
+ * The on-policy sibling of :class:`RewardSuccessEvidence` - it verifies the exported policy adapter AND
+ * the PROMOTION GATE: a MEASURED held-out mean-reward LIFT while the KL to the reference stayed within
+ * bound. A falling training loss is never the gate; training reward alone is not either (it reward-hacks).
+ * A run that blew the KL bound is NOT an admissible on-policy success - the frozen reference is the safety
+ * rail.
  */
-export interface TrainingSuccessEvidence {
+export interface RolloutSuccessEvidence {
   adapter_bytes_verified: AdapterBytesVerified2;
   adapter_config_sha256: AdapterConfigSha2562;
   adapter_safetensors_sha256: AdapterSafetensorsSha2562;
   artifact_integrity_verified: ArtifactIntegrityVerified3;
-  execution: TrainingExecutionEvidence;
+  execution: RolloutExecutionEvidence;
+  heldout_baseline_mean_reward: HeldoutBaselineMeanReward;
+  heldout_max_kl_to_reference: HeldoutMaxKlToReference;
+  heldout_mean_reward_lift: HeldoutMeanRewardLift;
+  heldout_policy_mean_reward: HeldoutPolicyMeanReward;
+  heldout_prompts_evaluated: HeldoutPromptsEvaluated;
+  kl_bound: KlBound;
   measured_peak?: MemoryMetrics | null;
   output_path_verified: OutputPathVerified3;
+}
+/**
+ * Trainer-side proof for an on-policy RL (GRPO) run before its policy adapter is admitted a success
+ * (RL slice S5b). The on-policy sibling of :class:`RewardExecutionEvidence`: it REUSES the generic
+ * adapter evidence pieces (:class:`TrainableStateChangeEvidence`, :class:`AdapterExportStateEvidence`,
+ * :class:`GradientCoverageEvidence`, :class:`OptimizerStepLossEvidence`) and adds the on-policy honesty
+ * signals: the KL reference model was FROZEN, real rollouts were sampled, and every completed step carries
+ * its rollout stats (group size, mean reward, KL, entropy, advantage). None of these are part of the
+ * sealed execution config, so the reuse cannot perturb the byte-locked SFT / pretraining / preference /
+ * reward / rollout seals.
+ */
+export interface RolloutExecutionEvidence {
+  adapter_export_state: AdapterExportStateEvidence;
+  completed_optimizer_steps: CompletedOptimizerSteps3;
+  gradient_coverage: GradientCoverageEvidence;
+  optimizer_created: OptimizerCreated3;
+  reference_model_frozen: ReferenceModelFrozen1;
+  step_losses: StepLosses3;
+  step_rollout_stats: StepRolloutStats;
+  total_rollouts_sampled: TotalRolloutsSampled;
+  trainable_state: TrainableStateChangeEvidence;
+}
+/**
+ * One optimizer step's on-policy RL signal (RL slice S5b): the GROUP of rollouts sampled from the
+ * current policy, their mean reward (from the served reward source), the KL divergence to the FROZEN
+ * reference (the safety rail - a blown-up KL is reward-hacking / collapse), the policy entropy, and the
+ * mean group-relative advantage the GRPO update was built from. Recording these proves the step was
+ * on-policy + reward-driven, not a degenerate SFT loss.
+ */
+export interface RolloutStepEvidence {
+  entropy: Entropy;
+  kl_to_reference: KlToReference;
+  mean_advantage: MeanAdvantage;
+  mean_reward: MeanReward;
+  optimizer_step: OptimizerStep2;
+  rollouts_sampled: RolloutsSampled;
+}
+/**
+ * All gates required before a resolved run or measured fit may be called successful.
+ */
+export interface TrainingSuccessEvidence {
+  adapter_bytes_verified: AdapterBytesVerified3;
+  adapter_config_sha256: AdapterConfigSha2563;
+  adapter_safetensors_sha256: AdapterSafetensorsSha2563;
+  artifact_integrity_verified: ArtifactIntegrityVerified4;
+  execution: TrainingExecutionEvidence;
+  measured_peak?: MemoryMetrics | null;
+  output_path_verified: OutputPathVerified4;
 }
 /**
  * Trainer-side proof produced before adapter export is admitted as a success.
  */
 export interface TrainingExecutionEvidence {
   adapter_export_state: AdapterExportStateEvidence;
-  completed_optimizer_steps: CompletedOptimizerSteps3;
+  completed_optimizer_steps: CompletedOptimizerSteps4;
   gradient_coverage: GradientCoverageEvidence;
-  optimizer_created: OptimizerCreated3;
+  optimizer_created: OptimizerCreated4;
   resumed_from_optimizer_step?: ResumedFromOptimizerStep;
-  step_losses: StepLosses3;
+  step_losses: StepLosses4;
   trainable_state: TrainableStateChangeEvidence;
 }
