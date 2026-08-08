@@ -3790,6 +3790,48 @@ def token_logprobs_and_entropy(  # pragma: no cover - torch-only; verified by to
     return token_logp, entropy
 
 
+def completion_token_mask(completion_targets: Any, eos_id: "int | list[int]") -> Any:
+    """The ``[G, C]`` completion mask that keeps every generated token UP TO AND INCLUDING the first EOS and
+    masks the padding after it - kept a small torch primitive so it is unit-tested (torch-guarded), not only
+    GPU-proven. HF ``generate`` ends a completion with an EOS then right-pads with ``pad_id``; when the
+    tokenizer has no dedicated pad token ``pad_id == eos_id``, so a naive ``targets != pad_id`` mask drops the
+    REAL end-of-completion EOS (its policy gradient + KL vanish, and an immediate-EOS completion reads as ZERO
+    valid tokens and is wrongly refused). ``eos_id`` is the COMPLETE stop set generation may end on (a list
+    for multi-EOS chat models); keying on the first of ANY of them keeps that token scored and excludes only
+    the trailing pad. A completion truncated at ``max_new_tokens`` with no EOS keeps every token. float32."""
+    import torch  # noqa: PLC0415
+
+    eos_ids = [eos_id] if isinstance(eos_id, int) else list(eos_id)
+    eos_tensor = torch.tensor(
+        eos_ids, device=completion_targets.device, dtype=completion_targets.dtype)
+    is_eos = torch.isin(completion_targets, eos_tensor).to(torch.long)
+    # EOS count STRICTLY before each position; valid iff none has occurred yet - so the first EOS is valid,
+    # everything after it is not.
+    eos_before = is_eos.cumsum(dim=-1) - is_eos
+    return (eos_before == 0).to(torch.float32)
+
+
+def _configured_stop_ids(policy_model: Any, tokenizer: Any) -> list[int]:  # pragma: no cover - integration
+    """The set of end-of-sequence ids ``generate()`` actually stops on, so the completion mask keys on the
+    SAME stop tokens generation honored. Prefer the model's ``generation_config.eos_token_id`` (a LIST for
+    multi-EOS chat models such as Llama-3) when it is set - generate() honors it OVER the tokenizer's nominal
+    eos, so unioning the two could make an ordinary generated tokenizer-eos wrongly terminate the mask. Fall
+    back to the tokenizer's eos only when the generation config declares none, then to the pad id."""
+    gen_cfg = getattr(policy_model, "generation_config", None)
+    src = getattr(gen_cfg, "eos_token_id", None)
+    if src is None:
+        src = getattr(tokenizer, "eos_token_id", None)
+    if isinstance(src, (list, tuple)):
+        ids = [int(x) for x in src if x is not None]
+    elif src is not None:
+        ids = [int(src)]
+    else:
+        ids = []
+    if not ids and tokenizer.pad_token_id is not None:
+        ids.append(int(tokenizer.pad_token_id))
+    return list(dict.fromkeys(ids))  # dedupe, order-stable
+
+
 def _encode_rollout_prompt(
     tokenizer: Any, prompt: str, max_prompt_length: int | None, *, truncation_allowed: bool = False
 ) -> list[int]:  # pragma: no cover - tokenizer integration; proven by a GPU run
@@ -3846,6 +3888,8 @@ def run_rollout_training(  # pragma: no cover - generation + optional training-s
     truncation_allowed: bool = False,
     seed: int = 42,
     learning_rate: float = 5e-5,
+    lr_scheduler: str = "constant",
+    warmup_ratio: float = 0.0,
     gradient_accumulation_steps: int = 1,
     max_grad_norm: float = float("inf"),
     optimizer: Any = None,
@@ -3894,9 +3938,19 @@ def run_rollout_training(  # pragma: no cover - generation + optional training-s
             )
     if optimizer is None:
         optimizer = torch.optim.AdamW(trainable, lr=learning_rate)
+    # Build + step the SEALED LR schedule (the custom loop must honor lr_scheduler + warmup_ratio, else the
+    # manifest claims a linear/cosine+warmup trajectory while the LR stays constant - irreproducible).
+    from transformers import get_scheduler  # noqa: PLC0415
+
+    scheduler = get_scheduler(
+        lr_scheduler, optimizer=optimizer,
+        # Ceiling conversion, matching TrainingArguments.get_warmup_steps: a positive warmup_ratio must not
+        # round down to zero warmup on a short run (e.g. 12 steps * 0.03 -> 1, not 0).
+        num_warmup_steps=math.ceil(warmup_ratio * max_steps), num_training_steps=max_steps)
     device = next(policy_model.parameters()).device
     cuda_device = device if getattr(device, "type", None) == "cuda" else None
     pad_id = tokenizer.pad_token_id
+    stop_ids = _configured_stop_ids(policy_model, tokenizer)  # the full EOS set generate() may stop on
     prior_use_cache = getattr(policy_model.config, "use_cache", None)
 
     _stage("training", f"GRPO at group_size={group_size}, max_new_tokens={max_new_tokens}")
@@ -3961,7 +4015,14 @@ def run_rollout_training(  # pragma: no cover - generation + optional training-s
             attention_mask[:, :prompt_len] = 1  # the prompt is always attended (pad==eos safe)
             policy_logp, entropy, completion_targets = _rollout_completion_logprobs(
                 backbone, lm_head_weight, generated, attention_mask, prompt_len)
-            completion_mask = (completion_targets != pad_id).to(policy_logp.dtype)
+            # Mask keyed on the FIRST of ANY configured EOS (not != pad_id): with pad==eos the real
+            # end-of-completion EOS must stay scored, and an immediate-EOS completion must count as one valid
+            # token, not zero.
+            completion_mask = completion_token_mask(completion_targets, stop_ids).to(policy_logp.dtype)
+            # old_logp is the SAMPLING-policy log-prob (same weights as this pre-update forward, dropout off),
+            # so the ratio is 1 at this single update - clip_range is correctly APPLIED but inert under one
+            # update per rollout. It binds only with mini-epoch reuse of these rollouts (a future enhancement);
+            # the KL-to-reference term is what regularizes each single-step update here.
             old_logp = policy_logp.detach()
             with torch.no_grad(), policy_model.disable_adapter():
                 ref_logp, _ref_entropy, _ = _rollout_completion_logprobs(
@@ -3996,6 +4057,7 @@ def run_rollout_training(  # pragma: no cover - generation + optional training-s
             micro_rollouts += int(generated.shape[0])
         grad_norms.append(float(torch.nn.utils.clip_grad_norm_(trainable, max_grad_norm)))
         optimizer.step()
+        scheduler.step()  # advance the sealed LR schedule once per optimizer step
         losses.append(micro_loss / gradient_accumulation_steps)
         mean_rewards.append(micro_reward / gradient_accumulation_steps)
         kls.append(micro_kl / gradient_accumulation_steps)
@@ -4035,9 +4097,12 @@ def evaluate_rollout_reward(  # pragma: no cover - generation + optional trainin
     use_reference: bool = False,
     stage_callback: StageCallback | None = None,
 ) -> dict[str, Any]:
-    """Held-out mean reward - one greedy-ish sample per prompt, scored by the served reward model. With
-    ``use_reference=True`` the adapter is DISABLED (the frozen base = the pre-RL policy), giving the BASELINE
-    reward; the lift ``policy - baseline`` under a bounded KL is the on-policy PROMOTION GATE. A pure
+    """Held-out mean reward - ONE GREEDY (deterministic) completion per prompt, scored by the served reward
+    model. With ``use_reference=True`` the adapter is DISABLED (the frozen base = the pre-RL policy), giving
+    the BASELINE reward; the lift ``policy - baseline`` under a bounded KL is the on-policy PROMOTION GATE.
+    Greedy decoding is deliberate: the lift must reflect the WEIGHT change, not sampling noise - with
+    ``do_sample=True`` the policy and reference draw different stochastic completions and a small held-out
+    split (down to the permitted single held-out prompt) could admit a run purely on noise. A pure
     measurement: eval mode, no optimizer, no backward."""
     import torch  # noqa: PLC0415
 
@@ -4061,8 +4126,8 @@ def evaluate_rollout_reward(  # pragma: no cover - generation + optional trainin
                     tokenizer, prompt, max_prompt_length, truncation_allowed=truncation_allowed)
                 prompt_tensor = torch.tensor([prompt_ids], device=device)
                 generated = policy_model.generate(
-                    prompt_tensor, do_sample=True, temperature=sampling_temperature,
-                    top_p=sampling_top_p, max_new_tokens=max_new_tokens, pad_token_id=pad_id)
+                    prompt_tensor, do_sample=False,
+                    max_new_tokens=max_new_tokens, pad_token_id=pad_id)
                 text = tokenizer.decode(generated[0, len(prompt_ids):], skip_special_tokens=True)
                 rewards.append(float(reward_scorer(prompt, text)))
 
@@ -4087,16 +4152,20 @@ def evaluate_rollout_kl(  # pragma: no cover - generation + optional training-st
     prompts: list[str],
     *,
     max_new_tokens: int,
-    sampling_temperature: float = 1.0,
-    sampling_top_p: float = 0.95,
     max_prompt_length: int | None = None,
     truncation_allowed: bool = False,
+    seed: int = 42,
     stage_callback: StageCallback | None = None,
 ) -> float:
     """The MAX per-completion KL to the frozen reference over held-out prompts - the on-policy safety-rail
     signal the success gate re-checks (a policy that stayed within the KL bound has not reward-hacked /
-    collapsed). Generate one completion per prompt with the trained policy, then score it under BOTH the
-    policy and the reference (``disable_adapter``) with the SAME float32 k3 KL estimator the loss uses."""
+    collapsed). The k3 estimator is unbiased ONLY for actions drawn from the SAME distribution its log-probs
+    score, so completions are sampled from the UNFILTERED policy (``temperature=1.0``, ``top_p=1.0``) - not
+    greedy, and not the training temperature/nucleus - with the sealed ``seed`` for reproducibility; each is
+    then scored under BOTH the policy and the reference (``disable_adapter``) with the SAME float32 k3 KL the
+    loss uses. (Greedy tokens report ~zero KL even when the policy moved mass off the argmax; a truncated/
+    tempered sample estimates the KL of the WRONG distribution and could hide tail divergence - either way the
+    bounded-KL gate could admit a collapsed or drifted policy.)"""
     import torch  # noqa: PLC0415
 
     def _stage(name: str, message: str) -> None:
@@ -4108,7 +4177,12 @@ def evaluate_rollout_kl(  # pragma: no cover - generation + optional training-st
     prior_use_cache = getattr(policy_model.config, "use_cache", None)
     policy_model.eval()
     device = next(policy_model.parameters()).device
+    cuda_device = device if getattr(device, "type", None) == "cuda" else None
     pad_id = tokenizer.pad_token_id
+    stop_ids = _configured_stop_ids(policy_model, tokenizer)  # the full EOS set generate() may stop on
+    torch.manual_seed(seed)  # reproducible policy samples for the k3 KL estimate
+    if cuda_device is not None:
+        torch.cuda.manual_seed_all(seed)
     max_kl = 0.0
     _stage("held_out_kl", f"measuring held-out KL over {len(prompts)} prompts")
     try:
@@ -4118,9 +4192,12 @@ def evaluate_rollout_kl(  # pragma: no cover - generation + optional training-st
                     tokenizer, prompt, max_prompt_length, truncation_allowed=truncation_allowed)
                 prompt_len = len(prompt_ids)
                 policy_model.config.use_cache = True
+                # SAMPLED from the UNFILTERED policy (temperature=1.0, top_p=1.0), seeded: the k3 estimator
+                # below is unbiased only for actions drawn from the same distribution its log-probs score.
+                # One completion per prompt, then scored under BOTH policy and reference (matched).
                 generated = policy_model.generate(
                     torch.tensor([prompt_ids], device=device), do_sample=True,
-                    temperature=sampling_temperature, top_p=sampling_top_p,
+                    temperature=1.0, top_p=1.0,
                     max_new_tokens=max_new_tokens, pad_token_id=pad_id)
                 policy_model.config.use_cache = False
                 attention_mask = (generated != pad_id).long()
@@ -4130,10 +4207,10 @@ def evaluate_rollout_kl(  # pragma: no cover - generation + optional training-st
                 with policy_model.disable_adapter():
                     ref_logp, _r, _t = _rollout_completion_logprobs(
                         backbone, lm_head_weight, generated, attention_mask, prompt_len)
-                mask = (targets != pad_id).to(torch.float32)
+                mask = completion_token_mask(targets, stop_ids)
                 valid = float(mask.sum())
                 if valid < 1.0:
-                    continue  # an empty (immediate-EOS) completion has no KL to contribute
+                    continue  # a zero-length completion (no generated tokens) has no KL to contribute
                 # Mask the log-ratio BEFORE expm1 (same 0*inf=NaN guard as grpo_policy_loss): a padded cell
                 # with an extreme divergence must be replaced by 0, not multiplied.
                 raw = (ref_logp - policy_logp).float()

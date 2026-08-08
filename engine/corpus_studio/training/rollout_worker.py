@@ -204,8 +204,21 @@ def run_rollout(  # pragma: no cover - optional training-stack integration; prov
     reward_backbone, reward_score_head = _seqcls_backbone_and_score_head(reward_model)
     reward_device = next(reward_model.parameters()).device
 
+    truncation_allowed = execution.sequence.truncation_allowed
+
     def _reward_scorer(prompt: str, completion: str) -> float:
-        ids = reward_tokenizer(prompt + completion, add_special_tokens=False)["input_ids"][:seq_len]
+        ids = reward_tokenizer(prompt + completion, add_special_tokens=False)["input_ids"]
+        # The served reward model may use a DIFFERENT tokenizer than the policy, so prompt+completion can
+        # exceed the policy's seq_len. Silently slicing to [:seq_len] would score a partial (or prompt-only)
+        # rollout while the evidence claims the full completion was scored - refuse unless truncation is sealed.
+        if len(ids) > seq_len:
+            if not truncation_allowed:
+                raise RolloutWorkerError(
+                    f"the reward tokenizer encodes prompt+completion to {len(ids)} tokens, beyond the sealed "
+                    f"seq_len={seq_len}, and the plan seals truncation_allowed=False; refusing to score a "
+                    f"silently-truncated rollout (raise the sequence window or seal a truncation policy)."
+                )
+            ids = ids[:seq_len]
         if not ids:
             return 0.0
         with torch.no_grad():
@@ -283,6 +296,8 @@ def run_rollout(  # pragma: no cover - optional training-stack integration; prov
             truncation_allowed=execution.sequence.truncation_allowed,
             seed=execution.seed,
             learning_rate=opt.learning_rate,
+            lr_scheduler=opt.lr_scheduler or "linear",
+            warmup_ratio=opt.warmup_ratio if opt.warmup_ratio is not None else 0.0,
             gradient_accumulation_steps=execution.batching.fallback_grad_accumulation_steps or 1,
             max_grad_norm=opt.max_grad_norm,
             optimizer=optimizer,
@@ -339,8 +354,8 @@ def run_rollout(  # pragma: no cover - optional training-stack integration; prov
             use_reference=True)
         max_kl = evaluate_rollout_kl(
             policy, tokenizer, heldout_prompts, max_new_tokens=max_new_tokens,
-            sampling_temperature=temperature, sampling_top_p=top_p,
-            max_prompt_length=max_prompt_length, truncation_allowed=truncation_allowed)
+            max_prompt_length=max_prompt_length, truncation_allowed=truncation_allowed,
+            seed=execution.seed)
     except TrainerError as exc:
         raise RolloutWorkerError(f"the held-out rollout evaluation refused the prompts: {exc}") from exc
 

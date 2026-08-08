@@ -579,6 +579,31 @@ def test_on_policy_rl_refuses_a_checkpoint_cadence():
         )
 
 
+def test_on_policy_rl_refuses_a_metric_driven_lr_scheduler():
+    # The GRPO loop steps the LR scheduler with no metric each optimizer step, so a metric-driven schedule
+    # (reduce_lr_on_plateau) would abort after the first update - refuse it at planning fail-closed rather
+    # than seal a schedule the loop cannot drive.
+    with pytest.raises(PlannerError, match="reduce_lr_on_plateau"):
+        _plan(
+            _profile(cc_major=8), _report(), task_type="grpo", objective_id="grpo",
+            lr_scheduler="reduce_lr_on_plateau",
+            reward_source_manifest=str(_REWARD_BRINGUP / "runs/run-reward-sealed-0001/RunManifest.json"),
+            reward_source_plan=str(_REWARD_BRINGUP / "reward-bringup.RunPlan.json"),
+        )
+
+
+def test_on_policy_rl_refuses_an_unknown_lr_scheduler():
+    # An ALLOWLIST, not a plateau blacklist: a typo / unsupported schedule must fail closed at planning, not
+    # reach transformers.get_scheduler at runtime.
+    with pytest.raises(PlannerError, match="not a supported schedule-only scheduler"):
+        _plan(
+            _profile(cc_major=8), _report(), task_type="grpo", objective_id="grpo",
+            lr_scheduler="linar",  # a typo for 'linear'
+            reward_source_manifest=str(_REWARD_BRINGUP / "runs/run-reward-sealed-0001/RunManifest.json"),
+            reward_source_plan=str(_REWARD_BRINGUP / "reward-bringup.RunPlan.json"),
+        )
+
+
 def test_on_policy_rl_seals_the_generation_prompt_formatter():
     # The rollout worker formats prompts with add_generation_prompt=True (format_rollout_prompt), which is
     # NOT the SFT 'chat' formatter (format_example_text renders a full example). The resolver must seal the

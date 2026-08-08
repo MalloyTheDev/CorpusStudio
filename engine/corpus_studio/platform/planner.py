@@ -1231,6 +1231,9 @@ def _resolve_rollout_execution(
             }
         )
     except ValidationError as exc:
+        # A metric-driven lr_scheduler (reduce_lr_on_plateau) is refused by the rollout CONTRACT validator so
+        # the refusal also covers imported/hand-built plans, not just this resolver; surfaces here as a
+        # PlannerError via this ValidationError wrap.
         raise PlannerError(f"the resolved rollout execution configuration is invalid: {exc}") from exc
     return draft.model_copy(
         update={"configuration_hash": rollout_execution_configuration_hash_for(draft)}

@@ -4367,6 +4367,25 @@ class PolicyOptimizationSpec(ContractModel):
         return self
 
 
+# The LR schedules the GRPO loop can construct via transformers.get_scheduler with ONLY
+# (num_warmup_steps, num_training_steps) - for ANY positive learning rate - AND drive with a metric-free
+# scheduler.step() each optimizer step. An ALLOWLIST (not a reduce_lr_on_plateau blacklist): a typo or any
+# other unsupported value must fail closed at planning, not raise inside get_scheduler at runtime.
+# Deliberately EXCLUDED: reduce_lr_on_plateau (step() needs a metric); schedules that need
+# scheduler_specific_kwargs the loop does not pass (cosine_with_min_lr needs min_lr; warmup_stable_decay
+# needs num_stable_steps/num_decay_steps); and polynomial (its lr_end defaults to 1e-7 and raises unless the
+# initial LR exceeds it - a floor the loop does not seal/pass). Kept as literal strings so the dependency-light
+# contract needs no transformers import; extend it (with the plumbing) when the loop seals a schedule's args.
+_ROLLOUT_LR_SCHEDULERS = frozenset({
+    "constant",
+    "constant_with_warmup",
+    "linear",
+    "cosine",
+    "cosine_with_restarts",
+    "inverse_sqrt",
+})
+
+
 class ResolvedRolloutExecutionConfiguration(ContractModel):
     """The hash-sealed configuration for an on-policy RL run - the sibling of
     :class:`ResolvedExecutionConfiguration` for the ``on_policy_rl`` execution variant (RL slice S5b,
@@ -4460,6 +4479,19 @@ class ResolvedRolloutExecutionConfiguration(ContractModel):
             QuantizationMode.nf4,
         }:
             raise ValueError("on-policy RL requires a 4-bit quantized base (int4 or nf4)")
+        # The GRPO loop constructs the LR scheduler via get_scheduler and steps it with NO metric each
+        # optimizer step. Enforce an ALLOWLIST in the CONTRACT (not only the resolver) so a hand-built /
+        # imported plan validated straight from JSON cannot seal a metric-driven schedule (reduce_lr_on_plateau)
+        # OR a typo/unsupported value that would raise inside get_scheduler at runtime.
+        if (
+            self.optimizer.lr_scheduler is not None
+            and self.optimizer.lr_scheduler not in _ROLLOUT_LR_SCHEDULERS
+        ):
+            raise ValueError(
+                f"on-policy RL lr_scheduler {self.optimizer.lr_scheduler!r} is not a supported schedule-only "
+                f"scheduler (the GRPO loop steps with no metric); use one of "
+                f"{sorted(_ROLLOUT_LR_SCHEDULERS)}"
+            )
         # On-policy RL scores discrete prompt+completion sequences; it never packs.
         if self.sequence.packing:
             raise ValueError("on-policy RL does not pack sequences")
