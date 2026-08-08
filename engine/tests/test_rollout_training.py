@@ -4,7 +4,12 @@ live rollout-generation + reward-serving loop (run_rollout_training) is pragma, 
 
 import pytest
 
-from corpus_studio.training.trainer import TrainerError, grpo_group_advantage, grpo_policy_loss
+from corpus_studio.training.trainer import (
+    TrainerError,
+    grpo_group_advantage,
+    grpo_policy_loss,
+    token_logprobs_and_entropy,
+)
 
 
 # --- grpo_group_advantage: the critic-free, group-relative advantage (PURE) -------------------------
@@ -21,6 +26,13 @@ def test_grpo_group_advantage_uniform_group_teaches_nothing() -> None:
     # a group the reward source could not separate (std 0) yields ~zero advantages - nothing to learn.
     adv = grpo_group_advantage([0.5, 0.5, 0.5])
     assert all(a == pytest.approx(0.0, abs=1e-3) for a in adv)
+
+
+def test_grpo_group_advantage_centering_only_when_normalization_off() -> None:
+    # honoring a sealed advantage_normalization=False: center (r - mean) WITHOUT the std scaling.
+    adv = grpo_group_advantage([1.0, 3.0], normalize=False)
+    assert adv == pytest.approx([-1.0, 1.0])  # mean 2 -> [-1, +1], no /std
+    assert sum(adv) == pytest.approx(0.0)
 
 
 def test_grpo_group_advantage_refuses_a_degenerate_group() -> None:
@@ -126,3 +138,21 @@ def test_grpo_policy_loss_refuses_a_nonzero_bonus_without_an_entropy_tensor() ->
     with pytest.raises(TrainerError, match="entropy_bonus requires an entropy tensor"):
         grpo_policy_loss(logp, logp, logp, torch.tensor([0.0]), torch.ones_like(logp),
                         entropy_bonus=0.1, entropy=None)
+
+
+# --- token_logprobs_and_entropy: the alignment-critical rollout logprob core (torch-guarded) ---------
+
+
+def test_token_logprobs_and_entropy_matches_log_softmax() -> None:
+    torch = pytest.importorskip("torch")
+
+    logits = torch.tensor([[[2.0, 1.0, 0.0], [0.0, 0.0, 0.0]]])  # [1, T=2, V=3]
+    targets = torch.tensor([[0, 2]])  # gather logprob of token 0 at t=0, token 2 at t=1
+    logp, entropy = token_logprobs_and_entropy(logits, targets)
+    ref = torch.log_softmax(logits.float(), dim=-1)
+    assert float(logp[0, 0]) == pytest.approx(float(ref[0, 0, 0]), abs=1e-6)
+    assert float(logp[0, 1]) == pytest.approx(float(ref[0, 1, 2]), abs=1e-6)
+    # a uniform distribution has entropy log(V) = log 3
+    assert float(entropy[0, 1]) == pytest.approx(float(torch.log(torch.tensor(3.0))), abs=1e-5)
+    # a peaked distribution has lower entropy than the uniform one
+    assert float(entropy[0, 0]) < float(entropy[0, 1])
