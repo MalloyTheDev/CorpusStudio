@@ -226,18 +226,19 @@ def test_reference_variants_workload_verified_are_the_four_dense_paths():
     assert by_kind[ExecutionVariantKind.pretraining] == ExecutionVariantSupport.workload_verified
     assert by_kind[ExecutionVariantKind.preference_dpo] == ExecutionVariantSupport.workload_verified
     assert by_kind[ExecutionVariantKind.dense_full_finetune] == ExecutionVariantSupport.workload_verified
+    assert by_kind[ExecutionVariantKind.reward_model] == ExecutionVariantSupport.workload_verified
     # MoE stays declared-only (no runtime).
     assert by_kind[ExecutionVariantKind.moe] != ExecutionVariantSupport.workload_verified
 
 
-def test_reward_model_variant_is_contract_validated_and_refused_at_execution():
+def test_reward_model_variant_is_workload_verified_and_admitted_at_execution():
     reference = {v.variant_kind: v for v in reference_execution_variants()}
     reward = reference[ExecutionVariantKind.reward_model]
-    # The pairwise reward-model shape is contract-expressible but NOT executable (RL slice S5a-1) - below
-    # the workload_verified admission bar, so execution admission refuses it fail-closed.
-    assert reward.support == ExecutionVariantSupport.contract_validated
-    with pytest.raises(ExecutionVariantRefused):
-        admit_execution_variant(reward)
+    # The pairwise reward-model shape is workload_verified (RL slice S5a PR 3c-2): a real GPU run through
+    # the managed execute_run -> RewardRunner -> supervisor reload-verify path admitted the evidence
+    # (held-out pairwise accuracy gate). Execution admission now passes fail-closed (returns None).
+    assert reward.support == ExecutionVariantSupport.workload_verified
+    assert admit_execution_variant(reward) is None
     # A reward task resolves by its SPECIFIC objective (only reward_model has a built shape); an absent /
     # unmapped objective, or a MoE reward request, refuses fail-closed rather than mis-claiming a shape.
     assert (

@@ -866,6 +866,7 @@ def execute_run(
         or plan.resolved_pretraining_execution is not None
         or plan.resolved_preference_execution is not None
         or plan.resolved_full_finetune_execution is not None
+        or plan.resolved_reward_execution is not None
     )
     record_dir = run_record_directory(out_dir, rid) if out_dir is not None else None
     events_handle: Any = None
@@ -999,6 +1000,15 @@ def execute_run(
             if type(runner) is not FullFinetuneRunner:
                 raise RunnerFailure(
                     "resolved full-finetune plans require the first-party FullFinetuneRunner adapter",
+                    taxonomy=FailureTaxonomy.UNSUPPORTED_CONFIGURATION,
+                    stage=StageMarker.env_loaded,
+                )
+        elif plan.resolved_reward_execution is not None:
+            from corpus_studio.platform.runners import RewardRunner  # noqa: PLC0415
+
+            if type(runner) is not RewardRunner:
+                raise RunnerFailure(
+                    "resolved reward plans require the first-party RewardRunner adapter",
                     taxonomy=FailureTaxonomy.UNSUPPORTED_CONFIGURATION,
                     stage=StageMarker.env_loaded,
                 )

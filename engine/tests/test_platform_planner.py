@@ -465,16 +465,15 @@ def test_planner_admits_the_dense_qlora_sft_task_and_refuses_unexecutable_varian
     assert dpo_plan.resolved_preference_execution.objective_ref.id == "dpo_qlora"
 
 
-def test_reward_model_resolves_to_a_sealed_config_and_is_refused_at_execution():
+def test_reward_model_resolves_to_a_sealed_config_and_routes_to_the_reward_lane():
     from corpus_studio.platform.execution_config import (
-        ExecutionConfigurationError,
         required_runner_lane,
         reward_execution_configuration_hash_for,
     )
 
-    # reward + the reward_model objective -> the reward_model variant (contract_validated) is ADMITTED at
-    # planning: the resolver seals a ResolvedRewardExecutionConfiguration (the plan carries it, not the SFT
-    # resolved_execution) and the plan's loss summary is the reward loss bound to the reward_model objective.
+    # reward + the reward_model objective -> the reward_model variant is ADMITTED at planning: the resolver
+    # seals a ResolvedRewardExecutionConfiguration (the plan carries it, not the SFT resolved_execution)
+    # and the plan's loss summary is the reward loss bound to the reward_model objective.
     plan = _plan(_profile(cc_major=8), _report(), task_type="reward", objective_id="reward_model")
     reward = plan.resolved_reward_execution
     assert reward is not None and plan.resolved_execution is None
@@ -483,16 +482,36 @@ def test_reward_model_resolves_to_a_sealed_config_and_is_refused_at_execution():
     assert reward.adapter_task_type == "SEQ_CLS"
     assert reward.export_format.value == "reward_model"
     assert plan.loss_impl.value == "reward_bt"
-    # ADMITTED at planning, REFUSED at execution: reward_model is contract_validated, not workload_verified
-    # (the reward-head worker + evidence + wheel are the gated milestone).
-    with pytest.raises(ExecutionConfigurationError, match="reward lane"):
-        required_runner_lane(plan)
+    # reward_model is workload_verified (GPU bring-up, RL slice S5a PR 3c-2), so the dispatch gate admits it
+    # and routes to the first-party RewardRunner lane - never the SFT/DPO adapter lane (which never trains a
+    # SEQ_CLS scalar score head under a Bradley-Terry loss).
+    assert required_runner_lane(plan) == "reward"
 
 
 def test_reward_objective_requires_the_reward_task():
     # a reward objective on a non-reward task is refused fail-closed (never silently lowered to SFT).
     with pytest.raises(PlannerError, match="a reward objective requires task_type='reward'"):
         _plan(_profile(cc_major=8), _report(), task_type="sft", objective_id="reward_model")
+
+
+def test_execute_run_refuses_a_reward_plan_with_a_non_reward_runner():
+    # A reward plan routes to the "reward" lane; execute_run additionally pins the RUNNER TYPE, so a
+    # look-alike runner that merely names the reward lane is refused fail-closed before any training - the
+    # exact gap the reward GPU bring-up caught (a reward plan used to fall through to the echo runner check).
+    from corpus_studio.platform.supervisor import execute_run
+
+    plan = _plan(_profile(cc_major=8), _report(), task_type="reward", objective_id="reward_model")
+
+    class _LookalikeRewardRunner:
+        name = "reward"
+
+        def run(self, ctx):  # noqa: ANN001, ANN201 - must never be reached
+            raise AssertionError("the runner-type gate must refuse before run()")
+
+    result = execute_run(plan, _LookalikeRewardRunner(), run_id="run-reward-typecheck", out_dir=None)
+    assert result.manifest.state == "failed"
+    assert result.manifest.failure is not None
+    assert "require the first-party RewardRunner adapter" in result.manifest.failure.message
 
 
 def test_preference_dpo_resolves_to_a_sealed_config_and_routes_to_the_preference_lane():

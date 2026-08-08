@@ -3,10 +3,14 @@
 Single source of truth for what Corpus Studio actually does today. When another
 doc disagrees with this file, this file wins (and the other doc should be fixed).
 
-Last reconciled: 2026-08-07 — **full-parameter SFT (dense_full_finetune) is workload_verified** (the
+Last reconciled: 2026-08-08 — **pairwise reward modeling (reward_model) is workload_verified** (the
+first-party `RewardRunner` lane trains a QLoRA SEQ_CLS scalar score head under a Bradley-Terry loss end to
+end - a Qwen2.5-0.5B GPU bring-up through the managed `execute_run`, supervisor-admitted evidence +
+adapter reload-verify, promotion gate = held-out pairwise ranking accuracy 1.0; RL slice S5a). Prior this
+arc: **full-parameter SFT (dense_full_finetune) is workload_verified** (the
 first-party `FullFinetuneRunner` lane trains ALL model parameters end to end - a Qwen2.5-0.5B GPU bring-up
 with supervisor-admitted full-model evidence + reload-verify; built across a clean 4-slice vertical
-#816/#817/#818/#819 + the S0 shared-optimizer hardening #815). Prior this arc: **offline DPO (preference) is
+#816/#817/#818/#819 + the S0 shared-optimizer hardening #815). Prior: **offline DPO (preference) is
 workload_verified** (the first-party `PreferenceRunner` lane trains a QLoRA adapter over a frozen reference
 model end to end - a Qwen3-4B DPO GPU bring-up with supervisor-admitted evidence, adapter reload-verify) and
 **from-scratch pretraining is workload_verified** (the `PretrainingRunner` lane, a 124M GPT-2 GPU bring-up, a
@@ -408,6 +412,22 @@ per-item error isolation, and off-thread document opens.
   504/504 LoRA tensors changed with observed gradients, peak 5.79 GiB; see [`HOST_STATE.md`](HOST_STATE.md)).
   A PRODUCT claim, not a sealed IEEE cell. The managed `platform-run --subprocess` route (a DPO worker
   wheel + sealed env) is the deployment follow-up, exactly as for pretraining (in-process routes now).
+- **Pairwise reward model (`reward_model`, `workload_verified`, EXECUTABLE)**: `platform-plan --task-type
+  reward --objective reward_model` admits a plan AT PLANNING and lowers it into a sealed
+  `ResolvedRewardExecutionConfiguration` (its own byte-locked seal, sibling to the DPO config) - a
+  `RewardModelingSpec` (pairwise / Bradley-Terry / last-token pooling / margin) reusing the
+  `PreferenceDataPolicy`, with `adapter_task_type=SEQ_CLS` and the `reward_model` export family. `platform-run`
+  routes it to the first-party `RewardRunner` - NOT the SFT/DPO adapter lane. The worker (`run_reward`) loads
+  a nf4 `AutoModelForSequenceClassification(num_labels=1)` + LoRA(SEQ_CLS) (the randomly-initialized score
+  head trains via PEFT `modules_to_save`), scores each branch at the explicit last content token, trains a
+  Bradley-Terry pairwise loss (cheaper than DPO - no reference model, no `[seq x vocab]` log-prob), carves a
+  seeded held-out ranking set, and returns `RewardExecutionEvidence`; the supervisor INDEPENDENTLY
+  reload-verifies the saved `adapter.safetensors` before admitting `RunManifest.reward_success_evidence`. The
+  PROMOTION GATE is HELD-OUT pairwise ranking accuracy, never a falling training loss. Promoted to
+  `workload_verified` by a measured GPU bring-up (Qwen2.5-0.5B-Instruct, nf4 QLoRA SEQ_CLS, seq 512, 20 steps,
+  loss 0.7563->0.0, score margin -0.07->46.65, held-out accuracy 1.0/2, 337/337 tensors changed, NATIVE_SAFE,
+  peak 0.95 GiB; see [`HOST_STATE.md`](HOST_STATE.md)). A PRODUCT claim, not a sealed IEEE cell. The managed
+  `platform-run --subprocess` route (a reward worker wheel + sealed env) is the deployment follow-up.
 - **Full-parameter SFT (`dense_full_finetune`, `workload_verified`, EXECUTABLE)**: `platform-plan
   --task-type sft --adapter-method full_finetune --export-format merged_safetensors` seals a full-MODEL
   `ResolvedFullFinetuneExecutionConfiguration` (its own byte-locked seal, sibling to the adapter SFT config)
