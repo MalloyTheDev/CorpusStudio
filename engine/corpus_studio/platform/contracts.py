@@ -4367,6 +4367,24 @@ class PolicyOptimizationSpec(ContractModel):
         return self
 
 
+# The LR schedules the GRPO loop can construct via transformers.get_scheduler AND drive with a metric-free
+# scheduler.step() each optimizer step. An ALLOWLIST (not a reduce_lr_on_plateau blacklist): a typo or any
+# other unsupported value must fail closed at planning, not reach get_scheduler at runtime. reduce_lr_on_plateau
+# is excluded on purpose (ReduceLROnPlateau.step() needs a metric). Kept as literal strings so the dependency-
+# light contract needs no transformers import; extend it when the loop learns to drive a new schedule.
+_ROLLOUT_LR_SCHEDULERS = frozenset({
+    "constant",
+    "constant_with_warmup",
+    "linear",
+    "cosine",
+    "cosine_with_restarts",
+    "cosine_with_min_lr",
+    "polynomial",
+    "inverse_sqrt",
+    "warmup_stable_decay",
+})
+
+
 class ResolvedRolloutExecutionConfiguration(ContractModel):
     """The hash-sealed configuration for an on-policy RL run - the sibling of
     :class:`ResolvedExecutionConfiguration` for the ``on_policy_rl`` execution variant (RL slice S5b,
@@ -4460,14 +4478,18 @@ class ResolvedRolloutExecutionConfiguration(ContractModel):
             QuantizationMode.nf4,
         }:
             raise ValueError("on-policy RL requires a 4-bit quantized base (int4 or nf4)")
-        # The GRPO loop steps the LR scheduler with no metric each optimizer step, so a metric-driven
-        # schedule (reduce_lr_on_plateau) would abort after the first update. Refuse it in the CONTRACT (not
-        # only the resolver) so a hand-built / imported plan validated straight from JSON cannot smuggle it in.
-        if self.optimizer.lr_scheduler == "reduce_lr_on_plateau":
+        # The GRPO loop constructs the LR scheduler via get_scheduler and steps it with NO metric each
+        # optimizer step. Enforce an ALLOWLIST in the CONTRACT (not only the resolver) so a hand-built /
+        # imported plan validated straight from JSON cannot seal a metric-driven schedule (reduce_lr_on_plateau)
+        # OR a typo/unsupported value that would raise inside get_scheduler at runtime.
+        if (
+            self.optimizer.lr_scheduler is not None
+            and self.optimizer.lr_scheduler not in _ROLLOUT_LR_SCHEDULERS
+        ):
             raise ValueError(
-                "on-policy RL cannot use lr_scheduler='reduce_lr_on_plateau': its scheduler needs a metric "
-                "each step, which the GRPO loop does not supply (use constant / linear / cosine / polynomial "
-                "/ inverse_sqrt)"
+                f"on-policy RL lr_scheduler {self.optimizer.lr_scheduler!r} is not a supported schedule-only "
+                f"scheduler (the GRPO loop steps with no metric); use one of "
+                f"{sorted(_ROLLOUT_LR_SCHEDULERS)}"
             )
         # On-policy RL scores discrete prompt+completion sequences; it never packs.
         if self.sequence.packing:
