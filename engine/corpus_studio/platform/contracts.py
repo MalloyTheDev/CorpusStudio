@@ -6168,6 +6168,78 @@ class PreferenceSuccessEvidence(ContractModel):
     measured_peak: MemoryMetrics | None = None
 
 
+class RewardExecutionEvidence(ContractModel):
+    """Trainer-side proof for a pairwise reward-model run before its adapter is admitted a success (RL
+    slice S5a). The reward sibling of :class:`PreferenceExecutionEvidence`: it REUSES the generic adapter
+    evidence pieces (:class:`TrainableStateChangeEvidence`, :class:`AdapterExportStateEvidence`,
+    :class:`GradientCoverageEvidence`, :class:`OptimizerStepLossEvidence`) and adds the reward-specific
+    honesty signals: real preference PAIRS were consumed, and every completed step carries the reward
+    margin (``score(chosen) - score(rejected)``) the Bradley-Terry loss was built from. A reward model has
+    NO reference model - it scores directly via the SEQ_CLS head - so there is no reference-frozen signal.
+    None of these are part of the sealed execution config, so the reuse cannot perturb the byte-locked
+    SFT / pretraining / preference / reward seals."""
+
+    trainable_state: TrainableStateChangeEvidence
+    adapter_export_state: AdapterExportStateEvidence
+    gradient_coverage: GradientCoverageEvidence
+    optimizer_created: Literal[True]
+    completed_optimizer_steps: int = Field(ge=1)
+    step_losses: list[OptimizerStepLossEvidence] = Field(min_length=1)
+    reward_pairs_consumed: int = Field(ge=1)
+    # Reuses the generic chosen/rejected/margin record; for a reward model the values are the EXPLICIT
+    # SEQ_CLS scores (not DPO implicit rewards), margin = score(chosen) - score(rejected).
+    step_reward_margins: list[PreferenceRewardMarginEvidence] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _one_loss_and_margin_per_completed_step(self) -> RewardExecutionEvidence:
+        expected_steps = list(range(1, self.completed_optimizer_steps + 1))
+        if [item.optimizer_step for item in self.step_losses] != expected_steps:
+            raise ValueError(
+                "step_losses must contain exactly one ordered finite loss for every completed step"
+            )
+        if [item.optimizer_step for item in self.step_reward_margins] != expected_steps:
+            raise ValueError(
+                "step_reward_margins must contain exactly one ordered reward margin for every completed "
+                "optimizer step"
+            )
+        changed = set(self.trainable_state.changed_tensor_names)
+        observed_gradients = set(self.gradient_coverage.observed_tensor_names)
+        if (
+            self.gradient_coverage.eligible_tensor_names
+            != self.trainable_state.trainable_tensor_names
+        ):
+            raise ValueError(
+                "gradient eligibility must equal the complete trainable-state inventory"
+            )
+        if not changed.intersection(observed_gradients):
+            raise ValueError(
+                "at least one changed trainable tensor must have an observed materialized gradient"
+            )
+        if self.adapter_export_state.tensor_count != self.trainable_state.trainable_tensor_count:
+            raise ValueError(
+                "adapter export tensor count must equal the complete trainable-state inventory"
+            )
+        return self
+
+
+class RewardSuccessEvidence(ContractModel):
+    """All gates required before a resolved pairwise reward-model run may be called successful. The reward
+    sibling of :class:`PreferenceSuccessEvidence` - it verifies the exported reward artifact (a SEQ_CLS
+    LoRA adapter + scalar score head) AND the PROMOTION GATE: held-out pairwise ranking accuracy. A falling
+    training loss is never the gate - a reward model must RANK held-out chosen>rejected pairs correctly."""
+
+    execution: RewardExecutionEvidence
+    output_path_verified: Literal[True]
+    adapter_bytes_verified: Literal[True]
+    artifact_integrity_verified: Literal[True]
+    adapter_safetensors_sha256: str = Field(pattern=SHA256_PATTERN)
+    adapter_config_sha256: str = Field(pattern=SHA256_PATTERN)
+    # The promotion gate: the fraction of HELD-OUT pairs the model scores chosen > rejected.
+    heldout_pairwise_accuracy: float = Field(ge=0.0, le=1.0)
+    heldout_pairs_evaluated: int = Field(ge=1)
+    measured_peak: MemoryMetrics | None = None
+
+
 class RunManifest(ContractModel):
     """A single run INSTANCE: the crash-safe durable record of one execution of a RunPlan.
     Formalizes run_registry.TrainingRunRecord almost field-for-field + its state machine (terminal =
@@ -6211,6 +6283,8 @@ class RunManifest(ContractModel):
     # PretrainingSuccessEvidence shape (the same model.safetensors + full-model export evidence); the
     # dedicated field keeps it distinct from a pretraining run. Mutually exclusive with the families above.
     full_finetune_success_evidence: PretrainingSuccessEvidence | None = None
+    # The pairwise reward-model sibling (RL slice S5a): present on a succeeded reward run, absent otherwise.
+    reward_success_evidence: RewardSuccessEvidence | None = None
     # Present only on a run that resumed from a parent checkpoint - explicit parent-run + parent-
     # checkpoint provenance for a fresh run identity (#440). Absent for an ordinary from-scratch run.
     resume_lineage: ResumeLineage | None = None
@@ -6227,6 +6301,7 @@ class RunManifest(ContractModel):
             self.pretraining_success_evidence is not None,
             self.preference_success_evidence is not None,
             self.full_finetune_success_evidence is not None,
+            self.reward_success_evidence is not None,
         )
         if sum(families) > 1:
             raise ValueError(
@@ -6234,7 +6309,8 @@ class RunManifest(ContractModel):
                 "(training_success_evidence) XOR full-model pretraining "
                 "(pretraining_success_evidence) XOR preference/DPO adapter "
                 "(preference_success_evidence) XOR full-parameter SFT "
-                "(full_finetune_success_evidence)"
+                "(full_finetune_success_evidence) XOR pairwise reward model "
+                "(reward_success_evidence)"
             )
         return self
 
@@ -6263,6 +6339,8 @@ class RunManifest(ContractModel):
             raise ValueError("only a succeeded run may carry preference success evidence")
         if self.state != "succeeded" and self.full_finetune_success_evidence is not None:
             raise ValueError("only a succeeded run may carry full-finetune success evidence")
+        if self.state != "succeeded" and self.reward_success_evidence is not None:
+            raise ValueError("only a succeeded run may carry reward success evidence")
         if (
             self.state != "succeeded"
             and self.final_fit is not None
