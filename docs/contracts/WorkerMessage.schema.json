@@ -7287,6 +7287,70 @@
       "title": "RewardSuccessEvidence",
       "type": "object"
     },
+    "RolloutExecutionEvidence": {
+      "additionalProperties": false,
+      "description": "Trainer-side proof for an on-policy RL (GRPO) run before its policy adapter is admitted a success\n(RL slice S5b). The on-policy sibling of :class:`RewardExecutionEvidence`: it REUSES the generic\nadapter evidence pieces (:class:`TrainableStateChangeEvidence`, :class:`AdapterExportStateEvidence`,\n:class:`GradientCoverageEvidence`, :class:`OptimizerStepLossEvidence`) and adds the on-policy honesty\nsignals: the KL reference model was FROZEN, real rollouts were sampled, and every completed step carries\nits rollout stats (group size, mean reward, KL, entropy, advantage). None of these are part of the\nsealed execution config, so the reuse cannot perturb the byte-locked SFT / pretraining / preference /\nreward / rollout seals.",
+      "properties": {
+        "adapter_export_state": {
+          "$ref": "#/$defs/AdapterExportStateEvidence"
+        },
+        "completed_optimizer_steps": {
+          "minimum": 1,
+          "title": "Completed Optimizer Steps",
+          "type": "integer"
+        },
+        "gradient_coverage": {
+          "$ref": "#/$defs/GradientCoverageEvidence"
+        },
+        "optimizer_created": {
+          "const": true,
+          "title": "Optimizer Created",
+          "type": "boolean"
+        },
+        "reference_model_frozen": {
+          "const": true,
+          "title": "Reference Model Frozen",
+          "type": "boolean"
+        },
+        "step_losses": {
+          "items": {
+            "$ref": "#/$defs/OptimizerStepLossEvidence"
+          },
+          "minItems": 1,
+          "title": "Step Losses",
+          "type": "array"
+        },
+        "step_rollout_stats": {
+          "items": {
+            "$ref": "#/$defs/RolloutStepEvidence"
+          },
+          "minItems": 1,
+          "title": "Step Rollout Stats",
+          "type": "array"
+        },
+        "total_rollouts_sampled": {
+          "minimum": 2,
+          "title": "Total Rollouts Sampled",
+          "type": "integer"
+        },
+        "trainable_state": {
+          "$ref": "#/$defs/TrainableStateChangeEvidence"
+        }
+      },
+      "required": [
+        "trainable_state",
+        "adapter_export_state",
+        "gradient_coverage",
+        "optimizer_created",
+        "completed_optimizer_steps",
+        "step_losses",
+        "reference_model_frozen",
+        "total_rollouts_sampled",
+        "step_rollout_stats"
+      ],
+      "title": "RolloutExecutionEvidence",
+      "type": "object"
+    },
     "RolloutSpec": {
       "additionalProperties": false,
       "description": "The GENERATION phase of an on-policy RL run (S5b): how completions are sampled from the current\npolicy to form the experience the update is computed over. Sampling MUST be stochastic (temperature > 0)\n- a greedy rollout collapses the group and yields a zero-variance GRPO advantage. ``rollouts_per_prompt``\nis the GRPO group size (>= 2 so the group-relative advantage is defined). Generation runs on the\nsanctioned worker decode path, never an unsanctioned generation path.",
@@ -7332,6 +7396,137 @@
         "rollouts_per_prompt"
       ],
       "title": "RolloutSpec",
+      "type": "object"
+    },
+    "RolloutStepEvidence": {
+      "additionalProperties": false,
+      "description": "One optimizer step's on-policy RL signal (RL slice S5b): the GROUP of rollouts sampled from the\ncurrent policy, their mean reward (from the served reward source), the KL divergence to the FROZEN\nreference (the safety rail - a blown-up KL is reward-hacking / collapse), the policy entropy, and the\nmean group-relative advantage the GRPO update was built from. Recording these proves the step was\non-policy + reward-driven, not a degenerate SFT loss.",
+      "properties": {
+        "entropy": {
+          "title": "Entropy",
+          "type": "number"
+        },
+        "kl_to_reference": {
+          "minimum": 0.0,
+          "title": "Kl To Reference",
+          "type": "number"
+        },
+        "mean_advantage": {
+          "title": "Mean Advantage",
+          "type": "number"
+        },
+        "mean_reward": {
+          "title": "Mean Reward",
+          "type": "number"
+        },
+        "optimizer_step": {
+          "minimum": 1,
+          "title": "Optimizer Step",
+          "type": "integer"
+        },
+        "rollouts_sampled": {
+          "minimum": 2,
+          "title": "Rollouts Sampled",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "optimizer_step",
+        "rollouts_sampled",
+        "mean_reward",
+        "kl_to_reference",
+        "entropy",
+        "mean_advantage"
+      ],
+      "title": "RolloutStepEvidence",
+      "type": "object"
+    },
+    "RolloutSuccessEvidence": {
+      "additionalProperties": false,
+      "description": "All gates required before a resolved on-policy RL (GRPO) run may be called successful (RL slice S5b).\nThe on-policy sibling of :class:`RewardSuccessEvidence` - it verifies the exported policy adapter AND\nthe PROMOTION GATE: a MEASURED held-out mean-reward LIFT while the KL to the reference stayed within\nbound. A falling training loss is never the gate; training reward alone is not either (it reward-hacks).\nA run that blew the KL bound is NOT an admissible on-policy success - the frozen reference is the safety\nrail.",
+      "properties": {
+        "adapter_bytes_verified": {
+          "const": true,
+          "title": "Adapter Bytes Verified",
+          "type": "boolean"
+        },
+        "adapter_config_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Adapter Config Sha256",
+          "type": "string"
+        },
+        "adapter_safetensors_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Adapter Safetensors Sha256",
+          "type": "string"
+        },
+        "artifact_integrity_verified": {
+          "const": true,
+          "title": "Artifact Integrity Verified",
+          "type": "boolean"
+        },
+        "execution": {
+          "$ref": "#/$defs/RolloutExecutionEvidence"
+        },
+        "heldout_baseline_mean_reward": {
+          "title": "Heldout Baseline Mean Reward",
+          "type": "number"
+        },
+        "heldout_max_kl_to_reference": {
+          "minimum": 0.0,
+          "title": "Heldout Max Kl To Reference",
+          "type": "number"
+        },
+        "heldout_mean_reward_lift": {
+          "title": "Heldout Mean Reward Lift",
+          "type": "number"
+        },
+        "heldout_policy_mean_reward": {
+          "title": "Heldout Policy Mean Reward",
+          "type": "number"
+        },
+        "heldout_prompts_evaluated": {
+          "minimum": 1,
+          "title": "Heldout Prompts Evaluated",
+          "type": "integer"
+        },
+        "kl_bound": {
+          "exclusiveMinimum": 0.0,
+          "title": "Kl Bound",
+          "type": "number"
+        },
+        "measured_peak": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MemoryMetrics"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "output_path_verified": {
+          "const": true,
+          "title": "Output Path Verified",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "execution",
+        "output_path_verified",
+        "adapter_bytes_verified",
+        "artifact_integrity_verified",
+        "adapter_safetensors_sha256",
+        "adapter_config_sha256",
+        "heldout_prompts_evaluated",
+        "heldout_baseline_mean_reward",
+        "heldout_policy_mean_reward",
+        "heldout_mean_reward_lift",
+        "heldout_max_kl_to_reference",
+        "kl_bound"
+      ],
+      "title": "RolloutSuccessEvidence",
       "type": "object"
     },
     "RouteMissAction": {
@@ -7851,6 +8046,17 @@
           "anyOf": [
             {
               "$ref": "#/$defs/RewardSuccessEvidence"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "rollout_success_evidence": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RolloutSuccessEvidence"
             },
             {
               "type": "null"
