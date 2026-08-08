@@ -6741,6 +6741,64 @@
       "title": "ResumeLineage",
       "type": "object"
     },
+    "RewardExecutionEvidence": {
+      "additionalProperties": false,
+      "description": "Trainer-side proof for a pairwise reward-model run before its adapter is admitted a success (RL\nslice S5a). The reward sibling of :class:`PreferenceExecutionEvidence`: it REUSES the generic adapter\nevidence pieces (:class:`TrainableStateChangeEvidence`, :class:`AdapterExportStateEvidence`,\n:class:`GradientCoverageEvidence`, :class:`OptimizerStepLossEvidence`) and adds the reward-specific\nhonesty signals: real preference PAIRS were consumed, and every completed step carries the reward\nmargin (``score(chosen) - score(rejected)``) the Bradley-Terry loss was built from. A reward model has\nNO reference model - it scores directly via the SEQ_CLS head - so there is no reference-frozen signal.\nNone of these are part of the sealed execution config, so the reuse cannot perturb the byte-locked\nSFT / pretraining / preference / reward seals.",
+      "properties": {
+        "adapter_export_state": {
+          "$ref": "#/$defs/AdapterExportStateEvidence"
+        },
+        "completed_optimizer_steps": {
+          "minimum": 1,
+          "title": "Completed Optimizer Steps",
+          "type": "integer"
+        },
+        "gradient_coverage": {
+          "$ref": "#/$defs/GradientCoverageEvidence"
+        },
+        "optimizer_created": {
+          "const": true,
+          "title": "Optimizer Created",
+          "type": "boolean"
+        },
+        "reward_pairs_consumed": {
+          "minimum": 1,
+          "title": "Reward Pairs Consumed",
+          "type": "integer"
+        },
+        "step_losses": {
+          "items": {
+            "$ref": "#/$defs/OptimizerStepLossEvidence"
+          },
+          "minItems": 1,
+          "title": "Step Losses",
+          "type": "array"
+        },
+        "step_reward_margins": {
+          "items": {
+            "$ref": "#/$defs/PreferenceRewardMarginEvidence"
+          },
+          "minItems": 1,
+          "title": "Step Reward Margins",
+          "type": "array"
+        },
+        "trainable_state": {
+          "$ref": "#/$defs/TrainableStateChangeEvidence"
+        }
+      },
+      "required": [
+        "trainable_state",
+        "adapter_export_state",
+        "gradient_coverage",
+        "optimizer_created",
+        "completed_optimizer_steps",
+        "step_losses",
+        "reward_pairs_consumed",
+        "step_reward_margins"
+      ],
+      "title": "RewardExecutionEvidence",
+      "type": "object"
+    },
     "RewardModelingSpec": {
       "additionalProperties": false,
       "description": "The reward-model training shape for a PAIRWISE (Bradley-Terry) reward model - the sibling of\n:class:`PreferenceOptimizationSpec` for the ``reward_model`` execution variant. Kept off\n:class:`PreferenceDataPolicy` (reused verbatim as the chosen/rejected data contract) so the data\npolicy stays method-agnostic. A reward model's output is a NEW artifact family: a scalar SCORE HEAD\nover the base (a SEQ_CLS ``num_labels=1`` projection), NOT a policy adapter and NOT causal-LM\ngeneration.\n\nOnly the pairwise Bradley-Terry family is admitted here; scalar-pointwise / process / outcome /\ngenerative-verifier reward families are DISTINCT (different output artifacts + eval semantics) and are\nadded as their own specs + objectives, never silently under this seal (each gates independently).",
@@ -6777,6 +6835,74 @@
         }
       },
       "title": "RewardModelingSpec",
+      "type": "object"
+    },
+    "RewardSuccessEvidence": {
+      "additionalProperties": false,
+      "description": "All gates required before a resolved pairwise reward-model run may be called successful. The reward\nsibling of :class:`PreferenceSuccessEvidence` - it verifies the exported reward artifact (a SEQ_CLS\nLoRA adapter + scalar score head) AND the PROMOTION GATE: held-out pairwise ranking accuracy. A falling\ntraining loss is never the gate - a reward model must RANK held-out chosen>rejected pairs correctly.",
+      "properties": {
+        "adapter_bytes_verified": {
+          "const": true,
+          "title": "Adapter Bytes Verified",
+          "type": "boolean"
+        },
+        "adapter_config_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Adapter Config Sha256",
+          "type": "string"
+        },
+        "adapter_safetensors_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Adapter Safetensors Sha256",
+          "type": "string"
+        },
+        "artifact_integrity_verified": {
+          "const": true,
+          "title": "Artifact Integrity Verified",
+          "type": "boolean"
+        },
+        "execution": {
+          "$ref": "#/$defs/RewardExecutionEvidence"
+        },
+        "heldout_pairs_evaluated": {
+          "minimum": 1,
+          "title": "Heldout Pairs Evaluated",
+          "type": "integer"
+        },
+        "heldout_pairwise_accuracy": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Heldout Pairwise Accuracy",
+          "type": "number"
+        },
+        "measured_peak": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MemoryMetrics"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "output_path_verified": {
+          "const": true,
+          "title": "Output Path Verified",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "execution",
+        "output_path_verified",
+        "adapter_bytes_verified",
+        "artifact_integrity_verified",
+        "adapter_safetensors_sha256",
+        "adapter_config_sha256",
+        "heldout_pairwise_accuracy",
+        "heldout_pairs_evaluated"
+      ],
+      "title": "RewardSuccessEvidence",
       "type": "object"
     },
     "RouteMissAction": {
@@ -7285,6 +7411,17 @@
           "anyOf": [
             {
               "$ref": "#/$defs/ResumeLineage"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "reward_success_evidence": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RewardSuccessEvidence"
             },
             {
               "type": "null"

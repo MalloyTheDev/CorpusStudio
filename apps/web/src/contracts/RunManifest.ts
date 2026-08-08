@@ -217,22 +217,40 @@ export type ParentCheckpointHash = string;
 export type ParentCheckpointId = string;
 export type ParentRunId = string;
 export type ResumedFromGlobalStep = number;
-export type RunId1 = string;
-export type StartedAt = string | null;
-export type State = "prepared" | "running" | "succeeded" | "failed" | "cancelled" | "interrupted";
-export type Target = string;
 export type AdapterBytesVerified1 = true;
 export type AdapterConfigSha2561 = string;
 export type AdapterSafetensorsSha2561 = string;
 export type ArtifactIntegrityVerified2 = true;
 export type CompletedOptimizerSteps2 = number;
 export type OptimizerCreated2 = true;
-export type ResumedFromOptimizerStep = number;
+export type RewardPairsConsumed = number;
 /**
  * @minItems 1
  */
 export type StepLosses2 = [OptimizerStepLossEvidence, ...OptimizerStepLossEvidence[]];
+/**
+ * @minItems 1
+ */
+export type StepRewardMargins1 = [PreferenceRewardMarginEvidence, ...PreferenceRewardMarginEvidence[]];
+export type HeldoutPairsEvaluated = number;
+export type HeldoutPairwiseAccuracy = number;
 export type OutputPathVerified2 = true;
+export type RunId1 = string;
+export type StartedAt = string | null;
+export type State = "prepared" | "running" | "succeeded" | "failed" | "cancelled" | "interrupted";
+export type Target = string;
+export type AdapterBytesVerified2 = true;
+export type AdapterConfigSha2562 = string;
+export type AdapterSafetensorsSha2562 = string;
+export type ArtifactIntegrityVerified3 = true;
+export type CompletedOptimizerSteps3 = number;
+export type OptimizerCreated3 = true;
+export type ResumedFromOptimizerStep = number;
+/**
+ * @minItems 1
+ */
+export type StepLosses3 = [OptimizerStepLossEvidence, ...OptimizerStepLossEvidence[]];
+export type OutputPathVerified3 = true;
 export type UpdatedAt = string;
 
 /**
@@ -263,6 +281,7 @@ export interface RunManifest {
   process?: RunProcessInfo | null;
   reproducibility?: RunReproducibility | null;
   resume_lineage?: ResumeLineage | null;
+  reward_success_evidence?: RewardSuccessEvidence | null;
   run_id: RunId1;
   started_at?: StartedAt;
   state?: State;
@@ -517,26 +536,64 @@ export interface ResumeLineage {
   resumed_from_global_step: ResumedFromGlobalStep;
 }
 /**
- * All gates required before a resolved run or measured fit may be called successful.
+ * All gates required before a resolved pairwise reward-model run may be called successful. The reward
+ * sibling of :class:`PreferenceSuccessEvidence` - it verifies the exported reward artifact (a SEQ_CLS
+ * LoRA adapter + scalar score head) AND the PROMOTION GATE: held-out pairwise ranking accuracy. A falling
+ * training loss is never the gate - a reward model must RANK held-out chosen>rejected pairs correctly.
  */
-export interface TrainingSuccessEvidence {
+export interface RewardSuccessEvidence {
   adapter_bytes_verified: AdapterBytesVerified1;
   adapter_config_sha256: AdapterConfigSha2561;
   adapter_safetensors_sha256: AdapterSafetensorsSha2561;
   artifact_integrity_verified: ArtifactIntegrityVerified2;
-  execution: TrainingExecutionEvidence;
+  execution: RewardExecutionEvidence;
+  heldout_pairs_evaluated: HeldoutPairsEvaluated;
+  heldout_pairwise_accuracy: HeldoutPairwiseAccuracy;
   measured_peak?: MemoryMetrics | null;
   output_path_verified: OutputPathVerified2;
+}
+/**
+ * Trainer-side proof for a pairwise reward-model run before its adapter is admitted a success (RL
+ * slice S5a). The reward sibling of :class:`PreferenceExecutionEvidence`: it REUSES the generic adapter
+ * evidence pieces (:class:`TrainableStateChangeEvidence`, :class:`AdapterExportStateEvidence`,
+ * :class:`GradientCoverageEvidence`, :class:`OptimizerStepLossEvidence`) and adds the reward-specific
+ * honesty signals: real preference PAIRS were consumed, and every completed step carries the reward
+ * margin (``score(chosen) - score(rejected)``) the Bradley-Terry loss was built from. A reward model has
+ * NO reference model - it scores directly via the SEQ_CLS head - so there is no reference-frozen signal.
+ * None of these are part of the sealed execution config, so the reuse cannot perturb the byte-locked
+ * SFT / pretraining / preference / reward seals.
+ */
+export interface RewardExecutionEvidence {
+  adapter_export_state: AdapterExportStateEvidence;
+  completed_optimizer_steps: CompletedOptimizerSteps2;
+  gradient_coverage: GradientCoverageEvidence;
+  optimizer_created: OptimizerCreated2;
+  reward_pairs_consumed: RewardPairsConsumed;
+  step_losses: StepLosses2;
+  step_reward_margins: StepRewardMargins1;
+  trainable_state: TrainableStateChangeEvidence;
+}
+/**
+ * All gates required before a resolved run or measured fit may be called successful.
+ */
+export interface TrainingSuccessEvidence {
+  adapter_bytes_verified: AdapterBytesVerified2;
+  adapter_config_sha256: AdapterConfigSha2562;
+  adapter_safetensors_sha256: AdapterSafetensorsSha2562;
+  artifact_integrity_verified: ArtifactIntegrityVerified3;
+  execution: TrainingExecutionEvidence;
+  measured_peak?: MemoryMetrics | null;
+  output_path_verified: OutputPathVerified3;
 }
 /**
  * Trainer-side proof produced before adapter export is admitted as a success.
  */
 export interface TrainingExecutionEvidence {
   adapter_export_state: AdapterExportStateEvidence;
-  completed_optimizer_steps: CompletedOptimizerSteps2;
+  completed_optimizer_steps: CompletedOptimizerSteps3;
   gradient_coverage: GradientCoverageEvidence;
-  optimizer_created: OptimizerCreated2;
+  optimizer_created: OptimizerCreated3;
   resumed_from_optimizer_step?: ResumedFromOptimizerStep;
-  step_losses: StepLosses2;
+  step_losses: StepLosses3;
   trainable_state: TrainableStateChangeEvidence;
 }
