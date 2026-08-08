@@ -50,6 +50,7 @@ def run_scoped_training_output(
         | ResolvedPreferenceExecutionConfiguration
         | ResolvedFullFinetuneExecutionConfiguration
         | ResolvedRewardExecutionConfiguration
+        | ResolvedRolloutExecutionConfiguration
     ),
     run_id: str,
     *,
@@ -414,6 +415,7 @@ def verify_run_scoped_output_path(
         | ResolvedPreferenceExecutionConfiguration
         | ResolvedFullFinetuneExecutionConfiguration
         | ResolvedRewardExecutionConfiguration
+        | ResolvedRolloutExecutionConfiguration
     ),
     run_id: str,
     *,

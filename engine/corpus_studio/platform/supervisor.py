@@ -40,6 +40,7 @@ from corpus_studio.platform.contracts import (
     PreferenceSuccessEvidence,
     PretrainingSuccessEvidence,
     RewardSuccessEvidence,
+    RolloutSuccessEvidence,
     RunEvent,
     RunManifest,
     RunPlan,
@@ -221,6 +222,10 @@ class RunContext:
         # evidence; execute_run RE-VERIFIES it (reload the saved adapter, re-hash, compare to the sealed
         # trained state) before it may reach the manifest - the runner cannot self-admit a success.
         self.reward_success_evidence: RewardSuccessEvidence | None = None
+        # An on-policy RL (GRPO) runner reports the worker-proposed CAUSAL_LM policy-adapter success
+        # evidence; execute_run RE-VERIFIES it (reload the saved adapter, re-hash, compare to the sealed
+        # trained state) before it may reach the manifest - the runner cannot self-admit a success.
+        self.rollout_success_evidence: RolloutSuccessEvidence | None = None
 
     @property
     def cancelled(self) -> bool:
@@ -711,6 +716,68 @@ def validate_reward_success_evidence(
     return proposed.model_copy(update={"measured_peak": measured_peak})
 
 
+def validate_rollout_success_evidence(
+    plan: RunPlan,
+    proposed: RolloutSuccessEvidence | None,
+    produced: Sequence[ProducedArtifact],
+    measured_peak: MemoryMetrics | None,
+) -> RolloutSuccessEvidence:
+    """Independently re-verify an on-policy RL runner's PROPOSED policy-adapter success before terminal PASS
+    - the GRPO sibling of :func:`validate_reward_success_evidence`. On-policy RL exports a CAUSAL_LM policy
+    PEFT adapter, so it reuses the same reload-verify: confirm the completed steps match the sealed schedule,
+    then reload the saved adapter and assert it reproduces the sealed trained export state (and that the
+    saved bytes match the proposal). Any mismatch is fail-closed. The held-out reward-LIFT + bounded-KL
+    promotion gate lives on the proposed evidence itself (bound by the RolloutSuccessEvidence contract);
+    execute_run's job is byte re-verification, not re-running the eval. Returns the admitted evidence
+    carrying the supervisor-measured peak."""
+    execution = plan.resolved_rollout_execution
+    if execution is None:  # pragma: no cover - caller restricts this to a resolved rollout plan.
+        raise RunnerFailure(
+            "rollout success evidence requires a resolved rollout execution",
+            taxonomy=FailureTaxonomy.UNSUPPORTED_CONFIGURATION,
+            stage=StageMarker.process_start,
+        )
+    if proposed is None:
+        raise RunnerFailure(
+            "resolved rollout returned without adapter success evidence",
+            taxonomy=FailureTaxonomy.UPDATE_FAILURE,
+            stage=StageMarker.optimizer_step,
+        )
+    if execution.schedule.max_steps is not None:
+        if proposed.execution.completed_optimizer_steps != execution.schedule.max_steps:
+            raise RunnerFailure(
+                "completed optimizer steps do not match the sealed schedule",
+                taxonomy=FailureTaxonomy.OPTIMIZER_FAILURE,
+                stage=StageMarker.optimizer_step,
+            )
+    elif proposed.execution.completed_optimizer_steps < 1:
+        raise RunnerFailure(
+            "epoch-scheduled rollout admitted zero completed optimizer steps",
+            taxonomy=FailureTaxonomy.OPTIMIZER_FAILURE,
+            stage=StageMarker.optimizer_step,
+        )
+    adapter_artifact = next((item for item in produced if item.kind == "adapter"), None)
+    if adapter_artifact is None:
+        raise RunnerFailure(
+            "resolved rollout produced no adapter artifact to admit",
+            taxonomy=FailureTaxonomy.ARTIFACT_FAILURE,
+            stage=StageMarker.export,
+        )
+    verified, reason = _reload_verify_adapter(
+        adapter_artifact.path,
+        expected_after_sha256=proposed.execution.adapter_export_state.after_sha256,
+        expected_adapter_sha256=proposed.adapter_safetensors_sha256,
+        expected_config_sha256=proposed.adapter_config_sha256,
+    )
+    if not verified:
+        raise RunnerFailure(
+            f"the rollout adapter artifact failed independent re-verification: {reason}",
+            taxonomy=FailureTaxonomy.ARTIFACT_FAILURE,
+            stage=StageMarker.export,
+        )
+    return proposed.model_copy(update={"measured_peak": measured_peak})
+
+
 def validate_pretraining_success_evidence(
     plan: RunPlan,
     proposed: PretrainingSuccessEvidence | None,
@@ -867,6 +934,7 @@ def execute_run(
         or plan.resolved_preference_execution is not None
         or plan.resolved_full_finetune_execution is not None
         or plan.resolved_reward_execution is not None
+        or plan.resolved_rollout_execution is not None
     )
     record_dir = run_record_directory(out_dir, rid) if out_dir is not None else None
     events_handle: Any = None
@@ -928,6 +996,7 @@ def execute_run(
     preference_success_evidence: PreferenceSuccessEvidence | None = None
     full_finetune_success_evidence: PretrainingSuccessEvidence | None = None
     reward_success_evidence: RewardSuccessEvidence | None = None
+    rollout_success_evidence: RolloutSuccessEvidence | None = None
 
     try:
         # Defense in depth: callers can reach this public library boundary without going through the
@@ -1012,6 +1081,15 @@ def execute_run(
                     taxonomy=FailureTaxonomy.UNSUPPORTED_CONFIGURATION,
                     stage=StageMarker.env_loaded,
                 )
+        elif plan.resolved_rollout_execution is not None:
+            from corpus_studio.platform.runners import RolloutRunner  # noqa: PLC0415
+
+            if type(runner) is not RolloutRunner:
+                raise RunnerFailure(
+                    "resolved rollout plans require the first-party RolloutRunner adapter",
+                    taxonomy=FailureTaxonomy.UNSUPPORTED_CONFIGURATION,
+                    stage=StageMarker.env_loaded,
+                )
         elif not isinstance(runner, EchoRunner):
             raise RunnerFailure(
                 "echo plans require the built-in EchoRunner adapter",
@@ -1074,6 +1152,13 @@ def execute_run(
             reward_success_evidence = validate_reward_success_evidence(
                 plan,
                 ctx.reward_success_evidence,
+                produced,
+                ctx.measured_peak,
+            )
+        if plan.resolved_rollout_execution is not None:
+            rollout_success_evidence = validate_rollout_success_evidence(
+                plan,
+                ctx.rollout_success_evidence,
                 produced,
                 ctx.measured_peak,
             )
@@ -1201,6 +1286,9 @@ def execute_run(
         ),
         reward_success_evidence=(
             reward_success_evidence if state == "succeeded" else None
+        ),
+        rollout_success_evidence=(
+            rollout_success_evidence if state == "succeeded" else None
         ),
         notes=(
             "event sink failures were isolated: " + ", ".join(sink_errors)

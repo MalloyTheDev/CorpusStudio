@@ -1003,6 +1003,18 @@ def platform_plan(
         help="DPO prompt token cap (preference plans only). Defaults to half the sequence window; "
         "must be below --sequence-len so the response has room.",
     ),
+    reward_source_manifest: Optional[Path] = typer.Option(
+        None,
+        "--reward-source-manifest",
+        help="On-policy RL (--task-type grpo): the reward run's RunManifest JSON (the admitted-run proof "
+        "whose reward_success_evidence binds the reward source by provenance). Required with --task-type grpo.",
+    ),
+    reward_source_plan: Optional[Path] = typer.Option(
+        None,
+        "--reward-source-plan",
+        help="On-policy RL (--task-type grpo): the reward run's RunPlan JSON (supplies the reward base "
+        "model + adapter location, cross-checked against the manifest). Required with --task-type grpo.",
+    ),
     corpus_manifest: Optional[Path] = typer.Option(
         None,
         "--corpus-manifest",
@@ -1412,6 +1424,10 @@ def platform_plan(
         preference_beta=dpo_beta,
         preference_label_smoothing=dpo_label_smoothing,
         preference_max_prompt_length=max_prompt_length,
+        reward_source_manifest=(
+            str(reward_source_manifest) if reward_source_manifest is not None else None
+        ),
+        reward_source_plan=(str(reward_source_plan) if reward_source_plan is not None else None),
         dataset_format=dataset_format,
         output_dir=output_dir,
         sequence_len=sequence_len,
