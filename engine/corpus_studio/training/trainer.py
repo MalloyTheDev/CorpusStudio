@@ -3812,16 +3812,21 @@ def completion_token_mask(completion_targets: Any, eos_id: "int | list[int]") ->
 
 
 def _configured_stop_ids(policy_model: Any, tokenizer: Any) -> list[int]:  # pragma: no cover - integration
-    """The COMPLETE set of end-of-sequence ids ``generate()`` may stop on: the model's generation_config eos
-    (a LIST for multi-EOS chat models such as Llama-3) unioned with the tokenizer's, so the completion mask
-    recognizes the ACTUAL stop token rather than only the tokenizer scalar. Falls back to the pad id."""
-    ids: list[int] = []
+    """The set of end-of-sequence ids ``generate()`` actually stops on, so the completion mask keys on the
+    SAME stop tokens generation honored. Prefer the model's ``generation_config.eos_token_id`` (a LIST for
+    multi-EOS chat models such as Llama-3) when it is set - generate() honors it OVER the tokenizer's nominal
+    eos, so unioning the two could make an ordinary generated tokenizer-eos wrongly terminate the mask. Fall
+    back to the tokenizer's eos only when the generation config declares none, then to the pad id."""
     gen_cfg = getattr(policy_model, "generation_config", None)
-    for src in (getattr(gen_cfg, "eos_token_id", None), getattr(tokenizer, "eos_token_id", None)):
-        if isinstance(src, (list, tuple)):
-            ids.extend(int(x) for x in src if x is not None)
-        elif src is not None:
-            ids.append(int(src))
+    src = getattr(gen_cfg, "eos_token_id", None)
+    if src is None:
+        src = getattr(tokenizer, "eos_token_id", None)
+    if isinstance(src, (list, tuple)):
+        ids = [int(x) for x in src if x is not None]
+    elif src is not None:
+        ids = [int(src)]
+    else:
+        ids = []
     if not ids and tokenizer.pad_token_id is not None:
         ids.append(int(tokenizer.pad_token_id))
     return list(dict.fromkeys(ids))  # dedupe, order-stable
