@@ -4460,6 +4460,15 @@ class ResolvedRolloutExecutionConfiguration(ContractModel):
             QuantizationMode.nf4,
         }:
             raise ValueError("on-policy RL requires a 4-bit quantized base (int4 or nf4)")
+        # The GRPO loop steps the LR scheduler with no metric each optimizer step, so a metric-driven
+        # schedule (reduce_lr_on_plateau) would abort after the first update. Refuse it in the CONTRACT (not
+        # only the resolver) so a hand-built / imported plan validated straight from JSON cannot smuggle it in.
+        if self.optimizer.lr_scheduler == "reduce_lr_on_plateau":
+            raise ValueError(
+                "on-policy RL cannot use lr_scheduler='reduce_lr_on_plateau': its scheduler needs a metric "
+                "each step, which the GRPO loop does not supply (use constant / linear / cosine / polynomial "
+                "/ inverse_sqrt)"
+            )
         # On-policy RL scores discrete prompt+completion sequences; it never packs.
         if self.sequence.packing:
             raise ValueError("on-policy RL does not pack sequences")

@@ -1231,16 +1231,10 @@ def _resolve_rollout_execution(
             }
         )
     except ValidationError as exc:
+        # A metric-driven lr_scheduler (reduce_lr_on_plateau) is refused by the rollout CONTRACT validator so
+        # the refusal also covers imported/hand-built plans, not just this resolver; surfaces here as a
+        # PlannerError via this ValidationError wrap.
         raise PlannerError(f"the resolved rollout execution configuration is invalid: {exc}") from exc
-    # The GRPO loop steps the LR scheduler with no metric each optimizer step, so a metric-driven schedule
-    # (reduce_lr_on_plateau) would abort after the first update. Refuse it at planning rather than seal a
-    # schedule the loop cannot drive (fail-closed; use a schedule-only lr_scheduler).
-    if draft.optimizer.lr_scheduler == "reduce_lr_on_plateau":
-        raise PlannerError(
-            "on-policy RL cannot use lr_scheduler='reduce_lr_on_plateau': its scheduler needs a metric each "
-            "step, which the GRPO loop does not supply. Choose a schedule-only lr_scheduler "
-            "(constant / linear / cosine / polynomial / inverse_sqrt)."
-        )
     return draft.model_copy(
         update={"configuration_hash": rollout_execution_configuration_hash_for(draft)}
     )
