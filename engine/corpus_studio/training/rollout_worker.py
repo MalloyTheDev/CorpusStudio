@@ -97,6 +97,7 @@ def run_rollout(  # pragma: no cover - optional training-stack integration; prov
         evaluate_rollout_kl,
         evaluate_rollout_reward,
         expected_saved_adapter_config_sha256,
+        format_rollout_prompt,
         reward_heldout_split,
         run_rollout_training,
     )
@@ -109,6 +110,15 @@ def run_rollout(  # pragma: no cover - optional training-stack integration; prov
     objective = get_objective(execution.objective_ref.id)
     if objective is None:
         raise RolloutWorkerError(f"unknown sealed rollout objective {execution.objective_ref.id!r}")
+    # Defense-in-depth: this worker hardcodes nf4 loaders for BOTH the policy and the served reward model.
+    # Refuse any other sealed quantization rather than silently run nf4 on a differently-sealed config (the
+    # planner already pins grpo to nf4; a hand-built or future int4 config must fail closed here, not lie).
+    if execution.precision.quantized_storage_format.value != "nf4":
+        raise RolloutWorkerError(
+            "the rollout worker loads nf4 4-bit models only; the sealed quantization is "
+            f"{execution.precision.quantized_storage_format.value!r} - refuse rather than run a different "
+            "precision than the seal declares."
+        )
     # The rollout loop processes ONE prompt per microbatch (a group of rollouts already fills memory); a
     # larger per-device batch must be expressed via gradient accumulation, not silently ignored.
     if execution.batching.micro_batch_size != 1:
@@ -132,15 +142,13 @@ def run_rollout(  # pragma: no cover - optional training-stack integration; prov
     if tokenizer.pad_token_id is None:
         tokenizer.pad_token = tokenizer.eos_token
 
-    def _format_prompt(row: dict[str, Any]) -> str:
-        messages = row.get("messages")
-        if not messages:
-            raise RolloutWorkerError("each rollout prompt row requires a non-empty 'messages' list")
-        return str(
-            tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-        )
-
-    prompts = [_format_prompt(row) for row in rows]
+    # Format each prompt through the SEALED rollout formatter (format_rollout_prompt, whose source is hashed
+    # into experience.formatter_sha256) - never an inline copy - so the prompt bytes match the seal and the
+    # run is reproducible from its sealed configuration.
+    try:
+        prompts = [format_rollout_prompt(row, tokenizer) for row in rows]
+    except TrainerError as exc:
+        raise RolloutWorkerError(str(exc)) from exc
     try:
         train_idx, heldout_idx = reward_heldout_split(len(prompts), data_seed=execution.data_seed)
     except TrainerError as exc:
@@ -169,6 +177,7 @@ def run_rollout(  # pragma: no cover - optional training-stack integration; prov
     reward_base = AutoModelForSequenceClassification.from_pretrained(
         reward_base_model, num_labels=1, quantization_config=reward_bnb,
         device_map={"": 0}, trust_remote_code=execution.trust_remote_code,
+        use_safetensors=execution.use_safetensors,
     )
     reward_base.config.pad_token_id = reward_tokenizer.pad_token_id
     # Provenance integrity: the reward adapter ON DISK must match the sha256 the resolver pinned into
@@ -211,10 +220,17 @@ def run_rollout(  # pragma: no cover - optional training-stack integration; prov
     policy = AutoModelForCausalLM.from_pretrained(
         base_model, quantization_config=bnb, device_map={"": 0},
         trust_remote_code=execution.trust_remote_code,
+        use_safetensors=execution.use_safetensors,
     )
     policy = prepare_model_for_kbit_training(
         policy, use_gradient_checkpointing=execution.gradient_checkpointing
     )
+    # Seed BEFORE constructing the LoRA adapter: get_peft_model randomly initializes the LoRA A matrix, so
+    # the sealed seed must be applied here (not only before the sampling loop in run_rollout_training) for a
+    # fresh worker process to reproduce the same adapter init and subsequent gradients.
+    torch.manual_seed(execution.seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(execution.seed)
     adapter = execution.adapter
     target_modules: Any = (
         adapter.target_modules[0]

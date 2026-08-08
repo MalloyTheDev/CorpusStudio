@@ -550,6 +550,7 @@ class TrainingRunner:
             PREFERENCE_NOT_EXECUTABLE_REASON,
             PRETRAINING_NOT_EXECUTABLE_REASON,
             REWARD_NOT_EXECUTABLE_REASON,
+            ROLLOUT_NOT_EXECUTABLE_REASON,
         )
 
         if plan.resolved_execution is None and plan.resolved_preference_execution is not None:
@@ -571,6 +572,16 @@ class TrainingRunner:
                 taxonomy=FailureTaxonomy.UNSUPPORTED_CONFIGURATION,
                 stage=StageMarker.env_loaded,
                 remediation="await the reward-model worker milestone that promotes reward_model to "
+                "workload_verified; do not hand-edit the plan to the SFT lane",
+            )
+        if plan.resolved_execution is None and plan.resolved_rollout_execution is not None:
+            # Same typed defense-in-depth for a sealed on-policy RL (GRPO) plan (admit-at-planning /
+            # refuse-at-execution) - reachable here rather than the generic contract-mismatch below.
+            raise RunnerFailure(
+                ROLLOUT_NOT_EXECUTABLE_REASON,
+                taxonomy=FailureTaxonomy.UNSUPPORTED_CONFIGURATION,
+                stage=StageMarker.env_loaded,
+                remediation="await the on-policy RL worker milestone that promotes on_policy_rl to "
                 "workload_verified; do not hand-edit the plan to the SFT lane",
             )
         if plan.resolved_execution is None and plan.resolved_pretraining_execution is not None:
@@ -633,6 +644,7 @@ class TrainingRunner:
             PREFERENCE_NOT_EXECUTABLE_REASON,
             PRETRAINING_NOT_EXECUTABLE_REASON,
             REWARD_NOT_EXECUTABLE_REASON,
+            ROLLOUT_NOT_EXECUTABLE_REASON,
             ExecutionConfigurationError,
             run_scoped_training_output,
             verify_execution_configuration_hash,
@@ -668,6 +680,14 @@ class TrainingRunner:
                     taxonomy=FailureTaxonomy.UNSUPPORTED_CONFIGURATION,
                     stage=StageMarker.env_loaded,
                     remediation="await the reward-model worker milestone that promotes reward_model to "
+                    "workload_verified; do not hand-edit the plan to the SFT lane",
+                )
+            if plan.resolved_rollout_execution is not None:
+                raise RunnerFailure(
+                    ROLLOUT_NOT_EXECUTABLE_REASON,
+                    taxonomy=FailureTaxonomy.UNSUPPORTED_CONFIGURATION,
+                    stage=StageMarker.env_loaded,
+                    remediation="await the on-policy RL worker milestone that promotes on_policy_rl to "
                     "workload_verified; do not hand-edit the plan to the SFT lane",
                 )
             raise RunnerFailure(
@@ -1061,6 +1081,87 @@ class RewardRunner:
         return [artifact]
 
 
+class RolloutRunner:
+    """Executes a sealed on-policy RL (GRPO) run through ``training.rollout_worker.run_rollout`` - the
+    CAUSAL_LM policy-optimization sibling of ``RewardRunner``. It dispatches the config-consuming rollout
+    worker (generate a group of completions per prompt, score them with the provenance-bound served reward
+    model, take a group-relative advantage step against a frozen-adapter reference with a KL rail), emits
+    the run's stages, samples the measured peak, and reports the worker-PROPOSED policy-adapter success
+    evidence on the context. It NEVER self-admits: ``execute_run`` independently re-verifies the saved
+    adapter before the evidence may reach the manifest. Whether a rollout plan is admitted is gated upstream
+    (selected only once the ``on_policy_rl`` variant is workload_verified)."""
+
+    def __init__(self, *, memory_sampler: MemorySampler = sample_gpu_memory) -> None:
+        self.memory_sampler = memory_sampler
+        self.name = "rollout"
+
+    def run(self, ctx: RunContext) -> Sequence[ProducedArtifact]:
+        execution = ctx.plan.resolved_rollout_execution
+        if execution is None:
+            raise RunnerFailure(
+                "the rollout runner requires a resolved rollout execution",
+                taxonomy=FailureTaxonomy.UNSUPPORTED_CONFIGURATION,
+                stage=StageMarker.process_start,
+            )
+        # On-policy RL exports a CAUSAL_LM policy PEFT adapter, so it reuses the run-scoped output
+        # (leaf="adapter").
+        from corpus_studio.platform.execution_config import (  # noqa: PLC0415
+            ExecutionConfigurationError,
+            run_scoped_training_output,
+            verify_run_scoped_output_path,
+        )
+
+        scoped_output = run_scoped_training_output(execution, ctx.run_id)
+        ctx.emit_stage(
+            StageMarker.process_start,
+            f"on-policy RL run [{self.name}]: dispatching the config-consuming worker",
+        )
+        from corpus_studio.training.rollout_worker import (  # noqa: PLC0415
+            RolloutWorkerError,
+            run_rollout,
+        )
+
+        try:
+            result = run_rollout(execution, output_dir=str(scoped_output))
+        except RolloutWorkerError as exc:
+            raise RunnerFailure(
+                str(exc),
+                taxonomy=FailureTaxonomy.UPDATE_FAILURE,
+                stage=StageMarker.optimizer_step,
+                remediation="preserve the failed run and inspect the first-party rollout worker",
+            ) from exc
+
+        try:
+            verify_run_scoped_output_path(
+                execution, ctx.run_id, observed_path=result.output_dir, require_exists=True
+            )
+        except ExecutionConfigurationError as exc:
+            raise RunnerFailure(
+                str(exc),
+                taxonomy=FailureTaxonomy.ARTIFACT_FAILURE,
+                stage=StageMarker.export,
+                remediation="preserve the failed run and repair the rollout run-scoped output layout",
+            ) from exc
+
+        # The runner REPORTS the worker-proposed success evidence; execute_run re-verifies before admit.
+        ctx.rollout_success_evidence = result.success_evidence
+        try:
+            ctx.measured_peak = self.memory_sampler()
+        except Exception:  # noqa: BLE001 - observability only; a probe fault is not a run failure
+            ctx.measured_peak = None
+
+        artifact = ProducedArtifact(
+            artifact_id=(
+                f"{ctx.run_id}-adapter-{result.success_evidence.adapter_safetensors_sha256[:12]}"
+            ),
+            kind="adapter",
+            path=result.output_dir,
+        )
+        ctx.emit_stage(StageMarker.export, f"rollout policy adapter saved: {result.output_dir}")
+        ctx.emit_artifact(artifact)
+        return [artifact]
+
+
 def build_lane_runner(
     runner_name: str, *, max_steps: int | None = None, corpus_root: str = "."
 ) -> Any:
@@ -1077,6 +1178,8 @@ def build_lane_runner(
         return PreferenceRunner()
     if runner_name == "reward":
         return RewardRunner()
+    if runner_name == "rollout":
+        return RolloutRunner()
     if runner_name == "full_finetune":
         return FullFinetuneRunner()
     if runner_name in ("pretraining", "pretraining_cpu_toy"):

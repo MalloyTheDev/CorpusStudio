@@ -114,6 +114,7 @@ from corpus_studio.platform.execution_config import (
     execution_configuration_hash_for,
     full_finetune_execution_configuration_hash_for,
     formatter_identity,
+    rollout_formatter_identity,
     huggingface_input_ref,
     preference_execution_configuration_hash_for,
     reward_execution_configuration_hash_for,
@@ -1184,8 +1185,11 @@ def _resolve_rollout_execution(
         )
 
     # On-policy RL draws PROMPTS (the model generates the completion); resolve + validate the 'chat' schema.
+    # Seal the ROLLOUT prompt formatter (add_generation_prompt=True), NOT the SFT 'chat' formatter that
+    # renders a full example - the worker generates from a prompt, so its sealed identity must hash the
+    # generation-prompt formatter it actually runs (reproducible-from-seal).
     schema, _schema_source = resolve_schema(project_dir, "chat")
-    formatter_id, formatter_hash = formatter_identity("chat")
+    formatter_id, formatter_hash = rollout_formatter_identity()
     max_length = constraints.sequence_len
     # The prompt cap + the generation budget must both fit the window; seal sane defaults (half the window
     # for the prompt, a quarter for the generation) this slice.
@@ -2142,6 +2146,17 @@ def build_run_plan(
         raise PlannerError(
             "full-parameter fine-tuning cannot write intermediate checkpoints yet; drop "
             "--checkpoint-cadence (the coordinator wires the adapter SFT lane)"
+        )
+    # The reward (pairwise RM) and rollout (on-policy RL) workers have no CheckpointCoordinator, so a
+    # sealed cadence would set save_strategy="steps" yet write nothing - a silent broken promise. Refuse it
+    # fail-closed rather than seal an unkept guarantee (the coordinator wires only the adapter SFT lane).
+    if (checkpoint_cadence is not None or checkpoint_keep_last is not None) and (
+        is_reward_model or is_rollout
+    ):
+        lane = "reward-model" if is_reward_model else "on-policy RL"
+        raise PlannerError(
+            f"the {lane} lane cannot write intermediate checkpoints; drop --checkpoint-cadence "
+            "(the CheckpointCoordinator wires only the adapter SFT lane)"
         )
     if checkpoint_cadence is None and checkpoint_keep_last is not None:
         raise PlannerError("--checkpoint-keep-last requires --checkpoint-cadence")

@@ -6,10 +6,42 @@ import pytest
 
 from corpus_studio.training.trainer import (
     TrainerError,
+    format_rollout_prompt,
     grpo_group_advantage,
     grpo_policy_loss,
     token_logprobs_and_entropy,
 )
+
+
+# --- format_rollout_prompt: the SEALED generation-prompt formatter (fail-closed guards, torch-free) ------
+
+
+class _FakeChatTokenizer:
+    """A minimal tokenizer stand-in: a non-empty chat_template + a deterministic apply_chat_template."""
+
+    chat_template = "{% for m in messages %}{{ m.content }}{% endfor %}"
+
+    def apply_chat_template(self, messages, tokenize=False, add_generation_prompt=False):
+        body = "".join(m["content"] for m in messages)
+        return body + ("<gen>" if add_generation_prompt else "")
+
+
+def test_format_rollout_prompt_applies_the_generation_prompt() -> None:
+    out = format_rollout_prompt({"messages": [{"role": "user", "content": "hi"}]}, _FakeChatTokenizer())
+    assert out == "hi<gen>"  # add_generation_prompt=True is what on-policy RL needs (the model continues)
+
+
+def test_format_rollout_prompt_refuses_an_empty_messages_row() -> None:
+    with pytest.raises(TrainerError, match="non-empty 'messages' list"):
+        format_rollout_prompt({"messages": []}, _FakeChatTokenizer())
+
+
+def test_format_rollout_prompt_refuses_a_tokenizer_without_a_chat_template() -> None:
+    class _NoTemplate:
+        chat_template = None
+
+    with pytest.raises(TrainerError, match="requires a tokenizer with a chat template"):
+        format_rollout_prompt({"messages": [{"role": "user", "content": "hi"}]}, _NoTemplate())
 
 
 # --- grpo_group_advantage: the critic-free, group-relative advantage (PURE) -------------------------
