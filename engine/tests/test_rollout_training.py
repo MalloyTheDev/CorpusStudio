@@ -45,6 +45,15 @@ def test_completion_token_mask_keeps_all_when_no_eos() -> None:
     assert mask.tolist() == [[1.0, 1.0, 1.0]]
 
 
+def test_completion_token_mask_handles_multiple_eos_ids() -> None:
+    torch = pytest.importorskip("torch")
+
+    # a multi-EOS model (e.g. Llama-3) may stop on EITHER configured stop token; the first of ANY ends it.
+    targets = torch.tensor([[1, 8, 9, 9]])  # stops at 8 (a stop token), the rest is padding
+    mask = completion_token_mask(targets, [8, 9])
+    assert mask.tolist() == [[1.0, 1.0, 0.0, 0.0]]
+
+
 # --- format_rollout_prompt: the SEALED generation-prompt formatter (fail-closed guards, torch-free) ------
 
 

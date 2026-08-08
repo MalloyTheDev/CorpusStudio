@@ -296,7 +296,7 @@ def run_rollout(  # pragma: no cover - optional training-stack integration; prov
             truncation_allowed=execution.sequence.truncation_allowed,
             seed=execution.seed,
             learning_rate=opt.learning_rate,
-            lr_scheduler=opt.lr_scheduler or "constant",
+            lr_scheduler=opt.lr_scheduler or "linear",
             warmup_ratio=opt.warmup_ratio if opt.warmup_ratio is not None else 0.0,
             gradient_accumulation_steps=execution.batching.fallback_grad_accumulation_steps or 1,
             max_grad_norm=opt.max_grad_norm,
@@ -355,7 +355,8 @@ def run_rollout(  # pragma: no cover - optional training-stack integration; prov
         max_kl = evaluate_rollout_kl(
             policy, tokenizer, heldout_prompts, max_new_tokens=max_new_tokens,
             sampling_temperature=temperature, sampling_top_p=top_p,
-            max_prompt_length=max_prompt_length, truncation_allowed=truncation_allowed)
+            max_prompt_length=max_prompt_length, truncation_allowed=truncation_allowed,
+            seed=execution.seed)
     except TrainerError as exc:
         raise RolloutWorkerError(f"the held-out rollout evaluation refused the prompts: {exc}") from exc
 
