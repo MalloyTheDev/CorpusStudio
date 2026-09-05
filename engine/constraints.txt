@@ -9,7 +9,7 @@
 # Bump intentionally: change this line, then regenerate docs/contracts and apps/web/src/contracts in
 # the same PR (CI diffs them). The engine's own dependency constraint stays the loose `pydantic>=2.0`
 # in pyproject.toml; this file only pins the exact CI resolution.
-pydantic==2.13.4
+pydantic==2.13.5
 
 # Pin ruff so the lint gate is REPRODUCIBLE. `pyproject.toml` keeps the loose `ruff>=0.5` dep, so without
 # an exact pin here CI installs whatever ruff is newest.
