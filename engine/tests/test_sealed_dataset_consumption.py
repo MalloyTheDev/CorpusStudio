@@ -24,7 +24,8 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from test_platform_planner import _REWARD_BRINGUP, _plan, _profile, _report
+from _sealed_loader_fakes import FakeLoadedModel, FakeTorch
+from test_platform_planner import _REWARD_BASE, _REWARD_BRINGUP, _plan, _profile, _report
 from test_reward_routing import _success as _reward_success
 
 import corpus_studio.importers.jsonl_importer as jsonl_importer
@@ -79,6 +80,7 @@ _LANES: dict[str, tuple[dict[str, Any], Any]] = {
         {
             "task_type": "grpo",
             "objective_id": "grpo",
+            "base_model": _REWARD_BASE,
             "reward_source_manifest": str(
                 _REWARD_BRINGUP / "runs/run-reward-sealed-0001/RunManifest.json"
             ),
@@ -127,7 +129,11 @@ def _module(name: str, **attrs: Any) -> types.ModuleType:
 
 def _install_fake_training_stack(monkeypatch, timeline: list[tuple], *, stop_at_model: bool = True):
     """Fake torch/transformers/peft/datasets whose loaders, and the sealed formatters, record onto
-    ``timeline``. The model loaders raise :class:`_StopAtLoader` unless ``stop_at_model`` is False."""
+    ``timeline``. The model loaders raise :class:`_StopAtLoader` unless ``stop_at_model`` is False, in
+    which case they return a model that reports exactly what it was loaded with, so the worker's sealed
+    loader checks (#863) pass and the run reaches its data preparation."""
+
+    fake_torch = FakeTorch()
 
     class _Tokenizer:
         pad_token_id = 0
@@ -149,11 +155,11 @@ def _install_fake_training_stack(monkeypatch, timeline: list[tuple], *, stop_at_
 
     class _ModelLoader:
         @classmethod
-        def from_pretrained(cls, *_a, **_k):
+        def from_pretrained(cls, location, **kwargs):
             timeline.append(("load", f"{cls.__name__}.from_pretrained"))
             if stop_at_model:
                 raise _StopAtLoader(f"{cls.__name__}.from_pretrained reached")
-            return types.SimpleNamespace(config=types.SimpleNamespace(use_cache=True))
+            return FakeLoadedModel(fake_torch, location, kwargs)
 
     class AutoModelForCausalLM(_ModelLoader):
         pass
@@ -189,7 +195,10 @@ def _install_fake_training_stack(monkeypatch, timeline: list[tuple], *, stop_at_
         prepare_model_for_kbit_training=object,
     )
     for name, module in (
-        ("torch", _module("torch", bfloat16="bf16", float32="fp32")),
+        ("torch", fake_torch),
+        ("torch.nn", fake_torch.nn),
+        ("torch.nn.functional", fake_torch.nn.functional),
+        ("torch.nn.attention", fake_torch.nn.attention),
         ("transformers", transformers),
         ("peft", peft),
         ("datasets", _module("datasets", Dataset=Dataset)),
@@ -359,8 +368,9 @@ def test_same_bytes_reach_the_real_worker_body_after_verification(tmp_path, monk
     first_heavy_index = next(index for index, item in enumerate(timeline) if item[0] in {"load", "format"})
     assert verification_index < first_heavy_index
     if lane == "full_finetune":
+        # The pinned tokenizer binding loads first, then the weights; both only after verification.
         loads = [item[1] for item in timeline if item[0] == "load"]
-        assert loads[0] == "AutoModelForCausalLM.from_pretrained"
+        assert loads[:2] == ["AutoTokenizer.from_pretrained", "AutoModelForCausalLM.from_pretrained"]
 
 
 @pytest.mark.parametrize("lane", _ADMITTED_LANES)
@@ -407,7 +417,7 @@ def test_same_bytes_run_is_admitted_with_the_consumed_digest_on_its_event_stream
     execution = plan.resolved_reward_execution
     sealed_digest = execution.inputs.dataset.content_sha256
 
-    def _fake_run_reward(execution, *, dataset, output_dir=None):
+    def _fake_run_reward(execution, *, dataset, output_dir=None, stage_callback=None):
         assert isinstance(dataset, VerifiedDataset)
         assert dataset.content_sha256 == sealed_digest
         assert list(dataset.rows) == rows_for("SEALED")

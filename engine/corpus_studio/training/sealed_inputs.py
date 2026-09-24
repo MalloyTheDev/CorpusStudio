@@ -24,8 +24,9 @@ Who calls what:
 
 Every refusal is a :class:`SealedInputError` with an ASCII message; the caller maps it to its own
 taxonomy. Torch-free by construction: this module imports only the contracts, the execution-config
-read primitives and the JSONL importer. Consumption checks for the other sealed inputs (the model and
-tokenizer bindings) belong here as well, so every lane shares one implementation.
+read primitives and the JSONL importer. The model and tokenizer bindings are consumed together with the
+sealed loader policy they are loaded under, so every lane shares that implementation in
+``training.sealed_loader`` (their pre-load re-hash is ``execution_config.verify_execution_non_dataset_inputs``).
 """
 
 from __future__ import annotations

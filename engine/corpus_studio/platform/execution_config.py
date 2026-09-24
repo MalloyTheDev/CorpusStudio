@@ -783,6 +783,15 @@ def local_input_binding(
     )
 
 
+LoaderLane = Literal["preference", "reward", "full_finetune", "rollout"]
+LoaderLaneExecution = (
+    ResolvedPreferenceExecutionConfiguration
+    | ResolvedRewardExecutionConfiguration
+    | ResolvedFullFinetuneExecutionConfiguration
+    | ResolvedRolloutExecutionConfiguration
+)
+
+
 def _verify_execution_input_bindings(bindings: tuple[ExecutionInputBinding, ...]) -> None:
     for binding in bindings:
         if binding.source == "huggingface":
@@ -810,14 +819,200 @@ def verify_execution_inputs(config: ResolvedExecutionConfiguration) -> None:
     )
 
 
-def verify_execution_non_dataset_inputs(config: ResolvedExecutionConfiguration) -> None:
+def verify_execution_non_dataset_inputs(
+    config: ResolvedExecutionConfiguration | LoaderLaneExecution,
+) -> None:
     """Revalidate model/tokenizer inputs when the consumer owns the stable dataset read.
 
     The training worker uses :func:`stable_file_bytes` to hash and capture the dataset exactly once,
     then parses those captured bytes. Rehashing that binding here would add a redundant full pass.
+    Every first-party lane that loads a sealed model and tokenizer calls this before dispatch.
     """
 
     _verify_execution_input_bindings((config.inputs.model, config.inputs.tokenizer))
+
+
+_LOADER_LANE_LABELS: dict[str, str] = {
+    "preference": "DPO",
+    "reward": "reward",
+    "full_finetune": "full-parameter SFT",
+    "rollout": "on-policy RL",
+}
+_LOADER_LANE_TYPES: dict[str, type[Any]] = {
+    "preference": ResolvedPreferenceExecutionConfiguration,
+    "reward": ResolvedRewardExecutionConfiguration,
+    "full_finetune": ResolvedFullFinetuneExecutionConfiguration,
+    "rollout": ResolvedRolloutExecutionConfiguration,
+}
+# The loaders these lanes call are Transformers ``from_pretrained`` on a Hub commit or a directory. A
+# single pinned file has no ``from_pretrained`` lowering, and the post-load digest check refuses it.
+_LOWERABLE_INPUT_SOURCES = frozenset({"huggingface", "local_directory"})
+# The exact torch dtypes ``trainer._torch_dtype`` lowers without approximation. ``tf32`` and the
+# ``mixed_*`` modes name autocast policies these workers do not run, and fp8 has no loader lowering.
+_LOWERABLE_TENSOR_DTYPES = frozenset({"bf16", "fp16", "fp32"})
+# ``xformers`` is an attention kernel, not a Transformers ``attn_implementation`` value.
+_LOWERABLE_ATTENTION_APIS = frozenset({"eager", "sdpa", "flash_attention_2", "flash_attention_3"})
+
+
+def _refuse_unlowered_update_precision(
+    config: LoaderLaneExecution, *, label: str, master: str | None
+) -> None:
+    """QLoRA lanes: admit only the gradient and optimizer-state dtypes the worker's update path yields.
+
+    The DPO, reward and on-policy RL workers set the trainable parameters to the sealed master dtype but
+    neither choose nor observe the gradient or optimizer-state dtypes, so a sealed value is honored only
+    when it is what that stack materializes on its own: autograd accumulates a leaf gradient in its
+    parameter's dtype (the master dtype); ``adamw_torch`` keeps its moments in the parameter dtype and
+    bitsandbytes paged 8-bit AdamW keeps 8-bit moments; both keep step counters and quantization
+    statistics in fp32. Any other sealed value would be silently replaced, so it is refused. The
+    optimizer rule mirrors the planner's (``int8`` exactly when the sealed impl names an 8-bit optimizer).
+    """
+
+    precision = config.precision
+    gradient = precision.gradient_dtype.value
+    if gradient != master:
+        raise ExecutionConfigurationError(
+            f"the first-party {label} worker accumulates gradients in the trainable master dtype "
+            f"{master!r}; the sealed gradient dtype {gradient!r} has no lowering - refuse"
+        )
+    impl = config.optimizer.impl.value
+    expected_state = "int8" if "8bit" in impl else master
+    state = precision.optimizer_state_dtype.value
+    if state != expected_state:
+        raise ExecutionConfigurationError(
+            f"the first-party {label} worker keeps {impl!r} optimizer state in {expected_state!r}; the "
+            f"sealed optimizer-state dtype {state!r} has no lowering - refuse"
+        )
+    auxiliary = precision.optimizer_auxiliary_dtype.value
+    if auxiliary != "fp32":
+        raise ExecutionConfigurationError(
+            f"the first-party {label} worker keeps optimizer step counters and quantization statistics "
+            f"in fp32; the sealed optimizer auxiliary dtype {auxiliary!r} has no lowering - refuse"
+        )
+
+
+def verify_loader_policy_supported(config: LoaderLaneExecution, *, lane: LoaderLane) -> None:
+    """Refuse a sealed model/tokenizer identity or loader policy that the lane's worker cannot lower.
+
+    The DPO, reward, full-parameter SFT and on-policy RL workers lower the sealed identity, placement,
+    precision and attention policy through the adapter SFT lane's loader helpers. A sealed value outside
+    what those helpers implement exactly must be refused before anything is loaded, never replaced by a
+    nearby value. The planner, each runner (before dispatch) and each worker call this check, so an
+    unsupported configuration is refused at planning and again at execution. Pure and torch-free.
+    """
+
+    label = _LOADER_LANE_LABELS.get(lane)
+    expected_type = _LOADER_LANE_TYPES.get(lane)
+    if label is None or expected_type is None:
+        raise ExecutionConfigurationError(f"unknown first-party loader lane {lane!r}")
+    if not isinstance(config, expected_type):
+        raise ExecutionConfigurationError(
+            f"the {label} loader lane cannot consume a {type(config).__name__}"
+        )
+    # Contract literals, re-checked because an in-memory copy can bypass validation and these two are
+    # passed straight to the loader: never execute repository code, never unpickle weights.
+    if config.trust_remote_code is not False or config.use_safetensors is not True:
+        raise ExecutionConfigurationError(
+            f"the first-party {label} worker loads only with trust_remote_code=False and "
+            "use_safetensors=True - refuse"
+        )
+    for binding in (config.inputs.model, config.inputs.tokenizer):
+        if binding.source not in _LOWERABLE_INPUT_SOURCES:
+            raise ExecutionConfigurationError(
+                f"the first-party {label} worker loads the sealed {binding.kind} from a pinned Hugging "
+                f"Face commit or a digest-pinned local directory; source {binding.source!r} has no "
+                "loader lowering - refuse"
+            )
+
+    # Judged on the sealed LIST, never on a dict built from it: the reward and on-policy RL contracts do
+    # not refuse a repeated module, and a dict would silently keep only the last of two root devices.
+    sealed_map = [(entry.module, entry.device) for entry in config.device_map]
+    if len(sealed_map) != 1 or sealed_map[0][0] != "":
+        raise ExecutionConfigurationError(
+            f"the first-party {label} worker implements exactly one root placement {{'': device}}; the "
+            f"sealed device_map {sealed_map} is not lowered - refuse rather than substitute a different "
+            "placement"
+        )
+    device = sealed_map[0][1]
+    kernel = config.attention.effective_backend_required.value
+    qlora_lane = lane != "full_finetune"
+    if config.runtime_mode == "cpu_toy":
+        if qlora_lane:
+            raise ExecutionConfigurationError(
+                f"the first-party {label} worker runs on CUDA only (nf4 4-bit storage requires CUDA); "
+                "a cpu_toy seal has no lowering - refuse"
+            )
+        if device != "cpu" or kernel != "eager":
+            raise ExecutionConfigurationError(
+                f"the first-party {label} cpu_toy path runs on 'cpu' with the eager reference "
+                f"attention; the sealed device {device!r} and kernel {kernel!r} are not lowered - refuse"
+            )
+    elif device != "cuda:0":
+        # The isolated kernel probe runs on the current CUDA device and the full-parameter lane trains
+        # through a single-process HF Trainer that places the model on cuda:0, so another index would be
+        # probed or trained somewhere other than where it was sealed.
+        raise ExecutionConfigurationError(
+            f"the first-party {label} worker probes, loads and trains on cuda:0; the sealed device "
+            f"{device!r} cannot be honored - refuse"
+        )
+
+    precision = config.precision
+    if qlora_lane:
+        storage = precision.quantized_storage_format.value
+        if storage != "nf4":
+            raise ExecutionConfigurationError(
+                f"the first-party {label} worker implements bitsandbytes nf4 4-bit storage; the sealed "
+                f"quantization {storage!r} has no lowering - refuse rather than run nf4"
+            )
+        dequantization = precision.dequantization_dtype.value
+        forward = precision.forward_compute_dtype.value
+        if dequantization != forward:
+            raise ExecutionConfigurationError(
+                f"the first-party {label} worker computes in the 4-bit dequantization dtype; a sealed "
+                f"dequantization dtype {dequantization!r} different from the forward dtype {forward!r} "
+                "has no lowering - refuse"
+            )
+        master = (
+            precision.master_weight_dtype.value if precision.master_weight_dtype is not None else None
+        )
+        for field, value in (("dequantization", dequantization), ("master-weight", master)):
+            if value not in _LOWERABLE_TENSOR_DTYPES:
+                raise ExecutionConfigurationError(
+                    f"the first-party {label} worker lowers the {field} dtype to one exact torch dtype "
+                    f"(bf16, fp16 or fp32); the sealed value {value!r} has no lowering - refuse"
+                )
+        _refuse_unlowered_update_precision(config, label=label, master=master)
+    else:
+        storage_dtype = (
+            precision.weight_storage_dtype.value
+            if precision.weight_storage_dtype is not None
+            else None
+        )
+        if storage_dtype not in _LOWERABLE_TENSOR_DTYPES:
+            raise ExecutionConfigurationError(
+                f"the first-party {label} worker loads its weights in one exact torch dtype (bf16, fp16 "
+                f"or fp32); the sealed weight-storage dtype {storage_dtype!r} has no lowering - refuse"
+            )
+
+    attention_api = config.attention.model_attention_api.value
+    if attention_api not in _LOWERABLE_ATTENTION_APIS:
+        raise ExecutionConfigurationError(
+            f"the sealed model attention API {attention_api!r} is not an attn_implementation the "
+            f"first-party {label} loader lowers - refuse"
+        )
+
+    if isinstance(config, ResolvedRolloutExecutionConfiguration):
+        # RewardSourceRef names the served reward base only by location; it carries no revision or
+        # digest of its own. The worker can load that base at a pinned identity only when it is the
+        # policy's own sealed base (the planner additionally requires the reward run's model and
+        # tokenizer bindings to equal the policy's).
+        reward_base = config.reward_source.reward_base_model
+        if reward_base != config.inputs.model.location:
+            raise ExecutionConfigurationError(
+                f"the served reward base {reward_base!r} has no pinned identity in the seal; the "
+                f"first-party {label} worker loads it only when it is the policy's pinned base "
+                f"{config.inputs.model.location!r} - refuse an unpinned reward model"
+            )
 
 
 def verify_execution_objective(

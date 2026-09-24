@@ -434,6 +434,15 @@ per-item error isolation, and off-thread document opens.
   `UNSUPPORTED_CONFIGURATION` at `dataset_verification` before any tokenizer or model load or output
   directory; the verified digest, byte/row counts and configuration hash are recorded in that stage event's
   payload. The GPU bring-up above predates this guard.
+  Sealed loader (#863, `training/sealed_loader.py`): the worker loads the model and the tokenizer each from
+  its own sealed binding (an immutable Hub commit or a digest-pinned local directory; local bindings are re-
+  hashed by the runner before dispatch and again after the load), safetensors-only with
+  trust_remote_code=False. Before any weights are allocated it applies and probes the sealed attention API
+  and SDPA kernel, loads onto the sealed root device (cuda:0), observes placement, and lowers the sealed nf4
+  compute dtype and trainable master dtype; training runs inside the exclusive sealed-kernel context. A
+  value the worker cannot lower is refused at planning, at runner admission and in the worker, and the
+  admitted identity is recorded in the `execution_config_verified` stage payload. The bring-up above
+  predates this enforcement; GPU re-validation with a rebuilt worker wheel is pending.
 - **Pairwise reward model (`reward_model`, `workload_verified`, EXECUTABLE)**: `platform-plan --task-type
   reward --objective reward_model` admits a plan AT PLANNING and lowers it into a sealed
   `ResolvedRewardExecutionConfiguration` (its own byte-locked seal, sibling to the DPO config) - a
@@ -457,6 +466,15 @@ per-item error isolation, and off-thread document opens.
   `dataset_verification` before any tokenizer or model load or output directory; the verified digest,
   byte/row counts and configuration hash are recorded in that stage event's payload. The GPU bring-up above
   predates this guard.
+  Sealed loader (#863, `training/sealed_loader.py`): the worker loads the model and the tokenizer each from
+  its own sealed binding (an immutable Hub commit or a digest-pinned local directory; local bindings are re-
+  hashed by the runner before dispatch and again after the load), safetensors-only with
+  trust_remote_code=False. Before any weights are allocated it applies and probes the sealed attention API
+  and SDPA kernel, loads onto the sealed root device (cuda:0), observes placement, and lowers the sealed nf4
+  compute dtype and trainable master dtype; training runs inside the exclusive sealed-kernel context. A
+  value the worker cannot lower is refused at planning, at runner admission and in the worker, and the
+  admitted identity is recorded in the `execution_config_verified` stage payload. The bring-up above
+  predates this enforcement; GPU re-validation with a rebuilt worker wheel is pending.
 - **Full-parameter SFT (`dense_full_finetune`, `workload_verified`, EXECUTABLE)**: `platform-plan
   --task-type sft --adapter-method full_finetune --export-format merged_safetensors` seals a full-MODEL
   `ResolvedFullFinetuneExecutionConfiguration` (its own byte-locked seal, sibling to the adapter SFT config)
@@ -476,6 +494,17 @@ per-item error isolation, and off-thread document opens.
   `UNSUPPORTED_CONFIGURATION` at `dataset_verification` before any weights or tokenizer load or output
   directory; the verified digest, byte/row counts and configuration hash are recorded in that stage event's
   payload. The GPU bring-up above predates this guard.
+  Sealed loader (#863, `training/sealed_loader.py`): the worker loads the model and the tokenizer each from
+  its own sealed binding (an immutable Hub commit or a digest-pinned local directory; local bindings are re-
+  hashed by the runner before dispatch and again after the load), safetensors-only with
+  trust_remote_code=False. Before any weights are allocated it applies and probes the sealed attention API
+  and SDPA kernel, loads onto the sealed root device (cuda:0; cpu_toy on cpu), observes placement, and
+  lowers the sealed full-parameter storage dtype; training runs inside the exclusive sealed-kernel context.
+  A value the worker cannot lower is refused at planning, at runner admission and in the worker, and the
+  admitted identity is recorded in the `execution_config_verified` stage payload. The bring-up above
+  predates this enforcement; GPU re-validation with a rebuilt worker wheel is pending. Known gap: full-
+  parameter plans seal master, gradient and optimizer-state dtypes as fp32 while the worker trains in the
+  storage dtype; those three are not enforced on this lane.
 - **Identity-bound backend worker protocol 2.0**: every newly generated RunPlan hash-pins the exact
   static BackendManifest. A subprocess worker must send `hello` first with that manifest and its exact
   environment/lock ref; only then can the core dispatch. The parent enforces protocol/direction/body,

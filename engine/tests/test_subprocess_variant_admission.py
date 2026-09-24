@@ -35,7 +35,6 @@ from corpus_studio.platform.artifacts import build_artifact_manifest
 from corpus_studio.platform.common import HashRef, MemoryMetrics, Ref
 from corpus_studio.platform.contracts import (
     ArtifactManifest,
-    ExecutionInputBinding,
     FailureRecord,
     RunManifest,
     RunPlan,
@@ -54,7 +53,6 @@ from corpus_studio.platform.execution_config import (
     resolved_execution_binding,
     reward_execution_configuration_hash_for,
     run_scoped_training_output,
-    stable_file_sha256,
 )
 from corpus_studio.platform.planner import (
     compute_plan_hash,
@@ -180,7 +178,8 @@ def _binding(plan: RunPlan):
     return binding
 
 
-# The dataset-consuming lanes whose runner verifies the sealed dataset bytes before dispatch.
+# The dataset-consuming lanes whose runner admits the sealed loader policy and verifies the sealed
+# dataset bytes before dispatch.
 _DATASET_CONFIG_HASHERS = {
     "resolved_preference_execution": preference_execution_configuration_hash_for,
     "resolved_reward_execution": reward_execution_configuration_hash_for,
@@ -188,38 +187,29 @@ _DATASET_CONFIG_HASHERS = {
 }
 
 
-def _with_sealed_dataset(plan: RunPlan, directory: Path) -> RunPlan:
-    """Rebind a dataset-consuming lane to a real local dataset file and reseal the plan.
+def _executable_plan(lane: str, output_root: Path, data_dir: Path) -> RunPlan:
+    """A plan the REAL lane runner admits end to end, with run-scoped outputs under ``output_root``.
 
-    Those runners read and hash the sealed dataset before they dispatch the worker, so an end-to-end
-    run needs bytes that match the seal. The binding keeps its logical ``ref`` (the RunPlan requires
-    it to equal ``dataset_ref``); only the location, source and content digest change."""
+    The DPO, reward and full-parameter SFT runners refuse a seal their worker cannot lower (for example
+    the cpu_toy shapes the contract-level builders produce for the QLoRA lanes) and read and hash the
+    sealed dataset before dispatch. Those lanes therefore use the planner's own seal over a real dataset
+    file, with only the output root redirected; the other lanes keep the contract-level builders."""
 
+    if lane not in {"preference", "reward", "full_finetune"}:
+        return _plan(lane, output_root)
+    from test_sealed_loader_admission import _sealed_plan
+
+    data_dir.mkdir(parents=True, exist_ok=True)
+    plan = _sealed_plan(data_dir, lane)
     binding = _binding(plan)
-    hasher = _DATASET_CONFIG_HASHERS.get(binding.plan_field)
-    if hasher is None:
-        return plan
-    directory.mkdir(parents=True, exist_ok=True)
-    data = directory / "sealed-dataset.jsonl"
-    data.write_text(
-        '{"prompt": "p", "chosen": "a", "rejected": "b", "instruction": "i", "output": "o"}\n',
-        encoding="utf-8",
+    root = str(output_root)
+    config = binding.config.model_copy(update={"output_dir": root})
+    config = config.model_copy(
+        update={"configuration_hash": _DATASET_CONFIG_HASHERS[binding.plan_field](config)}
     )
-    config = binding.config
-    dataset = ExecutionInputBinding.model_validate(
-        {
-            **config.inputs.dataset.model_dump(mode="json"),
-            "source": "local_file",
-            "location": str(data),
-            "content_sha256": stable_file_sha256(data),
-        }
-    )
-    rebound = config.model_copy(
-        update={"inputs": config.inputs.model_copy(update={"dataset": dataset})}
-    )
-    rebound = rebound.model_copy(update={"configuration_hash": hasher(rebound)})
     payload = plan.model_dump(mode="json")
-    payload[binding.plan_field] = rebound.model_dump(mode="json")
+    payload[binding.plan_field] = config.model_dump(mode="json")
+    payload["export"]["output_dir"] = root
     return _reseal(payload)
 
 
@@ -602,7 +592,7 @@ def test_parent_requires_a_null_accepted_hash_for_an_echo_plan():
 
 @pytest.mark.parametrize("lane", sorted(EXECUTABLE_LANES))
 def test_genuine_variant_success_is_admitted_through_the_real_worker(tmp_path, lane):
-    plan = _with_sealed_dataset(_plan(lane, tmp_path / "output-root"), tmp_path / "data")
+    plan = _executable_plan(lane, tmp_path / "output-root", tmp_path / "data")
     runner = required_runner_lane(plan)
     assert runner == EXECUTABLE_LANES[lane]
     records = tmp_path / "records"

@@ -12,6 +12,15 @@ dataset (``training.sealed_inputs``: one stable read, sha256 compared with the s
 parsed), so a changed dataset is refused before any weights load; the worker accepts only rows bound to
 its own sealed binding and never reopens the dataset path.
 
+The tokenizer and model are loaded through ``training.sealed_loader``: the tokenizer first, from its OWN
+sealed binding and revision (with a sealed chat-template digest checked); then, after the SDPA toggles are
+applied and the sealed kernel is probed, the model with the sealed revision, safetensors-only policy,
+weight-storage dtype, root device and attention API. Local inputs are re-hashed and the attention API,
+placement and storage dtype are observed after the load, placement again after the HF Trainer takes the
+model, and training runs inside the exclusive sealed-kernel context. ``cpu_toy`` comes from the sealed
+``runtime_mode``, never from the caller. A sealed loader value this worker cannot lower is refused before
+anything is imported or loaded.
+
 ``torch`` + ``transformers`` are lazy-imported; the training loop is ``# pragma: no cover`` (proven by a
 run). The pure row-padding helper is base-gate tested. This slice is UNROUTED: ``required_runner_lane``
 still refuses a full-finetune plan at execution, so nothing runs it in production and no wheel is needed
@@ -29,6 +38,7 @@ from corpus_studio.platform.contracts import (
 
 if TYPE_CHECKING:
     from corpus_studio.training.sealed_inputs import VerifiedDataset
+    from corpus_studio.training.sealed_loader import StageFn
 
 
 class FullFinetuneError(RuntimeError):
@@ -66,12 +76,13 @@ def run_full_finetune(  # pragma: no cover - torch/transformers integration; pro
     *,
     dataset: VerifiedDataset,
     output_dir: str | None = None,
-    cpu_toy: bool = False,
+    stage_callback: StageFn | None = None,
 ) -> FullFinetuneRunResult:
     """Load the sealed base model at full precision (all parameters trainable), tokenize the sealed SFT
     dataset, train full-parameter via the HF Trainer, capture the full-model execution evidence, save the
     full model, and seal the proposed success evidence. Refuses a quantized config (the contract guarantees
-    unquantized, but fail closed anyway)."""
+    unquantized, but fail closed anyway) and any other sealed loader value it cannot lower.
+    ``stage_callback(name, message)`` receives the loader and verification stages."""
     # Rows come only from the runner's single verified read of the sealed dataset (the bytes whose sha256
     # matched the seal). The mutable dataset path is never reopened here, and the binding is checked
     # before anything heavy is imported or loaded.
@@ -86,6 +97,16 @@ def run_full_finetune(  # pragma: no cover - torch/transformers integration; pro
         raise FullFinetuneError(str(exc)) from exc
     if not rows:
         raise FullFinetuneError("the sealed full-finetune dataset is empty")
+    # The same loader-policy refusal the planner and runner apply, repeated for a direct caller.
+    from corpus_studio.platform.execution_config import (  # noqa: PLC0415
+        ExecutionConfigurationError,
+        verify_loader_policy_supported,
+    )
+
+    try:
+        verify_loader_policy_supported(execution, lane="full_finetune")
+    except ExecutionConfigurationError as exc:
+        raise FullFinetuneError(str(exc)) from exc
 
     from pathlib import Path
 
@@ -110,9 +131,20 @@ def run_full_finetune(  # pragma: no cover - torch/transformers integration; pro
         _build_success_evidence,
         _canonical_config_sha256,
     )
+    from corpus_studio.training.sealed_loader import (
+        load_sealed_model,
+        load_sealed_tokenizer,
+        no_stage,
+        observe_sealed_placement,
+        prepare_sealed_attention,
+        sealed_loader_view,
+        verify_full_parameter_storage,
+    )
     from corpus_studio.training.trainer import (
+        ExecutionPlacementDeviation,
         capture_adapter_export_state,
         capture_trainable_state,
+        enforced_attention_training_kernel,
         format_example_text,
     )
 
@@ -120,20 +152,18 @@ def run_full_finetune(  # pragma: no cover - torch/transformers integration; pro
         raise FullFinetuneError(
             "full-parameter fine-tuning must be unquantized; the sealed config is quantized"
         )
+    _stage = stage_callback or no_stage
+    view = sealed_loader_view(execution)
+    # The CPU smoke path is a property of the seal (runtime_mode), not of whoever dispatched the worker.
+    cpu_toy = view.cpu_toy
     set_seed(execution.seed)
     out = Path(output_dir or execution.output_dir)
-    base_model = execution.inputs.model.location
 
-    # --- model + tokenizer: a real base at full precision, ALL parameters trainable (no adapter, no nf4) ---
-    dtype = torch.bfloat16 if execution.precision.forward_compute_dtype.value == "bf16" else torch.float32
-    # SECURITY: honor the sealed trust_remote_code (Literal[False]) explicitly - never execute a downloaded
-    # repo's custom code - exactly as the SFT trainer + merge do; do not rely on the library default.
-    model = AutoModelForCausalLM.from_pretrained(
-        base_model, torch_dtype=dtype, trust_remote_code=execution.trust_remote_code
-    )
-    tokenizer = AutoTokenizer.from_pretrained(
-        base_model, trust_remote_code=execution.trust_remote_code
-    )
+    # --- tokenizer + model: the sealed tokenizer binding, then a real base in the sealed storage dtype,
+    # ALL parameters trainable (no adapter, no nf4). The shared SFT helpers lower the sealed revision,
+    # safetensors-only policy, storage dtype, root device and attention API (trust_remote_code stays the
+    # sealed False), after the SDPA toggles are applied and the sealed kernel is probed. ---
+    tokenizer = load_sealed_tokenizer(AutoTokenizer, view, stage=_stage)
     if tokenizer.pad_token_id is None:
         tokenizer.pad_token = tokenizer.eos_token
     if tokenizer.pad_token_id is None:
@@ -144,6 +174,9 @@ def run_full_finetune(  # pragma: no cover - torch/transformers integration; pro
             "the base model's tokenizer defines no pad or eos token, so training batches cannot be "
             "padded; the base is unusable (a from-scratch tokenizer must declare an eos token)"
         )
+    prepare_sealed_attention(torch, view, stage=_stage)
+    model = load_sealed_model(AutoModelForCausalLM, torch, view, stage=_stage)
+    verify_full_parameter_storage(model, torch, view, stage=_stage)
 
     # --- data: the sealed SFT rows (verified above), formatted + tokenized to fixed length (whole-sequence
     # loss, per above) ---
@@ -220,7 +253,17 @@ def run_full_finetune(  # pragma: no cover - torch/transformers integration; pro
         model=model, args=arguments, train_dataset=train_dataset,
         data_collator=_collate, callbacks=[_EvidenceCallback()],
     )
-    train_output = trainer.train()
+    # The HF Trainer places the model itself: with more than one visible GPU it would replicate it with
+    # DataParallel, which is not the sealed single-root placement. Refuse that, then observe the placement
+    # the Trainer actually left before the first step.
+    if not cpu_toy and trainer.args.n_gpu != 1:
+        raise ExecutionPlacementDeviation(
+            f"PLACEMENT_DEVIATION: the HF Trainer sees {trainer.args.n_gpu} GPUs and would not keep the "
+            f"sealed single-device placement {view.device_map}"
+        )
+    observe_sealed_placement(trainer.model, view, stage=_stage, label="Trainer-placed model")
+    with enforced_attention_training_kernel(torch, view):
+        train_output = trainer.train()
     steps = int(getattr(train_output, "global_step", 0) or 0)
     if epoch_mode:
         planned_steps = int(getattr(trainer.state, "max_steps", 0) or 0)

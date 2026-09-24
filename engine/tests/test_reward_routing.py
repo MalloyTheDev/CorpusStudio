@@ -178,13 +178,22 @@ def _reward_execution(tmp_path) -> SimpleNamespace:
     )
 
 
+def _skip_loader_admission(monkeypatch) -> None:
+    # These dispatch tests use a stand-in execution with only a dataset binding; the model/tokenizer
+    # admission gate (#863) is exercised with real sealed configs in test_sealed_loader_admission.py.
+    import corpus_studio.platform.runners as runners
+
+    monkeypatch.setattr(runners, "_admit_sealed_loader", lambda *_a, **_k: None)
+
+
 def test_reward_runner_dispatches_and_reports_worker_evidence(monkeypatch, tmp_path) -> None:
     import corpus_studio.platform.execution_config as exec_cfg
     import corpus_studio.training.reward_worker as reward_worker
 
+    _skip_loader_admission(monkeypatch)
     success = _success()
 
-    def _fake_run_reward(execution, *, dataset, output_dir=None):
+    def _fake_run_reward(execution, *, dataset, output_dir=None, stage_callback=None):
         # the worker receives the rows parsed from the verified sealed bytes, never a path to reopen
         assert dataset.content_sha256 == execution.inputs.dataset.content_sha256
         assert dataset.rows == (_PAIR,)
@@ -217,7 +226,9 @@ def test_reward_runner_maps_a_worker_error_to_a_classified_failure(monkeypatch, 
     import corpus_studio.platform.execution_config as exec_cfg
     import corpus_studio.training.reward_worker as reward_worker
 
-    def _boom(execution, *, dataset, output_dir=None):
+    _skip_loader_admission(monkeypatch)
+
+    def _boom(execution, *, dataset, output_dir=None, stage_callback=None):
         raise reward_worker.RewardWorkerError("nf4 requires CUDA")
 
     monkeypatch.setattr(reward_worker, "run_reward", _boom)
@@ -231,6 +242,8 @@ def test_reward_runner_maps_a_worker_error_to_a_classified_failure(monkeypatch, 
 def test_reward_runner_refuses_a_changed_dataset_before_dispatch(monkeypatch, tmp_path) -> None:
     import corpus_studio.platform.execution_config as exec_cfg
     import corpus_studio.training.reward_worker as reward_worker
+
+    _skip_loader_admission(monkeypatch)
 
     def _must_not_dispatch(*_a, **_k):
         pytest.fail("the reward worker ran on a dataset that no longer matches its seal")

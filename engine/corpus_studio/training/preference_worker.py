@@ -9,6 +9,13 @@ The preference pairs are the rows the ``PreferenceRunner`` parsed from its singl
 sealed dataset (``training.sealed_inputs``: one stable read, sha256 compared with the seal, the same bytes
 parsed); the worker accepts only rows bound to its own sealed binding and never reopens the dataset path.
 
+The model and tokenizer are loaded through ``training.sealed_loader``: the tokenizer from its OWN sealed
+binding and revision, the nf4 base with the sealed revision, safetensors-only policy, dequantization
+dtype, root device and attention API; the SDPA toggles and isolated kernel probe run before allocation,
+placement/attention are observed after load, the sealed master dtype and nf4/dequantization state are
+observed after PEFT attachment, and DPO training runs inside the exclusive sealed-kernel context. A sealed
+loader value this worker cannot lower is refused before anything is imported or loaded.
+
 ``torch`` is lazy-imported inside ``run_preference``; the training path is ``# pragma: no cover`` (proven by
 a GPU run). Only the small pure helpers are base-gate tested."""
 
@@ -24,6 +31,7 @@ from corpus_studio.platform.contracts import (
 
 if TYPE_CHECKING:
     from corpus_studio.training.sealed_inputs import VerifiedDataset
+    from corpus_studio.training.sealed_loader import StageFn
 
 
 class PreferenceWorkerError(RuntimeError):
@@ -68,10 +76,13 @@ def run_preference(  # pragma: no cover - optional training-stack integration; p
     *,
     dataset: VerifiedDataset,
     output_dir: str | None = None,
+    stage_callback: StageFn | None = None,
 ) -> PreferenceRunResult:
     """Load the sealed nf4 base + LoRA adapter, tokenize the sealed preference pairs, train via
     ``run_dpo_training``, assemble the formal execution evidence, save the adapter, and seal the proposed
-    success evidence. Refuses ``cpu_toy`` (nf4 requires CUDA; a CPU DPO smoke path is a follow-up)."""
+    success evidence. Refuses ``cpu_toy`` (nf4 requires CUDA; a CPU DPO smoke path is a follow-up) and any
+    other sealed loader value it cannot lower. ``stage_callback(name, message)`` receives the loader and
+    verification stages."""
     # Rows come only from the runner's single verified read of the sealed dataset (the bytes whose sha256
     # matched the seal). The mutable dataset path is never reopened here, and the binding is checked
     # before anything heavy is imported or loaded.
@@ -86,6 +97,16 @@ def run_preference(  # pragma: no cover - optional training-stack integration; p
         raise PreferenceWorkerError(str(exc)) from exc
     if not rows:
         raise PreferenceWorkerError("the sealed preference dataset is empty")
+    # The same loader-policy refusal the planner and runner apply, repeated for a direct caller.
+    from corpus_studio.platform.execution_config import (  # noqa: PLC0415
+        ExecutionConfigurationError,
+        verify_loader_policy_supported,
+    )
+
+    try:
+        verify_loader_policy_supported(execution, lane="preference")
+    except ExecutionConfigurationError as exc:
+        raise PreferenceWorkerError(str(exc)) from exc
 
     import types
     from pathlib import Path
@@ -113,20 +134,26 @@ def run_preference(  # pragma: no cover - optional training-stack integration; p
         PreferenceExecutionTracker,
         build_preference_success_evidence,
     )
+    from corpus_studio.training.sealed_loader import (  # noqa: PLC0415
+        load_sealed_model,
+        load_sealed_tokenizer,
+        no_stage,
+        prepare_sealed_attention,
+        sealed_loader_view,
+        verify_sealed_adapter_precision,
+    )
     from corpus_studio.training.trainer import (  # noqa: PLC0415
         TrainerError,
         capture_adapter_export_state,
         capture_trainable_state,
+        enforced_attention_training_kernel,
         expected_saved_adapter_config_sha256,
         format_preference_pair,
         run_dpo_training,
     )
 
-    if execution.runtime_mode != "training":
-        raise PreferenceWorkerError(
-            f"the DPO worker runs on GPU (runtime_mode='training'); got {execution.runtime_mode!r} - "
-            "nf4 4-bit requires CUDA, so a cpu_toy DPO smoke path is a separate follow-up."
-        )
+    _stage = stage_callback or no_stage
+    view = sealed_loader_view(execution)
     objective = get_objective(execution.objective_ref.id)
     if objective is None:
         raise PreferenceWorkerError(f"unknown sealed preference objective {execution.objective_ref.id!r}")
@@ -134,27 +161,25 @@ def run_preference(  # pragma: no cover - optional training-stack integration; p
 
     # --- data: preference pairs from the sealed PreferenceDataPolicy dataset binding (verified rows) ---
     base_model = execution.inputs.model.location
-    # SECURITY: honor the sealed trust_remote_code (Literal[False]) explicitly - never execute a downloaded
-    # repo's custom code - exactly as the SFT trainer + merge do; do not rely on the library default.
-    tokenizer = AutoTokenizer.from_pretrained(
-        base_model, trust_remote_code=execution.trust_remote_code
-    )
+    # The sealed TOKENIZER binding (its own location + immutable revision or directory digest), with the
+    # sealed trust_remote_code (Literal[False]) passed explicitly - never the model location or HEAD.
+    tokenizer = load_sealed_tokenizer(AutoTokenizer, view, stage=_stage)
     if tokenizer.pad_token_id is None:
         tokenizer.pad_token = tokenizer.eos_token
     pairs = [format_preference_pair(row, tokenizer) for row in rows]
 
     # --- model: nf4 base + LoRA adapter from the sealed adapter spec (bias-free reference; frozen head) ---
-    bnb = BitsAndBytesConfig(
-        load_in_4bit=True,
-        bnb_4bit_quant_type="nf4",
-        bnb_4bit_compute_dtype=torch.bfloat16,
-        bnb_4bit_use_double_quant=execution.bnb_4bit_use_double_quant,
-    )
-    model = AutoModelForCausalLM.from_pretrained(
-        base_model,
-        quantization_config=bnb,
-        device_map={"": 0},
-        trust_remote_code=execution.trust_remote_code,
+    # Every sealed loader field is lowered by the shared SFT helpers (revision, safetensors-only, nf4 with
+    # the sealed dequantization dtype, the explicit root device, the sealed attention API), after the SDPA
+    # toggles are applied and the sealed kernel is probed; attention API and placement are observed after
+    # the load and local inputs are re-hashed.
+    prepare_sealed_attention(torch, view, stage=_stage)
+    model = load_sealed_model(
+        AutoModelForCausalLM,
+        torch,
+        view,
+        stage=_stage,
+        bitsandbytes_config_cls=BitsAndBytesConfig,
     )
     model = prepare_model_for_kbit_training(
         model, use_gradient_checkpointing=execution.gradient_checkpointing
@@ -182,6 +207,9 @@ def run_preference(  # pragma: no cover - optional training-stack integration; p
 
     # --- evidence capture: register post-accumulation gradient hooks + snapshot BEFORE training ---
     gradient_tracker = register_full_model_gradient_hooks(model, torch)
+    # Lower the sealed master dtype on the identity-bound trainable parameters, then observe post-adapter
+    # placement, nf4 storage, dequantization dtype and trainable dtypes before the first backward pass.
+    verify_sealed_adapter_precision(model, torch, view, gradient_tracker, stage=_stage)
     before_trainable = capture_trainable_state(model, torch, stage=StageMarker.adapter_attached)
     before_export = capture_adapter_export_state(
         get_peft_model_state_dict(model), torch, stage=StageMarker.adapter_attached
@@ -202,28 +230,33 @@ def run_preference(  # pragma: no cover - optional training-stack integration; p
     # --- train via the #781 primitive (it OWNS stdout-safe training; the runner wraps the protocol) ---
     # A TrainerError is a fail-closed data/finiteness refusal from the primitive; surface it as the worker's
     # typed error so the PreferenceRunner maps it to a classified RunnerFailure, not the generic catch-all.
-    try:
-        result = run_dpo_training(
-            model,
-            tokenizer,
-            pairs,
-            seq_len=execution.sequence.max_sequence_len,
-            chunk_size=execution.preference.sequence_chunk_size,
-            beta=execution.preference.beta,
-            label_smoothing=execution.preference.label_smoothing,
-            average_log_prob=execution.preference.average_log_prob,
-            learning_rate=opt.learning_rate,
-            max_steps=max_steps,
-            gradient_accumulation_steps=execution.batching.fallback_grad_accumulation_steps or 1,
-            max_prompt_length=execution.data.max_prompt_length,
-            score_response_eos=score_response_eos_for(objective),
-            gradient_checkpointing=execution.gradient_checkpointing,
-            max_grad_norm=opt.max_grad_norm,
-            optimizer=optimizer,
-            truncation_allowed=execution.sequence.truncation_allowed,
-        )
-    except TrainerError as exc:
-        raise PreferenceWorkerError(f"the DPO training primitive refused the run: {exc}") from exc
+    # The sealed SDPA kernel stays exclusive for the whole call (policy and frozen-reference forwards); a
+    # failure to enter, keep or restore that context is an environment error and propagates unwrapped.
+    with enforced_attention_training_kernel(torch, view):
+        try:
+            result = run_dpo_training(
+                model,
+                tokenizer,
+                pairs,
+                seq_len=execution.sequence.max_sequence_len,
+                chunk_size=execution.preference.sequence_chunk_size,
+                beta=execution.preference.beta,
+                label_smoothing=execution.preference.label_smoothing,
+                average_log_prob=execution.preference.average_log_prob,
+                learning_rate=opt.learning_rate,
+                max_steps=max_steps,
+                gradient_accumulation_steps=execution.batching.fallback_grad_accumulation_steps or 1,
+                max_prompt_length=execution.data.max_prompt_length,
+                score_response_eos=score_response_eos_for(objective),
+                gradient_checkpointing=execution.gradient_checkpointing,
+                max_grad_norm=opt.max_grad_norm,
+                optimizer=optimizer,
+                truncation_allowed=execution.sequence.truncation_allowed,
+            )
+        except TrainerError as exc:
+            raise PreferenceWorkerError(
+                f"the DPO training primitive refused the run: {exc}"
+            ) from exc
 
     # --- replay the per-step evidence into the tracker, snapshot AFTER, and seal the execution evidence ---
     losses = result["losses"]

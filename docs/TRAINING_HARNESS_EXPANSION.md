@@ -92,6 +92,21 @@ therefore mints a new wheel** - "byte-unchanged" is not achievable and is the wr
 contract does not change) and the re-sealed worker reproduces the SFT evidence (bitwise where already
 proven) before promotion carries over.
 
+**Extracted so far (helpers, not yet the enforced template):** two lifecycle steps now have one shared
+implementation that the DPO, reward, full-parameter SFT, and on-policy RL workers call. Real-worker
+conformance tests run against a fake ML stack.
+
+- `verify_inputs` for the dataset lives in `training/sealed_inputs.py` (#862). The runner reads the
+  dataset once, verifies its digest, parses the same bytes, and passes only verified rows to the worker.
+- `verify_inputs` for the model and tokenizer, plus `allocate_models`, live in
+  `training/sealed_loader.py` (#863). It lowers the pinned model and tokenizer identities, applies and
+  probes the sealed attention kernel, loads with the sealed placement and precision, and then observes
+  them. Refusals come from `execution_config.verify_loader_policy_supported` at planning, runner
+  admission, and in the worker.
+
+A worker still calls these helpers itself; the template runner that would make skipping one
+impossible is still the S0 delta above. The pretraining worker does not use `sealed_loader` yet.
+
 ## Sequenced backlog
 
 | # | Slice | New contract/system | Evidence gate (tuple) |
