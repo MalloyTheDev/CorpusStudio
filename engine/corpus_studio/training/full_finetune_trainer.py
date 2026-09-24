@@ -90,11 +90,14 @@ class FullFinetuneRunResult:
 
 
 def full_finetune_truncation_permitted(execution: ResolvedFullFinetuneExecutionConfiguration) -> bool:
-    """Whether the seal permits cutting over-length rows. ``data.truncation_policy`` is the enforced key
-    (as on the adapter SFT lane); ``sequence.truncation_allowed`` must agree. The contract already refuses
-    ``(False, 'allow')``; ``(True, 'refuse')`` is a valid seal and refuses here, so truncation needs
-    both fields to say so."""
-    return execution.data.truncation_policy == "allow" and execution.sequence.truncation_allowed
+    """Whether the seal permits cutting over-length rows.
+
+    One rule for every lane that lowers a sealed data policy: see
+    :func:`~corpus_studio.training.sealed_loader.sealed_truncation_permitted`. Kept as a named
+    full-parameter entry point because the preflight and the row builder both read it."""
+    from corpus_studio.training.sealed_loader import sealed_truncation_permitted  # noqa: PLC0415
+
+    return sealed_truncation_permitted(execution)
 
 
 def pad_sft_row(input_ids: Sequence[int], seq_len: int, pad_id: int) -> dict[str, list[int]]:

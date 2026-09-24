@@ -68,6 +68,30 @@ def no_stage(_name: str, _message: str) -> None:
     """The stage sink a worker uses when its caller supplied none."""
 
 
+def sealed_truncation_permitted(execution: LoaderLaneExecution) -> bool:
+    """Whether this seal permits cutting content that exceeds the sealed sequence window.
+
+    The DATA policy is the enforced key, exactly as on the adapter SFT lane (``trainer.py`` reads
+    ``data.truncation_policy``): ``data.truncation_policy`` here, or ``experience.truncation_policy``
+    on the on-policy RL lane. ``sequence.truncation_allowed`` must agree, which makes the rule
+    fail-closed from either direction.
+
+    Reading ``sequence.truncation_allowed`` ALONE inverts the contract's own safe default.
+    ``SequenceSpec.truncation_allowed`` defaults to True and ``truncation_policy`` defaults to
+    ``"refuse"``, and the contract validators reject only the opposite pair
+    (``truncation_allowed=False`` with policy ``"allow"``). So ``(True, "refuse")`` - which the
+    contract documents as the stricter safe default - would permit silent truncation on a lane that
+    consulted the sequence flag by itself.
+    """
+
+    policy = (
+        execution.experience.truncation_policy
+        if isinstance(execution, ResolvedRolloutExecutionConfiguration)
+        else execution.data.truncation_policy
+    )
+    return policy == "allow" and execution.sequence.truncation_allowed
+
+
 def sealed_loader_view(execution: LoaderLaneExecution) -> TrainRunConfig:
     """Map a sealed DPO, reward, full-parameter SFT or on-policy RL execution onto ``TrainRunConfig``.
 
@@ -85,12 +109,12 @@ def sealed_loader_view(execution: LoaderLaneExecution) -> TrainRunConfig:
     if isinstance(execution, ResolvedRolloutExecutionConfiguration):
         data_fields = {
             "chat_template_sha256": execution.experience.chat_template_sha256,
-            "truncation_allowed": execution.experience.truncation_policy == "allow",
+            "truncation_allowed": sealed_truncation_permitted(execution),
         }
     else:
         data_fields = {
             "chat_template_sha256": execution.data.chat_template_sha256,
-            "truncation_allowed": execution.data.truncation_policy == "allow",
+            "truncation_allowed": sealed_truncation_permitted(execution),
         }
     if isinstance(execution, ResolvedFullFinetuneExecutionConfiguration):
         data_fields.update(

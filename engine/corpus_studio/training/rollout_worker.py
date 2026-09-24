@@ -244,7 +244,7 @@ def run_rollout(  # pragma: no cover - optional training-stack integration; prov
     reward_backbone, reward_score_head = _seqcls_backbone_and_score_head(reward_model)
     reward_device = next(reward_model.parameters()).device
 
-    truncation_allowed = execution.sequence.truncation_allowed
+    truncation_allowed = view.truncation_allowed
 
     def _reward_scorer(prompt: str, completion: str) -> float:
         ids = reward_tokenizer(prompt + completion, add_special_tokens=False)["input_ids"]
@@ -337,7 +337,7 @@ def run_rollout(  # pragma: no cover - optional training-stack integration; prov
                 entropy_bonus=execution.stability.entropy_bonus,
                 advantage_normalization=execution.stability.advantage_normalization,
                 max_prompt_length=max_prompt_length,
-                truncation_allowed=execution.sequence.truncation_allowed,
+                truncation_allowed=view.truncation_allowed,
                 seed=execution.seed,
                 learning_rate=opt.learning_rate,
                 lr_scheduler=opt.lr_scheduler or "linear",
@@ -386,7 +386,7 @@ def run_rollout(  # pragma: no cover - optional training-stack integration; prov
     max_new_tokens = execution.rollout.max_new_tokens
     temperature = execution.rollout.sampling_temperature
     top_p = execution.rollout.sampling_top_p
-    truncation_allowed = execution.sequence.truncation_allowed
+    truncation_allowed = view.truncation_allowed
     # The promotion gate is measured with the same sealed kernel the policy was trained with.
     with enforced_attention_training_kernel(torch, view):
         try:

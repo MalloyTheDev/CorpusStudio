@@ -251,7 +251,7 @@ def run_preference(  # pragma: no cover - optional training-stack integration; p
                 gradient_checkpointing=execution.gradient_checkpointing,
                 max_grad_norm=opt.max_grad_norm,
                 optimizer=optimizer,
-                truncation_allowed=execution.sequence.truncation_allowed,
+                truncation_allowed=view.truncation_allowed,
             )
         except TrainerError as exc:
             raise PreferenceWorkerError(

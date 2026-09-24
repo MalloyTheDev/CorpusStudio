@@ -253,7 +253,7 @@ def run_reward(  # pragma: no cover - optional training-stack integration; prove
                 gradient_checkpointing=execution.gradient_checkpointing,
                 max_grad_norm=opt.max_grad_norm,
                 optimizer=optimizer,
-                truncation_allowed=execution.sequence.truncation_allowed,
+                truncation_allowed=view.truncation_allowed,
             )
         except TrainerError as exc:
             raise RewardWorkerError(
@@ -304,7 +304,7 @@ def run_reward(  # pragma: no cover - optional training-stack integration; prove
                 heldout_pairs,
                 seq_len=execution.sequence.max_sequence_len,
                 max_prompt_length=execution.data.max_prompt_length,
-                truncation_allowed=execution.sequence.truncation_allowed,
+                truncation_allowed=view.truncation_allowed,
             )
         except TrainerError as exc:
             raise RewardWorkerError(

@@ -47,6 +47,7 @@ from corpus_studio.training.sealed_loader import (
     prepare_sealed_attention,
     sealed_loader_view,
     sealed_tokenizer_load_args,
+    sealed_truncation_permitted,
     verify_full_parameter_storage,
     verify_sealed_adapter_precision,
     verify_sealed_chat_template,
@@ -966,3 +967,98 @@ def test_the_sealed_loader_module_is_import_light():
         text=True,
     )
     assert json.loads(completed.stdout) == []
+
+
+# --- the sealed truncation policy is one rule for every lane --------------------------------------------
+
+
+def _safe_default(payload: dict[str, Any]) -> None:
+    """The contract's documented SAFE default: the sequence flag permits, the data policy refuses.
+
+    ``SequenceSpec.truncation_allowed`` defaults to True and ``truncation_policy`` to ``"refuse"``,
+    and the validators reject only the opposite pair, so this combination is contract-valid on every
+    lane. A worker that read the sequence flag by itself would truncate under it."""
+    payload["sequence"]["truncation_allowed"] = True
+    payload["experience" if "experience" in payload else "data"]["truncation_policy"] = "refuse"
+
+
+def _lossy(payload: dict[str, Any]) -> None:
+    payload["sequence"]["truncation_allowed"] = True
+    payload["experience" if "experience" in payload else "data"]["truncation_policy"] = "allow"
+
+
+@pytest.mark.parametrize("lane", ["preference", "reward", "full_finetune", "rollout"])
+def test_the_safe_default_seal_refuses_truncation_on_every_lane(tmp_path, lane):
+    # The data policy is the enforced key; the sequence flag alone must never permit a cut.
+    execution = _sealed(tmp_path, lane, _safe_default)
+    assert execution.sequence.truncation_allowed is True
+    assert sealed_truncation_permitted(execution) is False
+    assert sealed_loader_view(execution).truncation_allowed is False
+
+
+@pytest.mark.parametrize("lane", ["preference", "reward", "full_finetune", "rollout"])
+def test_an_explicitly_lossy_seal_permits_truncation_on_every_lane(tmp_path, lane):
+    execution = _sealed(tmp_path, lane, _lossy)
+    assert sealed_truncation_permitted(execution) is True
+    assert sealed_loader_view(execution).truncation_allowed is True
+
+
+def test_full_parameter_helper_shares_the_one_rule(tmp_path):
+    from corpus_studio.training.full_finetune_trainer import full_finetune_truncation_permitted
+
+    for mutate in (_safe_default, _lossy):
+        execution = _sealed(tmp_path, "full_finetune", mutate)
+        assert full_finetune_truncation_permitted(execution) is sealed_truncation_permitted(
+            execution
+        )
+
+
+@pytest.mark.parametrize(
+    ("lane", "primitive"),
+    [
+        ("preference", "run_dpo_training"),
+        ("reward", "run_reward_training"),
+        ("rollout", "run_rollout_training"),
+    ],
+)
+def test_the_qlora_workers_hand_the_primitive_the_sealed_policy(
+    tmp_path, monkeypatch, lane, primitive
+):
+    # Each worker used to pass execution.sequence.truncation_allowed straight through, so under the
+    # safe default above it told its primitive truncation was permitted.
+    stack = FakeStack(monkeypatch)
+    _stub_training_plane(monkeypatch, stack)
+    captured: dict[str, Any] = {}
+
+    def _capture(*_args: Any, **kwargs: Any) -> Any:
+        captured.update(kwargs)
+        raise _StopTraining(primitive)
+
+    monkeypatch.setattr(trainer_module, primitive, _capture)
+    mutations: list[Callable[[dict[str, Any]], None]] = [_safe_default]
+    if lane == "rollout":
+        # The served reward adapter has to exist on disk before the policy is trained.
+        monkeypatch.setattr(
+            trainer_module, "_seqcls_backbone_and_score_head", lambda _model: ("backbone", "head")
+        )
+        adapter = tmp_path / "reward-adapter"
+        adapter.mkdir()
+        (adapter / "adapter_model.safetensors").write_bytes(b"reward-adapter")
+        adapter_sha = hashlib.sha256(b"reward-adapter").hexdigest()
+
+        def _local_adapter(payload: dict[str, Any]) -> None:
+            payload["reward_source"]["reward_adapter_location"] = str(adapter)
+            payload["reward_source"]["reward_ref"]["hash"]["value"] = adapter_sha
+
+        mutations.append(_local_adapter)
+    execution = _sealed(tmp_path, lane, *mutations)
+    run_worker, _error = _worker(lane)
+
+    with pytest.raises(_StopTraining):
+        run_worker(
+            execution,
+            dataset=read_verified_dataset(execution.inputs.dataset),
+            output_dir=str(tmp_path / "out"),
+        )
+
+    assert captured["truncation_allowed"] is False
