@@ -264,6 +264,19 @@ per-item error isolation, and off-thread document opens.
   full-parameter SFT and pretraining runs fail closed at `run_accepted` until the pinned worker wheel is
   rebuilt. Known limit: the full-model tensor-state check has not yet been exercised against a real
   `save_pretrained` export on the GPU host.
+- **Lane conformance matrix (test-only assurance)**: `engine/tests/lane_conformance.py` declares, for
+  each of the six resolved execution variants and each of fourteen execution guarantees, one cell -
+  `ENFORCED` with the test that proves it, `GAP` with its tracking issue, `UNPROVEN` where the code
+  applies the guarantee but no test covers that lane, or `NOT_APPLICABLE` with the reason. A new
+  resolved variant cannot reach execution without declaring all fourteen, which is the defect class
+  behind #860 to #863 (a lane added by copying an older one, silently dropping a guarantee). An
+  `ENFORCED` cell's proof is resolved by importing the test module and reading its real
+  `parametrize` marks, so a lane dropped from a proof's lane list fails the matrix instead of quietly
+  voiding the cell. Current non-`ENFORCED` cells, all tracked: adapter SFT export-tree ordering
+  (#918), formatter identity unchecked on the DPO/reward/on-policy RL/full-parameter SFT lanes
+  (#919), `--max-steps` silently discarded in-process on five lanes (#920), pretraining sealed corpus
+  and architecture hashes unverified (#921), pretraining precision/attention/placement sealed but not
+  lowered (#922), and four guarantees enforced in code with no test on one lane each (#923).
 - **Versioned reasoning/tool trace foundation** — the language-neutral, hash-sealed `TraceRecord`
   preserves exact source-row lineage, ordered role context, reasoning/action/tool/result/final-answer
   boundaries, producer/model/prompt/request/response evidence, typed validation findings, and a
