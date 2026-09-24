@@ -75,13 +75,17 @@ python -m corpus_studio.cli dataset-version-diff <project-dir> \
 # Restore a version's rows to a file (never examples.jsonl; verified by default)
 python -m corpus_studio.cli dataset-version-restore <project-dir> \
   --version-id <id> --output <path> [--force] [--no-verify] [--json]
+
+# Prune row-store rows that no version manifest references (fail-closed)
+python -m corpus_studio.cli dataset-version-gc <project-dir> [--dry-run] [--json]
 ```
 
 `dataset-version-create` computes the fingerprint + row count from the project's
 `examples.jsonl`, auto-links the newest dataset-scope gate report already on disk
 (deterministic — it never *runs* a gate), and with `--stamp-run` writes
 `source_snapshot_id=<version_id>` onto that run so the dataset→run link closes in
-both directions.
+both directions. The `--stamp-run` target is checked before anything is captured,
+so a missing run refuses without leaving rows or a manifest behind.
 
 ## Row store, manifests, and diff (v1.0.2)
 
@@ -143,13 +147,83 @@ from the store) and writes them as JSONL to `--output`:
 A version without stored rows (pre-v1.0.2 or `--no-store-rows`) can't be
 restored and refuses with the same "recapture with row storage" message.
 
+## Concurrency and crash safety (#859)
+
+The row store and the per-version manifests are **one shared structure**: a
+version is restorable only while every row its manifest names is in the store, and
+GC deletes the store rows no manifest names. Two protocols mutate it:
+
+- **capture / publication**: append the dataset's new rows to the store, publish
+  the manifest, commit the record (`dataset-version-create`, `import-commit`, the
+  undo capture of `examples-delete` / `examples-edit` / `examples-clean`, and
+  `dataset-version-restore --in-place`);
+- **GC**: read every manifest (the live set), read the store, atomically replace it.
+
+Unserialized, a version published between GC's manifest scan and its replace would
+lose its rows for good. Both protocols therefore run under one cross-process
+**version-store lock**, `dataset_versions/.version_store.lock`
+(`engine/corpus_studio/versions/store_lock.py`):
+
+- Publication holds it from the first store append through the manifest and the
+  record; GC holds it from the manifest scan through the replace (a dry run holds
+  it too, so its report is consistent). Every other store append takes it as well.
+- It is portable (`fcntl.flock` on POSIX, `msvcrt.locking` on Windows), waits a
+  **bounded** time (60 s by default) and then refuses with a "version store is
+  busy" error (nothing written, nothing pruned, safe to retry), is same-thread
+  reentrant, and is released by the kernel when its holder exits or crashes, so a
+  crash never leaves a stale lock. Never delete the lock file to "unstick" it.
+- The version store is **single-owner**. The lock file is created `0600` and must
+  be one regular file owned by the user running the engine (a planted link or
+  another user's file is refused), so a project shared between accounts, or run
+  once under `sudo` or as a container's root, refuses capture and GC with "lock
+  file is owned by another user". To recover, with no capture or GC running, the
+  file's owner or an administrator removes `dataset_versions/.version_store.lock`
+  (or `chown`s it to that user); the next operation recreates it. Removing it is
+  safe only then, because a running holder keeps its lock on the removed file.
+- Readers stay lock-free: `dataset-version-diff`, `restore --output`, and
+  version-pinned suites read published manifests, whose rows GC never prunes, and
+  GC swaps the store with an atomic `os.replace`.
+- The record, the manifest, and GC's rewritten store are all written through a
+  uniquely named, fsynced temp file plus `os.replace`, so a crash leaves either the
+  old file or the complete new one. That temp file is created owner-only (`0600`,
+  as for `examples.jsonl`), so records, manifests, and a store GC has rewritten are
+  readable only by their owner, consistent with the single-owner lock.
+
+**Lock order.** The `examples.jsonl` single-writer lock (non-blocking) is always
+taken **before** the version-store lock, never while holding it: `import-commit`
+takes the writer lock, then the version-store lock (before appending, so a busy
+store refuses the whole commit rather than committing rows without their undo
+version), and the examples-mutation and in-place restore undo captures take the
+version-store lock inside the writer lock. Capture, publication, and GC never
+request the writer lock, so the order is acyclic and nesting cannot deadlock. A
+busy version store makes those commands refuse with "nothing committed" /
+"nothing changed".
+
+**Interrupted states and how they recover** (no manual repair needed):
+
+| Interrupted at | Left on disk | Recovery |
+|---|---|---|
+| Mid-append | Complete orphan rows, possibly a torn last line (the cut can fall inside a multi-byte UTF-8 character) | The next capture newline-terminates the torn line before appending, at the byte level, so it cannot swallow a row. Every store reader decodes line by line and skips an undecodable or torn line, so capture, diff, and restore keep working. GC prunes the orphan rows and keeps the unclassifiable fragment. |
+| After the append, before the manifest | Orphan rows (and possibly a stray temp file nothing reads) | GC prunes the orphans. It can do so safely only because it holds the lock, which proves no publication is in flight. |
+| After the manifest, before the record | A manifest with no record | GC keeps its rows (it never prunes on a guess); the version is invisible to list/restore. |
+| During GC | The original store, intact (atomic replace) | Re-run GC. |
+| Failed capture (unreadable dataset, store I/O error) | Nothing new | The store is rolled back to its pre-capture size, and only ever shrunk, never extended. |
+
+**GC refuses an incomplete reference scan** (exit 1, nothing pruned) when a manifest
+cannot be read, is not valid UTF-8, has a line that is not a sha256 row id (torn or
+corrupt), or lists a different number of rows than its record's
+`stored_row_count`; it also refuses when the store itself is not valid UTF-8, when
+the store cannot be replaced (e.g. held open on Windows), or when the version store
+stays busy. A manifest whose record is missing or unreadable stays live as read, so
+it can only keep rows.
+
 ## Hard boundaries
 
-The engine only **reads** `examples.jsonl` and **writes** JSON under
-`dataset_versions/`. It never moves, copies, or deletes the dataset or any weight
-file; it runs no ML and makes no network calls. Capture is explicit/opt-in, taken
-when the dataset is quiescent (after an import/append commits), never as a side
-effect.
+The engine only **reads** `examples.jsonl` and **writes** only under
+`dataset_versions/` (records, manifests, the row store, and the version-store lock
+file). It never moves, copies, or deletes the dataset or any weight file; it runs
+no ML and makes no network calls. Capture is explicit/opt-in, taken when the
+dataset is quiescent (after an import/append commits), never as a side effect.
 
 ## Implemented vs deferred
 

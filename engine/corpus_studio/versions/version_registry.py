@@ -8,17 +8,37 @@ eval report, a gate report). The record JSON itself stores no row bodies (eval
 scores, base model, and integrity are all resolved live in the version card).
 As of v1.0.2, :func:`capture_dataset` (with ``store_rows``) also writes each row
 to a content-addressed store plus an ordered per-version manifest, which powers
-``dataset-version-diff`` (see ``row_store`` / ``version_diff``); only
-restore-to-version remains deferred.
+``dataset-version-diff`` and restore (see ``row_store`` / ``version_diff`` /
+``version_restore``).
+
+Concurrency and crash safety (#859): the row store and the manifests are one
+shared structure that row-store GC also rewrites, so every store append and every
+manifest publication runs under the version-store lock (``store_lock``), and
+:func:`publish_dataset_version` holds it across the whole capture -> manifest ->
+record sequence. The interrupted states that sequence can leave behind are all
+recoverable without manual repair:
+
+* died mid-append: complete orphan rows plus possibly a torn last line, which can
+  end inside a multi-byte UTF-8 character. The next capture newline-terminates the
+  torn line first, at the byte level (so it cannot swallow the next row), and every
+  store reader skips an undecodable or torn line, so capture, diff and restore keep
+  working; GC prunes the orphans and keeps the unclassifiable fragment.
+* died after the append, before the manifest rename: orphan rows (and possibly a
+  uniquely named temp file that nothing reads). GC prunes the orphans; it may do
+  so only under the lock, which proves no publication is in flight.
+* died after the manifest, before the record: a record-less manifest. GC keeps its
+  rows (never prunes on a guess); the version is invisible to list/restore.
+* a failed capture rolls the store back to its pre-capture size, never beyond the
+  current end (it never extends the file).
 
 Records are per-version inspectable JSON under ``dataset_versions/`` (mutable
 metadata like label/links => a per-record file, never a JSONL append log).
 ``version_id`` is timestamp-prefixed so listing is chronological without an
 index file.
 
-Hard constraint: this module only READS ``examples.jsonl`` and writes JSON under
-``dataset_versions/``. It never moves, copies, or deletes the dataset or any
-weight file.
+Hard constraint: this module only READS ``examples.jsonl`` and writes only under
+``dataset_versions/`` (records, manifests, the row store, and the lock file). It
+never moves, copies, or deletes the dataset or any weight file.
 """
 
 from __future__ import annotations
@@ -27,8 +47,11 @@ import hashlib
 import os
 import re
 from pathlib import Path
+from typing import Sequence
 
 from pydantic import BaseModel, Field
+
+from corpus_studio.storage.examples_writer import atomic_write_lines
 
 # Single source of the per-row exact signature (json.dumps sort_keys, compact),
 # reused verbatim so version identity matches cleaning/quality/leakage exactly.
@@ -177,7 +200,7 @@ def current_integrity(record: DatasetVersionRecord, examples_path: Path | str) -
 
 
 def save_version_record(project_dir: Path | str, record: DatasetVersionRecord) -> Path:
-    """Atomically write a version record (temp + os.replace).
+    """Atomically write a version record (unique fsynced temp + os.replace).
 
     ``version_id`` must match ``[A-Za-z0-9._-]+`` so the slugged filename is
     injective (distinct ids can never collapse to the same file and silently
@@ -188,12 +211,8 @@ def save_version_record(project_dir: Path | str, record: DatasetVersionRecord) -
         raise ValueError(
             f"Invalid version_id '{record.version_id}': must match [A-Za-z0-9._-]+."
         )
-    directory = registry_dir(project_dir)
-    directory.mkdir(parents=True, exist_ok=True)
-    path = directory / f"{_slug(record.version_id)}.json"
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(record.model_dump_json(indent=2) + "\n", encoding="utf-8")
-    os.replace(tmp, path)
+    path = registry_dir(project_dir) / f"{_slug(record.version_id)}.json"
+    atomic_write_lines(path, [record.model_dump_json(indent=2)])
     return path
 
 
@@ -230,14 +249,18 @@ def manifest_path(project_dir: Path | str, version_id: str) -> Path:
 
 
 def save_row_manifest(project_dir: Path | str, version_id: str, row_ids: list[str]) -> Path:
-    """Atomically write the ordered row-id manifest (one id per line)."""
+    """Atomically write the ordered row-id manifest (one id per line; unique fsynced
+    temp + os.replace, so a crash leaves either no manifest or a complete one).
 
-    directory = registry_dir(project_dir)
-    directory.mkdir(parents=True, exist_ok=True)
-    path = directory / f"{_slug(version_id)}{ROW_MANIFEST_SUFFIX}"
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text("".join(row_id + "\n" for row_id in row_ids), encoding="utf-8")
-    os.replace(tmp, path)
+    Publishing a manifest pins rows against GC, so it runs under the version-store
+    lock (reentrant: :func:`publish_dataset_version` already holds it across the
+    capture that stored those rows)."""
+
+    from corpus_studio.versions.store_lock import version_store_lock
+
+    path = registry_dir(project_dir) / f"{_slug(version_id)}{ROW_MANIFEST_SUFFIX}"
+    with version_store_lock(project_dir, operation="manifest publication"):
+        atomic_write_lines(path, list(row_ids))
     return path
 
 
@@ -275,17 +298,23 @@ class DatasetCapture(BaseModel):
 
 def _truncate_row_store(store_target: Path | None, size: int | None) -> None:
     """Best-effort rollback: shrink the row store back to its pre-capture size so a
-    failed/partial capture leaves nothing new on disk (there is no GC for blobs).
+    failed/partial capture leaves nothing new on disk.
 
     A ``size`` of ``None`` means the pre-capture size could not be determined, so the
     rollback is SKIPPED: truncating to a guessed 0 would destroy every previously-stored
-    version's rows. Leaving the newly-appended (content-addressed) rows in place is safe —
-    at worst they are harmless orphan blobs the store already tolerates and never GCs."""
+    version's rows. Leaving the newly-appended (content-addressed) rows in place is safe:
+    they are unreferenced orphans that row-store GC prunes later.
+
+    The store is only ever SHRUNK. ``os.truncate`` to a size past the current end would
+    EXTEND the file with NUL bytes, and the next append would be glued onto that NUL run
+    and become unreadable. The version-store lock keeps GC from shrinking the store
+    during a capture; this guard keeps the rollback safe even if something outside the
+    protocol did."""
 
     if store_target is None or size is None:
         return
     try:
-        if store_target.exists():
+        if store_target.stat().st_size > size:
             os.truncate(store_target, size)
     except OSError:
         pass
@@ -297,8 +326,8 @@ def capture_dataset(
     """Single streaming pass over ``examples.jsonl`` producing the identity + rows.
 
     In ONE read it (1) feeds the content fingerprint digest with the exact,
-    ordered per-row signatures — byte-for-byte identical to
-    :func:`fingerprint_dataset` — (2) computes each row_id, and (3) when
+    ordered per-row signatures - byte-for-byte identical to
+    :func:`fingerprint_dataset` - (2) computes each row_id, and (3) when
     ``store_rows`` appends any not-yet-stored row to the shared content-addressed
     store. Because everything derives from the same iteration, the returned
     fingerprint and ordered ``row_ids`` can never desync.
@@ -308,17 +337,38 @@ def capture_dataset(
     capture; a **row-store I/O failure** on an otherwise-readable dataset still
     returns the real fingerprint with ``rows_stored=False``. On either failure the
     store is rolled back to its pre-capture size, so a failed capture leaves
-    nothing new on disk. Never raises.
+    nothing new on disk. Dataset and store I/O problems never raise.
 
-    The caller (the CLI, which mints the version_id) writes the manifest via
-    :func:`save_row_manifest` and the record when ``rows_stored`` is True.
+    With ``store_rows`` the pass runs under the version-store lock (reentrant) and
+    raises :class:`~corpus_studio.versions.store_lock.VersionStoreLockError` (nothing
+    written) when that lock cannot be acquired. Rows appended here are unreferenced,
+    and therefore prunable by GC, until a manifest names them: a caller that
+    publishes a manifest for this capture MUST hold the lock across the capture AND
+    the publication. :func:`publish_dataset_version` does exactly that.
     """
-
-    from corpus_studio.versions.row_store import load_row_id_set, row_store_path, store_line
 
     path = Path(examples_path)
     if not path.exists():
         return DatasetCapture()
+    if not store_rows:
+        return _capture_pass(path, project_dir, store_rows=False)
+
+    from corpus_studio.versions.store_lock import version_store_lock
+
+    with version_store_lock(project_dir, operation="dataset capture"):
+        return _capture_pass(path, project_dir, store_rows=True)
+
+
+def _capture_pass(path: Path, project_dir: Path | str, *, store_rows: bool) -> DatasetCapture:
+    """The body of :func:`capture_dataset`; with ``store_rows`` the caller holds the
+    version-store lock, so no GC or other append can move the store under it."""
+
+    from corpus_studio.versions.row_store import (
+        load_row_id_set,
+        row_store_path,
+        store_line,
+        terminate_torn_tail,
+    )
 
     store_target: Path | None = None
     # 0 => no pre-existing store, so a rollback truncates the file we create back to
@@ -326,9 +376,18 @@ def capture_dataset(
     # must then be skipped rather than guess 0 and wipe every prior version's rows.
     store_start_size: int | None = 0
     existing: set[str] = set()
+    store_failed = False
     if store_rows:
-        existing = load_row_id_set(project_dir)
         store_target = row_store_path(project_dir)
+        try:
+            # A writer that died mid-append can leave a partial last line; appending
+            # straight after it would glue our first row onto the fragment.
+            terminate_torn_tail(store_target)
+        except OSError:
+            # The store cannot be made safe to append to: store nothing and record
+            # a fingerprint-only version rather than risk an unreadable first row.
+            store_failed = True
+        existing = load_row_id_set(project_dir)
         if store_target.exists():
             try:
                 store_start_size = store_target.stat().st_size
@@ -339,7 +398,6 @@ def capture_dataset(
     row_ids: list[str] = []
     new_stored = 0
     store_handle = None
-    store_failed = False
     dataset_unreadable = False
     count = 0
     try:
@@ -394,6 +452,83 @@ def capture_dataset(
         rows_stored=store_rows and not store_failed,
     )
 
+
+def publish_dataset_version(
+    project_dir: Path | str,
+    *,
+    label: str = "",
+    trigger: str = "manual",
+    store_rows: bool = True,
+    source_run_ids: Sequence[str] = (),
+    artifact_ids: Sequence[str] = (),
+    eval_report_path: str | None = None,
+    gate_report_path: str | None = None,
+) -> tuple[DatasetVersionRecord, DatasetCapture]:
+    """Capture examples.jsonl and publish it as a new dataset version.
+
+    The single publication path (the CLI ``dataset-version-create``, import-commit,
+    the examples-mutation undo, and in-place restore's undo all come through here):
+    capture -> mint id -> save manifest -> save record, as ONE critical section under
+    the version-store lock when rows are stored, so row-store GC can never prune the
+    appended rows before the manifest that pins them is published. The record save is
+    the commit point. Returns ``(record, capture)``.
+
+    Raises :class:`~corpus_studio.versions.store_lock.VersionStoreBusyError` (or its
+    base :class:`~corpus_studio.versions.store_lock.VersionStoreLockError`) before
+    anything is written when the lock cannot be acquired. Reads examples.jsonl;
+    writes only under dataset_versions/.
+    """
+
+    import secrets
+    from contextlib import AbstractContextManager, nullcontext
+    from datetime import datetime, timezone
+
+    from corpus_studio.versions.row_store import ROW_MANIFEST_ALGO
+    from corpus_studio.versions.store_lock import version_store_lock
+
+    project = Path(project_dir)
+    # A fingerprint-only version appends no rows and publishes no manifest, so it has
+    # nothing to serialize against GC.
+    guard: AbstractContextManager[None] = (
+        version_store_lock(project, operation="dataset version capture")
+        if store_rows
+        else nullcontext()
+    )
+    with guard:
+        capture = capture_dataset(project / "examples.jsonl", project, store_rows=store_rows)
+        rows_stored = capture.rows_stored
+        now_dt = datetime.now(timezone.utc)
+        # A random token breaks ties: the wall clock can be too coarse to advance
+        # between two in-process creates (esp. on Windows), and a pure-timestamp id
+        # would collide and silently overwrite the earlier version's file.
+        version_id = mint_version_id(
+            now_dt.strftime("%Y%m%dT%H%M%S"), f"{now_dt.microsecond:06d}-{secrets.token_hex(3)}"
+        )
+        now_iso = now_dt.isoformat()
+        record = DatasetVersionRecord(
+            version_id=version_id,
+            created_at=now_iso,
+            updated_at=now_iso,
+            label=label,
+            trigger=trigger,
+            row_count=capture.row_count,
+            content_fingerprint=capture.content_fingerprint,
+            source_run_ids=list(source_run_ids),
+            artifact_ids=list(artifact_ids),
+            eval_report_path=eval_report_path,
+            gate_report_path=gate_report_path,
+            rows_stored=rows_stored,
+            stored_row_count=capture.row_count if rows_stored else 0,
+            row_manifest_algo=ROW_MANIFEST_ALGO if rows_stored else None,
+        )
+        # The ordered manifest (it references the store) goes before the record; the
+        # record save is the commit point.
+        if rows_stored:
+            save_row_manifest(project, version_id, capture.row_ids)
+        save_version_record(project, record)
+    return record, capture
+
+
 def create_dataset_version(
     project_dir: Path | str,
     *,
@@ -403,38 +538,13 @@ def create_dataset_version(
 ) -> DatasetVersionRecord:
     """Capture examples.jsonl as a new dataset version and persist it.
 
-    Encapsulates the capture -> mint id -> save manifest -> save record sequence
-    for callers that need a plain version (no run/artifact/gate linkage) - notably
-    in-place restore's undo capture. Reads examples.jsonl; writes only under
-    dataset_versions/. Returns the saved record.
+    A plain version (no run/artifact/gate linkage) through
+    :func:`publish_dataset_version` - notably in-place restore's undo capture. Raises
+    :class:`~corpus_studio.versions.store_lock.VersionStoreLockError` (nothing written)
+    when the version-store lock cannot be acquired. Returns the saved record.
     """
 
-    import secrets
-    from datetime import datetime, timezone
-
-    from corpus_studio.versions.row_store import ROW_MANIFEST_ALGO
-
-    project = Path(project_dir)
-    capture = capture_dataset(project / "examples.jsonl", project, store_rows=store_rows)
-    rows_stored = capture.rows_stored
-    now_dt = datetime.now(timezone.utc)
-    version_id = mint_version_id(
-        now_dt.strftime("%Y%m%dT%H%M%S"), f"{now_dt.microsecond:06d}-{secrets.token_hex(3)}"
+    record, _capture = publish_dataset_version(
+        project_dir, label=label, trigger=trigger, store_rows=store_rows
     )
-    now_iso = now_dt.isoformat()
-    record = DatasetVersionRecord(
-        version_id=version_id,
-        created_at=now_iso,
-        updated_at=now_iso,
-        label=label,
-        trigger=trigger,
-        row_count=capture.row_count,
-        content_fingerprint=capture.content_fingerprint,
-        rows_stored=rows_stored,
-        stored_row_count=capture.row_count if rows_stored else 0,
-        row_manifest_algo=ROW_MANIFEST_ALGO if rows_stored else None,
-    )
-    if rows_stored:
-        save_row_manifest(project, version_id, capture.row_ids)
-    save_version_record(project, record)
     return record

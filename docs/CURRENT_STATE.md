@@ -540,6 +540,18 @@ per-item error isolation, and off-thread document opens.
   `--output` file, verified against the recorded fingerprint (all-or-nothing,
   atomic, overwrite-safe), or **in place** with `--in-place` (undo-captured). The
   sanctioned single writer of `examples.jsonl` is the engine's `examples-append`.
+  Capture/publication (store append -> manifest -> record) and row-store GC (manifest
+  scan -> replace) are serialized by a cross-process version-store lock
+  (`dataset_versions/.version_store.lock`: portable, bounded wait, same-thread
+  reentrant, released on crash), so a version published while GC runs never loses
+  rows (#859). The examples.jsonl writer lock is always taken before it. GC is
+  fail-closed: it refuses (exit 1, nothing pruned) on a busy store, a manifest that is
+  not UTF-8, a torn manifest line, a manifest whose row count disagrees with its
+  record, or a failed replace. A capture killed mid-append leaves only states the next
+  capture and GC recover without manual repair (a torn tail is newline-terminated at
+  the byte level; readers skip torn or undecodable lines); see
+  [`VERSIONING.md`](VERSIONING.md). Records, manifests, the GC-rewritten store and the
+  lock file are created 0600 (single-owner projects).
 - A desktop **Versions** tab: read-only history with a live integrity badge, an
   opt-in **Capture version** button, **View card**, a **diff view** ("Set diff
   base" → "Diff base → selected"), and **Restore this version** (in-place). The
@@ -647,7 +659,8 @@ per-item error isolation, and off-thread document opens.
 - Dataset-version **reorder detection** and a normalized row identity are still future.
 
   _Previously listed here but now **shipped** (see `CLI_REFERENCE.md`): row-store garbage collection
-  (`dataset-version-gc`, fail-closed, `--dry-run`), opt-in export PII/secret redaction
+  (`dataset-version-gc`, fail-closed, `--dry-run`, serialized with version capture by the
+  version-store lock, #859), opt-in export PII/secret redaction
   (`export --redact-pii`, with a redaction manifest — known patterns only, not de-identification), the
   desktop per-project gate-threshold editor (`gate-thresholds` read + `gate-thresholds-set` validated
   write), and the validator's recursive **lists-of-objects** checking (`SchemaField.item_fields`)._

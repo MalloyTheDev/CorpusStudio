@@ -3647,6 +3647,7 @@ def _apply_examples_mutation(
         replace_examples_lines_locked,
         single_writer_lock,
     )
+    from corpus_studio.versions.store_lock import VersionStoreLockError
     from corpus_studio.versions.version_registry import create_dataset_version
     from corpus_studio.versions.version_restore import reconstruct_version_lines
 
@@ -3659,9 +3660,15 @@ def _apply_examples_mutation(
             existing = read_existing_lines(project_dir)
             # Compute the result FIRST so a bad address refuses before any undo/version churn.
             new_lines = transform(existing)
-            undo = create_dataset_version(
-                project_dir, label=undo_label, trigger=undo_trigger, store_rows=True
-            )
+            # Lock order: the writer lock (held) BEFORE the version-store lock taken inside.
+            try:
+                undo = create_dataset_version(
+                    project_dir, label=undo_label, trigger=undo_trigger, store_rows=True
+                )
+            except VersionStoreLockError as exc:
+                raise _ExamplesMutationError(
+                    f"could not capture an undo version ({exc}); nothing changed."
+                ) from exc
             # A current dataset that yields NO fingerprint is UNREADABLE (a torn line), not empty -
             # refuse rather than mutate it behind a dead undo.
             if undo.content_fingerprint is None:
@@ -4053,22 +4060,41 @@ def import_commit(
 
     version_id: Optional[str] = None
     if accepted:
+        from contextlib import AbstractContextManager, nullcontext
+
+        from corpus_studio.versions.store_lock import VersionStoreLockError, version_store_lock
+
         # Hold the single-writer lock across BOTH the append and the version capture, so
         # the captured undo point reflects exactly this commit - no concurrent writer can
         # slip in between (create_dataset_version only reads examples.jsonl + writes under
-        # dataset_versions/, so it runs safely inside the held lock).
+        # dataset_versions/, so it runs safely inside the held lock). The version-store lock
+        # is taken next (lock order: writer lock first, never the reverse) and BEFORE the
+        # append, so a busy version store refuses the whole commit instead of committing
+        # rows without their undo point; the capture inside re-enters it.
         try:
             with single_writer_lock(project_dir):
-                append_examples_locked(project_dir, accepted)
-                if capture_version:
-                    from corpus_studio.versions.version_registry import create_dataset_version
+                store_guard: AbstractContextManager[None] = (
+                    version_store_lock(project_dir, operation="import commit")
+                    if capture_version
+                    else nullcontext()
+                )
+                with store_guard:
+                    append_examples_locked(project_dir, accepted)
+                    if capture_version:
+                        from corpus_studio.versions.version_registry import create_dataset_version
 
-                    record = create_dataset_version(
-                        project_dir, label="import commit", trigger="import_commit", store_rows=True
-                    )
-                    version_id = record.version_id
+                        record = create_dataset_version(
+                            project_dir,
+                            label="import commit",
+                            trigger="import_commit",
+                            store_rows=True,
+                        )
+                        version_id = record.version_id
         except ExamplesLockedError as exc:
             typer.echo(str(exc), err=True)
+            raise typer.Exit(code=1) from exc
+        except VersionStoreLockError as exc:
+            typer.echo(f"Refusing to commit, nothing committed: {exc}", err=True)
             raise typer.Exit(code=1) from exc
 
     # Persist the rejects (original content + reasons) so they survive for repair. Written to a
@@ -7660,77 +7686,17 @@ def dataset_version_create(
     or deletes the dataset or any weight file.
     """
 
-    from datetime import datetime, timezone
+    from corpus_studio.versions.store_lock import VersionStoreLockError
+    from corpus_studio.versions.version_registry import publish_dataset_version
 
-    from corpus_studio.versions.row_store import ROW_MANIFEST_ALGO
-    from corpus_studio.versions.version_registry import (
-        DatasetVersionRecord,
-        capture_dataset,
-        mint_version_id,
-        save_row_manifest,
-        save_version_record,
-    )
-
-    examples_path = project_dir / "examples.jsonl"
-    capture = capture_dataset(examples_path, project_dir, store_rows=store_rows)
-    rows_stored = capture.rows_stored
-    if capture.content_fingerprint is None:
-        typer.echo(
-            "Note: examples.jsonl is missing or unreadable; recording a version without a fingerprint.",
-            err=True,
-        )
-    elif store_rows and not rows_stored:
-        # Readable dataset, but the row store could not be written: record a
-        # fingerprint-only version rather than falsely claiming it is diffable.
-        typer.echo(
-            "Note: the row store could not be written; recording a fingerprint-only version (not diffable).",
-            err=True,
-        )
-    elif rows_stored and capture.row_count > 0:
-        typer.echo(
-            f"Stored {capture.row_count} row(s) ({capture.new_rows_stored} new) to the row store.",
-            err=True,
-        )
-
-    import secrets
-
-    now_dt = datetime.now(timezone.utc)
-    # A random token breaks ties: the wall clock can be too coarse to advance
-    # between two in-process creates (esp. on Windows), and a pure-timestamp id
-    # would collide and silently overwrite the earlier version's file.
-    version_id = mint_version_id(
-        now_dt.strftime("%Y%m%dT%H%M%S"), f"{now_dt.microsecond:06d}-{secrets.token_hex(3)}"
-    )
-    now_iso = now_dt.isoformat()
-
-    record = DatasetVersionRecord(
-        version_id=version_id,
-        created_at=now_iso,
-        updated_at=now_iso,
-        label=label,
-        trigger=trigger,
-        row_count=capture.row_count,
-        content_fingerprint=capture.content_fingerprint,
-        source_run_ids=list(link_run or []),
-        artifact_ids=list(link_artifact or []),
-        eval_report_path=eval_report_path,
-        gate_report_path=gate_report_path or _newest_dataset_gate_report(project_dir),
-        rows_stored=rows_stored,
-        stored_row_count=capture.row_count if rows_stored else 0,
-        row_manifest_algo=ROW_MANIFEST_ALGO if rows_stored else None,
-    )
-
-    # Write the ordered manifest (references the store) before the record; the
-    # record save below is the commit point.
-    if rows_stored:
-        save_row_manifest(project_dir, version_id, capture.row_ids)
-
+    # Resolve everything that can refuse BEFORE capturing, so a bad --stamp-run never leaves an
+    # orphan manifest or orphan store rows behind.
     run_to_stamp = None
+    source_run_ids = list(link_run or [])
     if stamp_run is not None:
         from corpus_studio.training.run_registry import (
             load_run_record,
             record_path as run_record_path,
-            save_run_record,
         )
 
         run_path = run_record_path(project_dir, stamp_run)
@@ -7738,19 +7704,56 @@ def dataset_version_create(
             typer.echo(f"No training run '{stamp_run}' to stamp.", err=True)
             raise typer.Exit(code=1)
         run_to_stamp = load_run_record(run_path)
-        if stamp_run not in record.source_run_ids:
-            record.source_run_ids.append(stamp_run)
+        if stamp_run not in source_run_ids:
+            source_run_ids.append(stamp_run)
 
-    # Commit the version FIRST, then write the run's back-link. If the version
-    # save fails, no run is left pointing at a version that was never saved (a
-    # version listing a run that lacks the back-link is tolerated; the reverse
-    # corrupts lineage).
-    save_version_record(project_dir, record)
+    # Capture -> manifest -> record is ONE critical section under the version-store lock, so a
+    # concurrent dataset-version-gc can never prune this version's rows before its manifest exists.
+    try:
+        record, capture = publish_dataset_version(
+            project_dir,
+            label=label,
+            trigger=trigger,
+            store_rows=store_rows,
+            source_run_ids=source_run_ids,
+            artifact_ids=list(link_artifact or []),
+            eval_report_path=eval_report_path,
+            gate_report_path=gate_report_path or _newest_dataset_gate_report(project_dir),
+        )
+    except VersionStoreLockError as exc:
+        typer.echo(f"Could not capture a dataset version, nothing was written: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
 
+    if capture.content_fingerprint is None:
+        typer.echo(
+            "Note: examples.jsonl is missing or unreadable; recording a version without a fingerprint.",
+            err=True,
+        )
+    elif store_rows and not capture.rows_stored:
+        # Readable dataset, but the row store could not be written: record a
+        # fingerprint-only version rather than falsely claiming it is diffable.
+        typer.echo(
+            "Note: the row store could not be written; recording a fingerprint-only version (not diffable).",
+            err=True,
+        )
+    elif capture.rows_stored and capture.row_count > 0:
+        typer.echo(
+            f"Stored {capture.row_count} row(s) ({capture.new_rows_stored} new) to the row store.",
+            err=True,
+        )
+
+    # The version is committed FIRST (publish_dataset_version saved the record), then the run's
+    # back-link. If the version save fails, no run is left pointing at a version that was never
+    # saved (a version listing a run that lacks the back-link is tolerated; the reverse corrupts
+    # lineage).
     if run_to_stamp is not None:
+        from corpus_studio.training.run_registry import save_run_record
+
         save_run_record(
             project_dir,
-            run_to_stamp.model_copy(update={"source_snapshot_id": version_id, "updated_at": now_iso}),
+            run_to_stamp.model_copy(
+                update={"source_snapshot_id": record.version_id, "updated_at": record.created_at}
+            ),
         )
 
     typer.echo(record.model_dump_json(indent=2))
@@ -7789,13 +7792,22 @@ def dataset_version_gc(
     """Prune row-store rows that no dataset version references.
 
     Safe by construction: the rows to keep are the union of every version manifest, and a row that
-    can't be positively identified as unreferenced is kept. If any manifest is unreadable, GC aborts
-    rather than risk deleting referenced rows.
+    can't be positively identified as unreferenced is kept. If any manifest is unreadable or cannot
+    be trusted (torn, not UTF-8, disagreeing with its record), GC aborts rather than risk deleting
+    referenced rows. GC holds the version-store lock, so it never races a version capture; it waits
+    a bounded time for an in-flight capture and refuses (nothing pruned) if the store stays busy.
     """
-    from corpus_studio.versions.gc import gc_row_store
+    from corpus_studio.versions.gc import RowStoreGcRefusedError, gc_row_store
+    from corpus_studio.versions.store_lock import VersionStoreLockError
 
     try:
         result = gc_row_store(project_dir, dry_run=dry_run)
+    except VersionStoreLockError as exc:
+        typer.echo(f"GC refused, nothing was pruned: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    except RowStoreGcRefusedError as exc:
+        typer.echo(f"GC aborted: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
     except OSError as exc:
         typer.echo(f"GC aborted (a version manifest could not be read): {exc}", err=True)
         raise typer.Exit(code=1) from exc
@@ -8107,6 +8119,7 @@ def dataset_version_restore(
             replace_examples_lines_locked,
             single_writer_lock,
         )
+        from corpus_studio.versions.store_lock import VersionStoreLockError
         from corpus_studio.versions.version_registry import create_dataset_version
         from corpus_studio.versions.version_restore import reconstruct_version_lines
 
@@ -8116,12 +8129,21 @@ def dataset_version_restore(
         try:
             with single_writer_lock(project_dir):
                 if examples_path.exists():
-                    undo = create_dataset_version(
-                        project_dir,
-                        label=f"undo before restore of {version_id}",
-                        trigger="restore_undo",
-                        store_rows=True,
-                    )
+                    # Lock order: the writer lock (held) BEFORE the version-store lock inside.
+                    try:
+                        undo = create_dataset_version(
+                            project_dir,
+                            label=f"undo before restore of {version_id}",
+                            trigger="restore_undo",
+                            store_rows=True,
+                        )
+                    except VersionStoreLockError as exc:
+                        typer.echo(
+                            "Refusing --in-place: could not capture an undo version "
+                            f"({exc}); nothing changed.",
+                            err=True,
+                        )
+                        raise typer.Exit(code=1) from exc
                     # An existing dataset that yields NO fingerprint is UNREADABLE (e.g. a
                     # torn line), not empty - refuse rather than destroy it with a dead undo.
                     if undo.content_fingerprint is None:
