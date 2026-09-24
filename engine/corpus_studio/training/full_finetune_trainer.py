@@ -247,7 +247,10 @@ def prepare_full_finetune_dataset(
     if not token_ids:
         raise FullFinetuneDataRefusal("the sealed full-finetune dataset rendered no trainable rows")
     built = build_full_finetune_rows(
-        token_ids, seq_len, tokenizer.pad_token_id, truncation_permitted=permitted
+        token_ids,
+        seq_len,
+        tokenizer.pad_token_id,
+        truncation_permitted=permitted,
     )
     coverage = FullFinetuneTokenCoverage(
         configuration_hash=execution.configuration_hash,
