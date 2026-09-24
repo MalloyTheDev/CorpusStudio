@@ -715,3 +715,49 @@ def test_every_newer_runner_maps_a_worker_loader_refusal(
         StageMarker.placement_deviation,
     )
     assert StageMarker.model_load in [e.stage for e in _events(timeline) if e.event_type == "stage"]
+
+
+# --- the in-process path re-verifies every variant's seal, not only adapter SFT ------------------------
+
+
+@pytest.mark.parametrize("lane", ["preference", "reward", "full_finetune", "rollout"])
+def test_execute_run_refuses_a_broken_variant_seal_in_process(tmp_path, lane):
+    """A plan handed straight to the library with a tampered variant body must be refused.
+
+    RunPlan validation rejects a mismatched configuration hash, so the reachable case is an
+    in-memory plan built with ``model_copy`` - exactly what the subprocess parent already refuses
+    before it spawns. The in-process path is the default CLI route, so it has to refuse too.
+    """
+    from corpus_studio.platform.planner import compute_plan_hash, run_plan_hash_payload
+    from corpus_studio.platform.supervisor import execute_run
+
+    plan = _sealed_plan(tmp_path, lane)
+    execution = _execution(plan)
+    field = {
+        "preference": "resolved_preference_execution",
+        "reward": "resolved_reward_execution",
+        "full_finetune": "resolved_full_finetune_execution",
+        "rollout": "resolved_rollout_execution",
+    }[lane]
+    # Change the sealed body without resealing its configuration_hash, then reseal only plan_hash.
+    tampered = plan.model_copy(update={field: execution.model_copy(update={"seed": execution.seed + 1})})
+    tampered = tampered.model_copy(
+        update={"plan_hash": compute_plan_hash(run_plan_hash_payload(tampered))}
+    )
+
+    dispatched: list[str] = []
+
+    class _Runner:
+        name = "cpu_toy"
+
+        def run(self, _ctx):  # pragma: no cover - the refusal must precede dispatch
+            dispatched.append("ran")
+            return []
+
+    result = execute_run(tampered, _Runner(), run_id=f"run-{lane}-tampered")
+    assert result.manifest.state == "failed"
+    failure = result.manifest.failure
+    assert failure is not None
+    assert failure.taxonomy is FailureTaxonomy.UNSUPPORTED_CONFIGURATION
+    assert "configuration hash verification failed" in failure.message
+    assert dispatched == []

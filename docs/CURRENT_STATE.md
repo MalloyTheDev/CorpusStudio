@@ -256,10 +256,14 @@ per-item error isolation, and off-thread document opens.
   shards, sharding index, alternate formats or `checkpoint-*` directories), both before any byte is hashed.
   For non-SFT variants the parent also re-checks the sealed step schedule, the proposed Safetensors/config
   digests and the canonical tensor state against the trained export state; a claimed fit is reconstructed
-  from the raw peak. An echo terminal may claim no evidence, artifact or fit. Compatibility: worker wheels
-  built before #860 echo only the adapter-SFT hash, so their DPO, reward, full-parameter SFT and pretraining
-  runs fail closed at `run_accepted` until the pinned worker wheel is rebuilt. Known limit: the full-model
-  tensor-state check has not yet been exercised against a real `save_pretrained` export on the GPU host.
+  from the raw peak. An echo terminal may claim no evidence, artifact or fit. The in-process supervisor
+  (`supervisor.execute_run`, the default `platform-run` path) re-verifies the dispatched variant's seal
+  through the same binding table, so a tampered DPO, reward, on-policy RL, full-parameter SFT or
+  pretraining body is refused with `UNSUPPORTED_CONFIGURATION` on both paths, not only under `--subprocess`.
+  Compatibility: worker wheels built before #860 echo only the adapter-SFT hash, so their DPO, reward,
+  full-parameter SFT and pretraining runs fail closed at `run_accepted` until the pinned worker wheel is
+  rebuilt. Known limit: the full-model tensor-state check has not yet been exercised against a real
+  `save_pretrained` export on the GPU host.
 - **Versioned reasoning/tool trace foundation** — the language-neutral, hash-sealed `TraceRecord`
   preserves exact source-row lineage, ordered role context, reasoning/action/tool/result/final-answer
   boundaries, producer/model/prompt/request/response evidence, typed validation findings, and a
