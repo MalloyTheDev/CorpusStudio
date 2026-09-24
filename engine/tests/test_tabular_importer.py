@@ -119,3 +119,38 @@ def test_duplicate_header_raises(tmp_path: Path):
 
     with pytest.raises(ValueError, match="Duplicate column"):
         list(read_tabular(csv_path))
+
+
+def test_mid_stream_failure_leaves_existing_staging_file_untouched(tmp_path: Path):
+    # A ragged row three rows in must not destroy a previous good staging file at
+    # the same path - the converter truncates its output before it has confirmed
+    # the whole source converts (#876).
+    csv_path = _write(tmp_path / "src.csv", "text\nrow1\nrow2\nrow3,EXTRA\nrow4\n")
+    out = _write(tmp_path / "staging.jsonl", '{"text": "previous good conversion"}\n')
+
+    with pytest.raises(ValueError, match="more cell"):
+        convert_tabular_to_jsonl(csv_path, out)
+
+    assert out.read_text(encoding="utf-8") == '{"text": "previous good conversion"}\n'
+
+
+def test_mid_stream_failure_leaves_absent_output_path_absent(tmp_path: Path):
+    # Same failure, but with no pre-existing file at the output path: the
+    # converter must not leave a partial prefix behind either (#876).
+    csv_path = _write(tmp_path / "src.csv", "text\nrow1\nrow2\nrow3,EXTRA\nrow4\n")
+    out = tmp_path / "staging.jsonl"
+
+    with pytest.raises(ValueError, match="more cell"):
+        convert_tabular_to_jsonl(csv_path, out)
+
+    assert not out.exists()
+
+
+def test_field_larger_than_limit_raises_valueerror_not_csv_error(tmp_path: Path):
+    # A cell over the csv module's field-size limit must be a clean ValueError
+    # naming the row, not an uncaught _csv.Error traceback (#876).
+    huge_cell = "x" * 200_000
+    csv_path = _write(tmp_path / "big.csv", f"text\nsmall\n{huge_cell}\n")
+
+    with pytest.raises(ValueError, match="row"):
+        list(read_tabular(csv_path))

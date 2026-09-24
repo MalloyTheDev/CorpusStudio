@@ -85,6 +85,7 @@ def test_unknown_format_is_rejected(tmp_path: Path):
 pa_test = pytest.importorskip("pyarrow")
 pq_test = pytest.importorskip("pyarrow.parquet")
 from corpus_studio.exporters.parquet_exporter import write_parquet  # noqa: E402
+from corpus_studio.importers import parquet_importer  # noqa: E402
 from corpus_studio.importers.parquet_importer import (  # noqa: E402
     convert_parquet_to_jsonl,
     read_parquet,
@@ -114,6 +115,51 @@ def test_convert_parquet_to_jsonl_row_count_and_columns(tmp_path: Path):
     assert conversion.columns == ["text", "label"]
     lines = out.read_text(encoding="utf-8").strip().splitlines()
     assert [json.loads(line) for line in lines] == [{"text": "a", "label": "x"}, {"text": "b", "label": "y"}]
+
+
+def _flaky_dumps_failing_on_third_row(monkeypatch):
+    # Fails serialising the third row so the first two rows have already streamed
+    # into the (temp) output before the error hits - reproduces a mid-stream
+    # conversion failure without depending on a specific row's content (#876).
+    real_dumps = json.dumps
+    calls = {"n": 0}
+
+    def _flaky_dumps(*args, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 3:
+            raise ValueError("boom on row 3")
+        return real_dumps(*args, **kwargs)
+
+    monkeypatch.setattr(parquet_importer.json, "dumps", _flaky_dumps)
+
+
+def test_convert_parquet_mid_stream_failure_leaves_existing_output_untouched(tmp_path: Path, monkeypatch):
+    # A failure partway through conversion must not destroy a previous good
+    # staging file at the same output path (#876).
+    path = tmp_path / "d.parquet"
+    _write_parquet_table(path, [{"text": "a"}, {"text": "b"}, {"text": "c"}])
+    out = tmp_path / "staging.jsonl"
+    out.write_text('{"text": "previous good conversion"}\n', encoding="utf-8")
+    _flaky_dumps_failing_on_third_row(monkeypatch)
+
+    with pytest.raises(ValueError, match="boom on row 3"):
+        convert_parquet_to_jsonl(path, out)
+
+    assert out.read_text(encoding="utf-8") == '{"text": "previous good conversion"}\n'
+
+
+def test_convert_parquet_mid_stream_failure_leaves_absent_output_absent(tmp_path: Path, monkeypatch):
+    # Same failure, but with no pre-existing output file: the converter must not
+    # leave a partial prefix behind either (#876).
+    path = tmp_path / "d.parquet"
+    _write_parquet_table(path, [{"text": "a"}, {"text": "b"}, {"text": "c"}])
+    out = tmp_path / "staging.jsonl"
+    _flaky_dumps_failing_on_third_row(monkeypatch)
+
+    with pytest.raises(ValueError, match="boom on row 3"):
+        convert_parquet_to_jsonl(path, out)
+
+    assert not out.exists()
 
 
 def test_convert_empty_parquet_reports_columns_from_schema(tmp_path: Path):
