@@ -189,7 +189,10 @@ trainer-ready format. Pass `export … --format parquet` (or select it in the de
 Export panel); it shares the same validate → PII/secret export-gate → optional
 clean/redact pipeline — only the writer differs. Parquet needs the optional
 `[parquet]` extra; without `pyarrow` installed the export fails fast (before any
-output is written) with `pip install corpus-studio-engine[parquet]`.
+output is written) with `pip install corpus-studio-engine[parquet]`. The columns
+are the union of every row's fields in first-seen order, so a field that only some
+rows carry (an optional `input`, a `meta` key) is kept and holds null in the rows
+that lack it; the export's reported `columns` list is exactly the file's columns.
 
 ### Planned dataset exports
 
