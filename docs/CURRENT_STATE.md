@@ -217,6 +217,9 @@ per-item error isolation, and off-thread document opens.
   many examples a given `sequence_len` would **truncate** (cutting the end - including the model's
   answer). New platform plans render and tokenize the complete hash-pinned JSONL with the exact pinned
   tokenizer/template; over-length rows fail closed unless `allow_truncation` is explicit in the seal.
+  At execution the adapter SFT and full-parameter SFT workers enforce this before any weights load
+  (#861); the DPO and reward workers refuse over-length pairs only inside the training primitive, after
+  the model loads, and the on-policy RL worker checks prompt length lazily per sample.
   The standalone report retains a documented heuristic when the tokenizer extra is absent.
 - **Resolved checkpoint/output policy**: by default a first-party plan seals checkpointing off
   (`save_strategy="no"`, null cadence/retention) and each run writes beneath
@@ -435,8 +438,8 @@ per-item error isolation, and off-thread document opens.
   directory; the verified digest, byte/row counts and configuration hash are recorded in that stage event's
   payload. The GPU bring-up above predates this guard.
   Sealed loader (#863, `training/sealed_loader.py`): the worker loads the model and the tokenizer each from
-  its own sealed binding (an immutable Hub commit or a digest-pinned local directory; local bindings are re-
-  hashed by the runner before dispatch and again after the load), safetensors-only with
+  its own sealed binding (an immutable Hub commit or a digest-pinned local directory; local bindings are
+  re-hashed by the runner before dispatch and again after the load), safetensors-only with
   trust_remote_code=False. Before any weights are allocated it applies and probes the sealed attention API
   and SDPA kernel, loads onto the sealed root device (cuda:0), observes placement, and lowers the sealed nf4
   compute dtype and trainable master dtype; training runs inside the exclusive sealed-kernel context. A
@@ -467,8 +470,8 @@ per-item error isolation, and off-thread document opens.
   byte/row counts and configuration hash are recorded in that stage event's payload. The GPU bring-up above
   predates this guard.
   Sealed loader (#863, `training/sealed_loader.py`): the worker loads the model and the tokenizer each from
-  its own sealed binding (an immutable Hub commit or a digest-pinned local directory; local bindings are re-
-  hashed by the runner before dispatch and again after the load), safetensors-only with
+  its own sealed binding (an immutable Hub commit or a digest-pinned local directory; local bindings are
+  re-hashed by the runner before dispatch and again after the load), safetensors-only with
   trust_remote_code=False. Before any weights are allocated it applies and probes the sealed attention API
   and SDPA kernel, loads onto the sealed root device (cuda:0), observes placement, and lowers the sealed nf4
   compute dtype and trainable master dtype; training runs inside the exclusive sealed-kernel context. A
@@ -495,16 +498,25 @@ per-item error isolation, and off-thread document opens.
   directory; the verified digest, byte/row counts and configuration hash are recorded in that stage event's
   payload. The GPU bring-up above predates this guard.
   Sealed loader (#863, `training/sealed_loader.py`): the worker loads the model and the tokenizer each from
-  its own sealed binding (an immutable Hub commit or a digest-pinned local directory; local bindings are re-
-  hashed by the runner before dispatch and again after the load), safetensors-only with
+  its own sealed binding (an immutable Hub commit or a digest-pinned local directory; local bindings are
+  re-hashed by the runner before dispatch and again after the load), safetensors-only with
   trust_remote_code=False. Before any weights are allocated it applies and probes the sealed attention API
   and SDPA kernel, loads onto the sealed root device (cuda:0; cpu_toy on cpu), observes placement, and
   lowers the sealed full-parameter storage dtype; training runs inside the exclusive sealed-kernel context.
   A value the worker cannot lower is refused at planning, at runner admission and in the worker, and the
   admitted identity is recorded in the `execution_config_verified` stage payload. The bring-up above
-  predates this enforcement; GPU re-validation with a rebuilt worker wheel is pending. Known gap: full-
-  parameter plans seal master, gradient and optimizer-state dtypes as fp32 while the worker trains in the
-  storage dtype; those three are not enforced on this lane.
+  predates this enforcement; GPU re-validation with a rebuilt worker wheel is pending. Known gap:
+  full-parameter plans seal master, gradient and optimizer-state dtypes as fp32 while the worker trains in
+  the storage dtype; those three are not enforced on this lane.
+  No silent truncation (#861): after the pinned tokenizer loads and before the kernel probe or any weights
+  load, the worker runs the adapter SFT lane's own full-content preflight (`trainer.preflight_sft_dataset`)
+  over every verified row with the bound tokenizer (chat template included) and trains exactly the ids it
+  measured. Under the default refuse policy an over-length, unrenderable or empty row anywhere is refused as
+  `UNSUPPORTED_CONFIGURATION`; truncation needs both `data.truncation_policy` and
+  `sequence.truncation_allowed`, and is then explicit and recorded as a deterministic token-coverage payload
+  on the `truncation_analysis` stage, bound to the execution hash. The bring-up above ran on the earlier
+  worker, which cut over-length rows silently; whether any of its rows exceeded 512 tokens has not been
+  re-checked.
 - **Identity-bound backend worker protocol 2.0**: every newly generated RunPlan hash-pins the exact
   static BackendManifest. A subprocess worker must send `hello` first with that manifest and its exact
   environment/lock ref; only then can the core dispatch. The parent enforces protocol/direction/body,

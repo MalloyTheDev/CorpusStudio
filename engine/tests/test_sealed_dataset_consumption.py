@@ -344,9 +344,9 @@ def test_same_bytes_reach_the_real_worker_body_after_verification(tmp_path, monk
     monkeypatch.chdir(tmp_path)
     plan, data, _rows_for = _sealed_plan(tmp_path, lane)
     timeline: list[tuple] = []
-    # Full-parameter SFT formats rows only after its model loads, so let that load "succeed" and stop at
-    # the dataset build instead; the other lanes format before any model load.
-    _install_fake_training_stack(monkeypatch, timeline, stop_at_model=(lane != "full_finetune"))
+    # Every lane, full-parameter SFT included (#861), formats its rows before any model load, so the run
+    # stops at the first model load with the sealed rows already formatted.
+    _install_fake_training_stack(monkeypatch, timeline)
 
     state, _taxonomy, _stage, message = _dispatch(plan, lane, f"run-{lane}", timeline)
 
@@ -368,9 +368,14 @@ def test_same_bytes_reach_the_real_worker_body_after_verification(tmp_path, monk
     first_heavy_index = next(index for index, item in enumerate(timeline) if item[0] in {"load", "format"})
     assert verification_index < first_heavy_index
     if lane == "full_finetune":
-        # The pinned tokenizer binding loads first, then the weights; both only after verification.
+        # The pinned tokenizer binding loads first, then the weights; both only after verification, and
+        # every sealed row is formatted between them (the full-content preflight precedes the weights).
         loads = [item[1] for item in timeline if item[0] == "load"]
         assert loads[:2] == ["AutoTokenizer.from_pretrained", "AutoModelForCausalLM.from_pretrained"]
+        kinds = [item[1] if item[0] == "load" else item[0] for item in timeline]
+        model_index = kinds.index("AutoModelForCausalLM.from_pretrained")
+        assert kinds.index("AutoTokenizer.from_pretrained") < kinds.index("format") < model_index
+        assert kinds[:model_index].count("format") == 6
 
 
 @pytest.mark.parametrize("lane", _ADMITTED_LANES)

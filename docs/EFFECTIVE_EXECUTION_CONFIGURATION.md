@@ -37,6 +37,17 @@ The configuration pins:
 `RunPlan.training_config_snapshot` remains only as a legacy read-compatibility field. Newly generated
 plans leave it empty and use `resolved_execution`.
 
+## Deployment status of the consumption guards
+
+The dataset-consumption check, the model/tokenizer and loader-policy lowering, and the full-parameter
+SFT preflight described below are worker code (`platform/runners.py`, the lane workers, and
+`training/trainer.py`), so they change worker bytes. A managed `platform-run --subprocess` run imports
+`corpus_studio` from the worker package installed in its sealed environment, never from this checkout.
+A managed environment therefore enforces these guards only after its worker wheel is rebuilt from source
+that contains them and the environment is re-sealed. The worker wheels recorded in
+[`HOST_STATE.md`](HOST_STATE.md) predate them, and the recorded DPO, reward, and full-parameter
+`workload_verified` bring-ups ran without them.
+
 ## Dataset consumption
 
 The sealed dataset digest is enforced where the bytes are consumed, on every lane that trains from one
@@ -282,6 +293,42 @@ does not silently replace it with `role: content` text.
 Truncation analysis renders and tokenizes the complete pinned JSONL, not the first 256 rows. Any
 over-length record blocks a default plan. `--allow-truncation` makes that policy explicit in the seal;
 it does not silently truncate an otherwise refusing plan.
+
+Full-parameter SFT runs the same preflight as adapter SFT (`trainer.preflight_sft_dataset`, one shared
+implementation). The worker runs it after the pinned tokenizer loads and its chat-template digest is
+checked, and before the SDPA kernel probe or any model weights load. Every verified row is formatted
+with that tokenizer (chat template included), and each rendered row is tokenized once, at full length
+(`add_special_tokens=True`, `truncation=False`). The token-coverage ledger measures those ids, and the
+training rows are built from exactly those ids. So any BOS, EOS, or other special token the tokenizer
+adds is counted, and a row exactly at `max_sequence_len` keeps every token. Labels are positional, so a
+trailing EOS whose id equals the pad id stays supervised and only the pad tail is masked.
+
+Truncation is permitted only when both `data.truncation_policy` and `sequence.truncation_allowed` allow
+it. Otherwise the run is refused before any weights load if any row, in any position, is over-length,
+renders to nothing, or tokenizes to no ids. The refusal is `UNSUPPORTED_CONFIGURATION` at the preflight
+stage the run reached (`dataset_formatting` or `truncation_analysis`). Its remediation names
+`--allow-truncation` only when the no-truncation policy itself refused (an over-length or unrenderable
+row); a formatter or tokenizer failure, or a row with no ids, gets a remediation that names no
+truncation policy, because none would admit it. The tokenizer never truncates and the row builder never
+slices. Under a sealed lossy policy the worker cuts over-length rows explicitly (right truncation) and
+drops unrenderable rows, and the ledger counts both; the lossy notice on stderr is ASCII.
+
+On the runner path the coverage is recorded as structured evidence before the model loads: a
+`truncation_analysis` stage event carries `payload = {execution_configuration_hash, truncation_policy,
+sealed_rows, unrenderable_rows, ledger, ledger_sha256}`. Like the other stage payloads, it is streamed
+to the parent and persisted in `RunEvents.jsonl`. For a fixed seal and worker the counts are
+deterministic.
+
+Not yet covered:
+
+- The typed success evidence does not carry the coverage record.
+- The full-parameter lane does not yet verify the sealed formatter identity at execution. It formats
+  with the worker's `format_example_text`.
+- DPO and reward measure truncation only after their models load, and they key it off
+  `sequence.truncation_allowed`. On-policy RL refuses an over-length prompt only when it samples that
+  prompt.
+- Instruction rows get no appended EOS in either SFT lane's preflight. Whether the pinned TRL version
+  appends one to adapter SFT rows is unverified.
 
 Corpus-scale streaming preparation is still future work. This guard is correct for the current
 file-backed trainer, but the trainer still materializes the corpus in memory.

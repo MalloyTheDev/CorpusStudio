@@ -21,19 +21,39 @@ model, and training runs inside the exclusive sealed-kernel context. ``cpu_toy``
 ``runtime_mode``, never from the caller. A sealed loader value this worker cannot lower is refused before
 anything is imported or loaded.
 
+The sealed no-truncation policy is honored with the adapter SFT lane's OWN full-content preflight
+(``trainer.preflight_sft_dataset``), run right after the tokenizer loads and BEFORE the attention probe or
+any weight allocation: every sealed row is formatted by ``format_example_text`` with the bound, verified
+tokenizer (chat template included), tokenized once at full length, and measured by the token-coverage
+ledger. Under the default ``refuse`` policy an over-length row anywhere in the dataset, or a row that
+renders to nothing, is refused (:class:`FullFinetuneDataRefusal`) before any weights load. Truncation
+happens only when BOTH ``data.truncation_policy`` and ``sequence.truncation_allowed`` allow it, and then
+explicitly, never inside the tokenizer or the row builder; the ledger is reported as a deterministic
+token-coverage record bound to the execution hash. The rows that train are exactly the measured ids, so
+any BOS/EOS or other special token the tokenizer adds is counted.
+
 ``torch`` + ``transformers`` are lazy-imported; the training loop is ``# pragma: no cover`` (proven by a
-run). The pure row-padding helper is base-gate tested. This slice is UNROUTED: ``required_runner_lane``
-still refuses a full-finetune plan at execution, so nothing runs it in production and no wheel is needed
-until the (gated) promotion."""
+run). The data preparation (:func:`prepare_full_finetune_dataset`) and the row helpers are torch-free and
+base-gate tested. The lane is routed: ``dense_full_finetune`` is workload_verified and
+``required_runner_lane`` selects ``FullFinetuneRunner`` for a full-finetune plan."""
 
 from __future__ import annotations
 
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from corpus_studio.platform.contracts import (
     PretrainingSuccessEvidence,
     ResolvedFullFinetuneExecutionConfiguration,
+)
+from corpus_studio.platform.execution_config import canonical_sha256
+from corpus_studio.training.trainer import (
+    SftDataPolicyRefusal,
+    StageCallback,
+    TokenCoverageLedger,
+    TrainerError,
+    preflight_sft_dataset,
 )
 
 if TYPE_CHECKING:
@@ -43,6 +63,20 @@ if TYPE_CHECKING:
 
 class FullFinetuneError(RuntimeError):
     """A full-parameter fine-tune the worker cannot honor (fail-closed, a clean typed error)."""
+
+
+class FullFinetuneDataRefusal(FullFinetuneError):
+    """The sealed data policy refuses the SFT dataset: an over-length row under a no-truncation policy, a
+    row that renders to nothing or tokenizes to no ids, or a formatter/tokenizer failure during the
+    full-content preflight. Always raised before any model weights are loaded.
+
+    ``policy_refusal`` is True only when the sealed no-truncation policy itself refused (an over-length
+    or unrenderable row), the one case a sealed lossy policy could admit. A formatter or tokenizer failure,
+    or a row with no ids, is False: no truncation policy fixes it, so no remediation may suggest one."""
+
+    def __init__(self, message: str, *, policy_refusal: bool = False) -> None:
+        super().__init__(message)
+        self.policy_refusal = policy_refusal
 
 
 @dataclass
@@ -55,14 +89,36 @@ class FullFinetuneRunResult:
     success_evidence: PretrainingSuccessEvidence
 
 
-def pad_sft_row(input_ids: list[int], seq_len: int, pad_id: int) -> dict[str, list[int]]:
-    """PURE + torch-free. Right-truncate then right-pad ONE tokenized SFT example to ``seq_len`` for a
-    fixed-shape batch: ``input_ids`` padded with ``pad_id``, ``labels`` mirroring ``input_ids`` but ``-100``
-    on the pad tail (never train on padding), and an ``attention_mask`` over the true content. The current
-    first-party SFT trainer trains on the WHOLE sequence (no completion-only mask yet), so labels mirror the
-    content verbatim - this worker matches that exactly."""
-    content = input_ids[:seq_len]
+def full_finetune_truncation_permitted(execution: ResolvedFullFinetuneExecutionConfiguration) -> bool:
+    """Whether the seal permits cutting over-length rows. ``data.truncation_policy`` is the enforced key
+    (as on the adapter SFT lane); ``sequence.truncation_allowed`` must agree. The contract already refuses
+    ``(False, 'allow')``; ``(True, 'refuse')`` is a valid seal and refuses here, so truncation needs
+    both fields to say so."""
+    return execution.data.truncation_policy == "allow" and execution.sequence.truncation_allowed
+
+
+def pad_sft_row(input_ids: Sequence[int], seq_len: int, pad_id: int) -> dict[str, list[int]]:
+    """PURE + torch-free. Right-pad ONE tokenized SFT example to ``seq_len`` for a fixed-shape batch:
+    ``input_ids`` padded with ``pad_id``, ``labels`` mirroring ``input_ids`` but ``-100`` on the pad tail
+    (never train on padding), and an ``attention_mask`` over the true content. Labels are positional, so
+    a real trailing EOS whose id equals ``pad_id`` stays supervised. The first-party SFT trainers train on
+    the WHOLE sequence (no completion-only mask yet), so labels mirror the content verbatim.
+
+    It never truncates: whether an over-length row may be cut is a sealed-policy decision made (and
+    counted) before padding, so an over-length or empty row is refused here instead of being sliced or
+    trained as padding only."""
+    content = list(input_ids)
     n = len(content)
+    if n == 0:
+        raise FullFinetuneDataRefusal(
+            "an SFT row tokenized to zero tokens; it would train on padding only"
+        )
+    if n > seq_len:
+        raise FullFinetuneDataRefusal(
+            f"an SFT row has {n} tokens, beyond max_sequence_len={seq_len}; truncation is a sealed-policy "
+            "decision made before padding, never inside the row builder",
+            policy_refusal=True,
+        )
     pad = seq_len - n
     return {
         "input_ids": content + [pad_id] * pad,
@@ -71,18 +127,158 @@ def pad_sft_row(input_ids: list[int], seq_len: int, pad_id: int) -> dict[str, li
     }
 
 
+def build_full_finetune_rows(
+    token_ids: Sequence[Sequence[int]],
+    seq_len: int,
+    pad_id: int,
+    *,
+    truncation_permitted: bool,
+) -> list[dict[str, list[int]]]:
+    """PURE + torch-free. Build the fixed-length training rows from the measured ids. Only a sealed lossy
+    policy cuts an over-length row (right truncation, already counted by the preflight ledger); without
+    it :func:`pad_sft_row` refuses the row, which backstops the preflight. ``index`` in a refusal counts
+    rendered rows from 0."""
+    built: list[dict[str, list[int]]] = []
+    for index, ids in enumerate(token_ids):
+        content = list(ids)
+        if truncation_permitted:
+            content = content[:seq_len]
+        try:
+            built.append(pad_sft_row(content, seq_len, pad_id))
+        except FullFinetuneDataRefusal as exc:
+            raise FullFinetuneDataRefusal(
+                f"rendered row {index}: {exc}", policy_refusal=exc.policy_refusal
+            ) from exc
+    return built
+
+
+@dataclass(frozen=True)
+class FullFinetuneTokenCoverage:
+    """The token-coverage record of one full-parameter SFT preflight, bound to the execution hash.
+
+    Deterministic for a fixed seal and worker: the verified dataset bytes, the pinned tokenizer binding
+    and the policy are fixed by ``configuration_hash``, the formatter is the worker's
+    ``format_example_text``, and every count is derived from the measured ids alone."""
+
+    configuration_hash: str
+    truncation_permitted: bool
+    sealed_rows: int
+    unrenderable_rows: int
+    ledger: TokenCoverageLedger
+
+    def evidence(self) -> dict[str, Any]:
+        """The structured record (JSON-safe) carried on the run's ``truncation_analysis`` stage event."""
+        ledger = self.ledger.model_dump(mode="json")
+        return {
+            "execution_configuration_hash": self.configuration_hash,
+            "truncation_policy": "allow" if self.truncation_permitted else "refuse",
+            "sealed_rows": self.sealed_rows,
+            "unrenderable_rows": self.unrenderable_rows,
+            "ledger": ledger,
+            "ledger_sha256": canonical_sha256(ledger),
+        }
+
+    def summary(self) -> str:
+        """One ASCII line with the policy, the counts and the ledger digest."""
+        evidence = self.evidence()
+        ledger = self.ledger
+        return (
+            f"token coverage for execution {self.configuration_hash}: "
+            f"policy={evidence['truncation_policy']} rows={self.sealed_rows} "
+            f"examples={ledger.n_examples} seq_len={ledger.seq_len} "
+            f"input_tokens={ledger.input_tokens_total} retained_tokens={ledger.retained_tokens} "
+            f"dropped_tokens={ledger.dropped_tokens} supervised_dropped={ledger.supervised_dropped} "
+            f"severed_examples={ledger.boundary_severances} "
+            f"unrenderable_rows={self.unrenderable_rows} ledger_sha256={evidence['ledger_sha256']}"
+        )
+
+
+@dataclass(frozen=True)
+class FullFinetuneDataset:
+    """The fixed-length training rows (exactly the measured ids) and their coverage record."""
+
+    rows: list[dict[str, list[int]]]
+    coverage: FullFinetuneTokenCoverage
+
+
+CoverageCallback = Callable[[FullFinetuneTokenCoverage], None]
+
+
+def prepare_full_finetune_dataset(
+    execution: ResolvedFullFinetuneExecutionConfiguration,
+    rows: Sequence[dict[str, Any]],
+    tokenizer: Any,
+    *,
+    stage_callback: StageCallback | None = None,
+    coverage_callback: CoverageCallback | None = None,
+) -> FullFinetuneDataset:
+    """Torch-free. The full-parameter SFT data preparation, run before any model weights load.
+
+    Runs the adapter SFT lane's full-content preflight
+    (:func:`~corpus_studio.training.trainer.preflight_sft_dataset`) over every verified row with the
+    bound tokenizer: one full-length tokenization (``add_special_tokens=True``, ``truncation=False``)
+    whose ids are kept and trained as-is, so the ledger counts exactly the trained tokens. Any refusal
+    is a :class:`FullFinetuneDataRefusal`. On success the coverage record goes to ``coverage_callback``
+    (the runner records it as structured evidence), or else to ``stage_callback`` as a
+    ``truncation_analysis`` message."""
+    permitted = full_finetune_truncation_permitted(execution)
+    seq_len = execution.sequence.max_sequence_len
+
+    def _encode(text: str) -> list[int]:
+        # Full length, never cut by the tokenizer: these ids are both measured and trained.
+        return list(tokenizer(text, add_special_tokens=True, truncation=False)["input_ids"])
+
+    try:
+        preflight = preflight_sft_dataset(
+            rows,
+            dataset_format=execution.data.dataset_format,
+            sequence_len=seq_len,
+            truncation_allowed=permitted,
+            tokenizer=tokenizer,
+            encode=_encode,
+            keep_token_ids=True,
+            stage_callback=stage_callback,
+        )
+    except TrainerError as exc:
+        raise FullFinetuneDataRefusal(
+            str(exc), policy_refusal=isinstance(exc, SftDataPolicyRefusal)
+        ) from exc
+    token_ids = preflight.token_ids or []
+    if not token_ids:
+        raise FullFinetuneDataRefusal("the sealed full-finetune dataset rendered no trainable rows")
+    built = build_full_finetune_rows(
+        token_ids, seq_len, tokenizer.pad_token_id, truncation_permitted=permitted
+    )
+    coverage = FullFinetuneTokenCoverage(
+        configuration_hash=execution.configuration_hash,
+        truncation_permitted=permitted,
+        sealed_rows=len(rows),
+        unrenderable_rows=preflight.unrenderable_rows,
+        ledger=preflight.ledger,
+    )
+    if coverage_callback is not None:
+        coverage_callback(coverage)
+    elif stage_callback is not None:
+        stage_callback("truncation_analysis", coverage.summary())
+    return FullFinetuneDataset(rows=built, coverage=coverage)
+
+
 def run_full_finetune(  # pragma: no cover - torch/transformers integration; proven by a run
     execution: ResolvedFullFinetuneExecutionConfiguration,
     *,
     dataset: VerifiedDataset,
     output_dir: str | None = None,
     stage_callback: StageFn | None = None,
+    coverage_callback: CoverageCallback | None = None,
 ) -> FullFinetuneRunResult:
-    """Load the sealed base model at full precision (all parameters trainable), tokenize the sealed SFT
-    dataset, train full-parameter via the HF Trainer, capture the full-model execution evidence, save the
-    full model, and seal the proposed success evidence. Refuses a quantized config (the contract guarantees
-    unquantized, but fail closed anyway) and any other sealed loader value it cannot lower.
-    ``stage_callback(name, message)`` receives the loader and verification stages."""
+    """Load the sealed tokenizer, run the full-content SFT preflight over every verified row, then load the
+    sealed base model at full precision (all parameters trainable), train full-parameter via the HF
+    Trainer on exactly the measured ids, capture the full-model execution evidence, save the full model,
+    and seal the proposed success evidence. Refuses a quantized config (the contract guarantees
+    unquantized, but fail closed anyway), any other sealed loader value it cannot lower, and any dataset
+    the sealed truncation policy refuses (before the weights load).
+    ``stage_callback(name, message)`` receives the loader, preflight and verification stages;
+    ``coverage_callback`` receives the token-coverage record once the preflight passes."""
     # Rows come only from the runner's single verified read of the sealed dataset (the bytes whose sha256
     # matched the seal). The mutable dataset path is never reopened here, and the binding is checked
     # before anything heavy is imported or loaded.
@@ -145,7 +341,6 @@ def run_full_finetune(  # pragma: no cover - torch/transformers integration; pro
         capture_adapter_export_state,
         capture_trainable_state,
         enforced_attention_training_kernel,
-        format_example_text,
     )
 
     if execution.precision.quantized_storage_format.value != "none":
@@ -159,10 +354,7 @@ def run_full_finetune(  # pragma: no cover - torch/transformers integration; pro
     set_seed(execution.seed)
     out = Path(output_dir or execution.output_dir)
 
-    # --- tokenizer + model: the sealed tokenizer binding, then a real base in the sealed storage dtype,
-    # ALL parameters trainable (no adapter, no nf4). The shared SFT helpers lower the sealed revision,
-    # safetensors-only policy, storage dtype, root device and attention API (trust_remote_code stays the
-    # sealed False), after the SDPA toggles are applied and the sealed kernel is probed. ---
+    # --- tokenizer: the sealed tokenizer binding (its own revision, sealed chat-template digest) ---
     tokenizer = load_sealed_tokenizer(AutoTokenizer, view, stage=_stage)
     if tokenizer.pad_token_id is None:
         tokenizer.pad_token = tokenizer.eos_token
@@ -174,26 +366,25 @@ def run_full_finetune(  # pragma: no cover - torch/transformers integration; pro
             "the base model's tokenizer defines no pad or eos token, so training batches cannot be "
             "padded; the base is unusable (a from-scratch tokenizer must declare an eos token)"
         )
+
+    # --- data: the full-content preflight over EVERY verified row with the bound tokenizer, before the
+    # kernel probe or any weight allocation, so a refused dataset never spends GPU memory. The built rows
+    # are exactly the measured ids (whole-sequence loss, per above). ---
+    prepared = prepare_full_finetune_dataset(
+        execution, rows, tokenizer, stage_callback=_stage, coverage_callback=coverage_callback
+    )
+    del rows
+
+    # --- model: a real base in the sealed storage dtype, ALL parameters trainable (no adapter, no nf4).
+    # The shared SFT helpers lower the sealed revision, safetensors-only policy, storage dtype, root
+    # device and attention API (trust_remote_code stays the sealed False), after the SDPA toggles are
+    # applied and the sealed kernel is probed. ---
     prepare_sealed_attention(torch, view, stage=_stage)
     model = load_sealed_model(AutoModelForCausalLM, torch, view, stage=_stage)
     verify_full_parameter_storage(model, torch, view, stage=_stage)
 
-    # --- data: the sealed SFT rows (verified above), formatted + tokenized to fixed length (whole-sequence
-    # loss, per above) ---
-    seq_len = execution.sequence.max_sequence_len
-    built = [
-        pad_sft_row(
-            tokenizer(
-                format_example_text(row, execution.data.dataset_format, tokenizer),
-                truncation=True, max_length=seq_len, add_special_tokens=True,
-            )["input_ids"],
-            seq_len,
-            tokenizer.pad_token_id,
-        )
-        for row in rows
-    ]
     # Named apart from the ``dataset`` parameter (the verified sealed rows) so the two never blur.
-    train_dataset = Dataset.from_list(built)
+    train_dataset = Dataset.from_list(prepared.rows)
 
     def _collate(features: list[dict[str, Any]]) -> dict[str, Any]:
         return {

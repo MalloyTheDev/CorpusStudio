@@ -976,6 +976,19 @@ def _admit_sealed_loader(
     )
 
 
+_FULL_FINETUNE_DATA_REMEDIATION = (
+    "split or shorten the over-length records (structure-aware chunking) and fix unrenderable rows, or "
+    "raise the sealed sequence length; to accept a lossy cut, regenerate the RunPlan with "
+    "--allow-truncation so the policy and its token coverage are sealed and recorded"
+)
+# A formatter or tokenizer failure, or a row with no ids, is not something a lossy policy can admit.
+_FULL_FINETUNE_DATA_FAILURE_REMEDIATION = (
+    "fix the rows the sealed formatter or the pinned tokenizer could not render or tokenize (the "
+    "refusal names the failure), or regenerate the RunPlan with a tokenizer and chat template that can; "
+    "a truncation policy does not change this outcome"
+)
+
+
 class FullFinetuneRunner:
     """Executes a sealed full-parameter SFT run through ``training.full_finetune_trainer.run_full_finetune``
     - the full-MODEL sibling of ``TrainingRunner`` (adapter) using the same SFT data. It dispatches the
@@ -1014,16 +1027,45 @@ class FullFinetuneRunner:
             ctx, execution.inputs.dataset, configuration_hash=execution.configuration_hash
         )
         from corpus_studio.training.full_finetune_trainer import (  # noqa: PLC0415
+            FullFinetuneDataRefusal,
             FullFinetuneError,
+            FullFinetuneTokenCoverage,
             run_full_finetune,
         )
         from corpus_studio.training.trainer import TrainerError  # noqa: PLC0415
 
         stages = _LaneStages(ctx)
+
+        def _record_coverage(coverage: FullFinetuneTokenCoverage) -> None:
+            # The measured token coverage (and, under a sealed lossy policy, exactly what was cut) is
+            # structured evidence on the durable event stream, bound to the execution hash, recorded
+            # before any weights load.
+            ctx.emit_stage(
+                StageMarker.truncation_analysis, coverage.summary(), payload=coverage.evidence()
+            )
+
         try:
             result = run_full_finetune(
-                execution, dataset=dataset, output_dir=str(scoped_output), stage_callback=stages
+                execution,
+                dataset=dataset,
+                output_dir=str(scoped_output),
+                stage_callback=stages,
+                coverage_callback=_record_coverage,
             )
+        except FullFinetuneDataRefusal as exc:
+            # The sealed data policy refused the dataset in the pre-weight preflight: a configuration
+            # the worker cannot honor, attributed to the preflight stage it reached (the adapter SFT
+            # lane classifies the same refusal the same way), never an update failure.
+            raise RunnerFailure(
+                str(exc),
+                taxonomy=FailureTaxonomy.UNSUPPORTED_CONFIGURATION,
+                stage=stages.last,
+                remediation=(
+                    _FULL_FINETUNE_DATA_REMEDIATION
+                    if exc.policy_refusal
+                    else _FULL_FINETUNE_DATA_FAILURE_REMEDIATION
+                ),
+            ) from exc
         except FullFinetuneError as exc:
             raise RunnerFailure(
                 str(exc),

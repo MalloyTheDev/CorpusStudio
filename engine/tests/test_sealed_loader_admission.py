@@ -667,7 +667,8 @@ def test_the_full_parameter_runner_takes_cpu_toy_only_from_the_seal(tmp_path, mo
     result = execute_run(plan, build_lane_runner(required_runner_lane(plan)), run_id="run-toy")
 
     assert result.manifest.state == "failed"
-    assert set(received) == {"dataset", "output_dir", "stage_callback"}  # no runner cpu_toy flag
+    # no runner cpu_toy flag; the coverage callback records the #861 token-coverage evidence
+    assert set(received) == {"dataset", "output_dir", "stage_callback", "coverage_callback"}
     assert not hasattr(build_lane_runner("full_finetune"), "cpu_toy")
     assert callable(received["stage_callback"])
 
@@ -688,7 +689,7 @@ def test_every_newer_runner_maps_a_worker_loader_refusal(
     monkeypatch.chdir(tmp_path)
     plan = _sealed_plan(tmp_path, lane)
 
-    def _fake_worker(execution, *, dataset, output_dir=None, stage_callback=None):
+    def _fake_worker(execution, *, dataset, output_dir=None, stage_callback=None, **_lane_kwargs):
         stage_callback("model_load", "materialized the sealed model weights")
         raise ExecutionPlacementDeviation("PLACEMENT_DEVIATION: parameters outside cuda:0")
 
