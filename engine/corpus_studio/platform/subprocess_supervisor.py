@@ -11,6 +11,12 @@ watchdog cannot — **time out and KILL a hung run** (e.g. the sm_120 fused-atte
 classify it honestly as ``KERNEL_STALL``. It also isolates a backend crash (a segfault / CUDA abort)
 from the core: the child dying is a classified failure here, not a core crash.
 
+Success is never taken from the child's word. The parent binds ``run_accepted`` to the sealed
+configuration hash of the one execution variant it dispatched (``resolved_execution_binding``) and
+re-derives a succeeded terminal for exactly that variant: its own success-evidence family only, one
+run-scoped artifact of its kind, integrity-checked bytes, and (for every variant) a torch-free
+re-verification of the saved export plus a fit reconstructed from the raw peak.
+
 Reading a pipe with a timeout is done with a reader thread + a queue (cross-platform; ``select`` on
 pipes isn't portable to Windows). Dependency-light: stdlib + platform contracts only.
 """
@@ -26,7 +32,7 @@ import threading
 import time
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 from corpus_studio.platform.contracts import (
     ArtifactManifest,
@@ -71,6 +77,9 @@ from corpus_studio.platform.worker_protocol import (
     encode_worker_message,
     parse_worker_body,
 )
+
+if TYPE_CHECKING:
+    from corpus_studio.platform.execution_config import ResolvedExecutionBinding
 
 
 _PREFLIGHT_STAGES = frozenset(
@@ -258,12 +267,24 @@ def _bind_failure_record(
 
 
 def _measured_failure_fit(manifest: RunManifest) -> FitClassification | None:
-    evidence = manifest.training_success_evidence
-    if evidence is None or evidence.measured_peak is None:
+    """The unproven fit a downgraded success keeps, from whichever admitted variant's raw peak."""
+    from corpus_studio.platform.execution_config import (  # noqa: PLC0415
+        SUCCESS_EVIDENCE_FIELDS,
+    )
+
+    measured_peak = next(
+        (
+            evidence.measured_peak
+            for evidence in (getattr(manifest, name) for name in SUCCESS_EVIDENCE_FIELDS)
+            if evidence is not None
+        ),
+        None,
+    )
+    if measured_peak is None:
         return None
     from corpus_studio.platform.watchdog import reconcile_measured_fit  # noqa: PLC0415
 
-    return reconcile_measured_fit(evidence.measured_peak, proven=False)
+    return reconcile_measured_fit(measured_peak, proven=False)
 
 
 WORKER_STDERR_FILENAME = "worker-stderr.log"
@@ -363,49 +384,49 @@ def execute_run_subprocess(
             write_run_manifest(manifest, record_dir)
         return SupervisedRun(manifest=manifest, events=[], artifacts=[])
 
-    if plan.resolved_execution is not None:
-        from corpus_studio.platform.execution_config import (  # noqa: PLC0415
-            verify_execution_configuration_hash,
-        )
-
-        if not verify_execution_configuration_hash(plan.resolved_execution):
-            manifest = _failed_manifest(
-                plan,
-                rid,
-                taxonomy=FailureTaxonomy.UNSUPPORTED_CONFIGURATION,
-                message="resolved execution configuration hash verification failed",
-                target=runner_name,
-                started=started,
-                finished=clock(),
-                out_dir=out_dir_str,
-                remediation="regenerate the RunPlan; do not mutate resolved execution fields",
-            )
-            if record_dir is not None:
-                write_run_manifest(manifest, record_dir)
-            return SupervisedRun(manifest=manifest, events=[], artifacts=[])
-        if (
-            max_steps is not None
-            and max_steps != plan.resolved_execution.schedule.max_steps
-        ):
-            manifest = _failed_manifest(
-                plan,
-                rid,
-                taxonomy=FailureTaxonomy.UNSUPPORTED_CONFIGURATION,
-                message="max_steps cannot override the sealed execution schedule",
-                target=runner_name,
-                started=started,
-                finished=clock(),
-                out_dir=out_dir_str,
-                remediation="create a derived RunPlan with a new execution hash",
-            )
-            if record_dir is not None:
-                write_run_manifest(manifest, record_dir)
-            return SupervisedRun(manifest=manifest, events=[], artifacts=[])
-
     from corpus_studio.platform.execution_config import (  # noqa: PLC0415
         ExecutionConfigurationError,
+        resolved_execution_binding,
         verify_runner_lane,
     )
+
+    def _refuse_before_spawn(message: str, remediation: str) -> SupervisedRun:
+        refused = _failed_manifest(
+            plan,
+            rid,
+            taxonomy=FailureTaxonomy.UNSUPPORTED_CONFIGURATION,
+            message=message,
+            target=runner_name,
+            started=started,
+            finished=clock(),
+            out_dir=out_dir_str,
+            remediation=remediation,
+        )
+        if record_dir is not None:
+            write_run_manifest(refused, record_dir)
+        return SupervisedRun(manifest=refused, events=[], artifacts=[])
+
+    # Every sealed variant (not only adapter SFT) is re-verified before spawn, and the same binding
+    # later decides the run_accepted echo and which success-evidence family a terminal may claim.
+    try:
+        binding = resolved_execution_binding(plan)
+    except ExecutionConfigurationError as exc:
+        return _refuse_before_spawn(
+            str(exc), "regenerate the RunPlan; do not mutate resolved execution fields"
+        )
+    if binding is not None:
+        if not binding.verify_configuration_hash():
+            return _refuse_before_spawn(
+                "resolved execution configuration hash verification failed"
+                if binding.label == "training"
+                else f"resolved {binding.label} execution configuration hash verification failed",
+                "regenerate the RunPlan; do not mutate resolved execution fields",
+            )
+        if max_steps is not None and max_steps != binding.config.schedule.max_steps:
+            return _refuse_before_spawn(
+                "max_steps cannot override the sealed execution schedule",
+                "create a derived RunPlan with a new execution hash",
+            )
 
     try:
         if runner_name == "auto":
@@ -640,15 +661,7 @@ def execute_run_subprocess(
                     if not isinstance(body, RunAcceptedBody):  # pragma: no cover - canonical map
                         raise WorkerProtocolError("run_accepted selected the wrong body contract")
                     _require_run_id(body.run_id, rid, "run_accepted")
-                    expected_execution_hash = (
-                        plan.resolved_execution.configuration_hash
-                        if plan.resolved_execution is not None
-                        else None
-                    )
-                    if body.execution_configuration_hash != expected_execution_hash:
-                        raise WorkerProtocolError(
-                            "run_accepted execution configuration hash does not match the dispatch"
-                        )
+                    _require_accepted_variant(body, binding)
                     accepted = True
                     _reset_progress_deadline()
                 elif message.type == "event":
@@ -884,6 +897,30 @@ def _require_run_id(actual: str, expected: str, message_type: str) -> None:
         )
 
 
+def _require_accepted_variant(
+    body: RunAcceptedBody, binding: ResolvedExecutionBinding | None
+) -> None:
+    """Bind run_accepted to the exact sealed variant the parent dispatched (null only for echo).
+
+    A worker that echoes another variant's hash, or none for a resolved plan, did not accept this
+    execution. That includes a worker built before the echo covered every variant: it echoes only
+    the adapter-SFT hash, so it fails closed here for every other variant until it is rebuilt."""
+
+    if binding is None:
+        if body.execution_configuration_hash is not None:
+            raise WorkerProtocolError(
+                "run_accepted execution configuration hash must be null for a plan without a "
+                "resolved execution configuration"
+            )
+        return
+    if body.execution_configuration_hash != binding.configuration_hash:
+        raise WorkerProtocolError(
+            "run_accepted execution configuration hash does not match the dispatched "
+            f"{binding.label} execution configuration; the worker must echo the sealed hash of "
+            "that variant"
+        )
+
+
 def _validate_hello(message_type: str, body: object, plan: RunPlan) -> None:
     """Bind the worker's self-declared backend and environment to the immutable RunPlan."""
 
@@ -919,7 +956,9 @@ def _parse_terminal(
     events: list[RunEvent],
     artifacts: list[ArtifactManifest],
 ) -> RunManifest:
-    """Validate terminal identity/linkage before accepting any child-produced artifacts."""
+    """Validate terminal identity/linkage, then (for a succeeded run) re-derive success for the
+    exact dispatched execution variant, before accepting any child-produced artifacts. Failed,
+    cancelled, and interrupted terminals need no success evidence."""
 
     _require_run_id(body.run_id, rid, "terminal_result")
     manifest = body.run_manifest
@@ -967,109 +1006,261 @@ def _parse_terminal(
         raise WorkerProtocolError(
             "terminal artifact list does not match run_manifest.artifact_ids"
         )
-    if plan.resolved_execution is not None and manifest.state == "succeeded":
-        adapters = [artifact for artifact in parsed_artifacts if artifact.kind == "adapter"]
-        if manifest.training_success_evidence is None:
-            raise RunnerFailure(
-                "successful training terminal has no sealed training-success evidence",
-                taxonomy=FailureTaxonomy.UPDATE_FAILURE,
-                stage=StageMarker.optimizer_step,
-            )
+    if manifest.state == "succeeded":
         from corpus_studio.platform.execution_config import (  # noqa: PLC0415
-            ExecutionConfigurationError,
-            verify_run_scoped_output_path,
+            resolved_execution_binding,
         )
 
-        execution = plan.resolved_execution
-        assert execution is not None
-        try:
+        _admit_terminal_success(
+            resolved_execution_binding(plan), plan, rid, manifest, parsed_artifacts, events
+        )
+    artifacts.extend(parsed_artifacts)
+    return manifest
+
+
+def _export_failure(message: str) -> RunnerFailure:
+    return RunnerFailure(
+        message,
+        taxonomy=FailureTaxonomy.ARTIFACT_FAILURE,
+        stage=StageMarker.export,
+    )
+
+
+def _admit_terminal_success(
+    binding: ResolvedExecutionBinding | None,
+    plan: RunPlan,
+    rid: str,
+    manifest: RunManifest,
+    parsed_artifacts: list[ArtifactManifest],
+    events: list[RunEvent],
+) -> None:
+    """Re-derive a succeeded terminal for the exact dispatched variant before any of it is admitted.
+
+    The worker's own supervisor reload-verifies its proposal with torch; the parent never trusts
+    that claim and re-checks it torch-free. It requires exactly the dispatched variant's
+    success-evidence family, exactly one artifact of that variant's kind at the sealed run-scoped
+    path, integrity-checked bytes whose content hash still matches, and a fit reconstructed from
+    the raw measured peak. Adapter SFT keeps its event-bound admission; every other variant also
+    passes its kind's export-tree policy before any byte is hashed, and re-verifies the sealed
+    schedule, the proposed Safetensors/config digests, and the canonical tensor state against the
+    trained export state. The parent must never call the supervisor's torch reload-verify helpers.
+    A plan without a resolved execution (echo) may claim no evidence, artifact, or fit at all."""
+
+    from corpus_studio.platform.execution_config import (  # noqa: PLC0415
+        SUCCESS_EVIDENCE_FIELDS,
+        ExecutionConfigurationError,
+        verify_run_scoped_output_path,
+    )
+
+    expected_field = binding.evidence_field if binding is not None else None
+    for field_name in SUCCESS_EVIDENCE_FIELDS:
+        if field_name != expected_field and getattr(manifest, field_name) is not None:
+            admitted = (
+                f"the dispatched {binding.label} execution admits only {binding.evidence_field}"
+                if binding is not None
+                else "a plan without a resolved execution admits no success evidence"
+            )
+            raise WorkerProtocolError(f"terminal run_manifest carries {field_name} but {admitted}")
+    if binding is None:
+        if parsed_artifacts or manifest.final_fit is not None:
+            raise _export_failure(
+                "a terminal without a resolved execution cannot claim artifacts or a measured fit"
+            )
+        return
+
+    label, kind = binding.label, binding.artifact_kind
+    evidence: Any = getattr(manifest, binding.evidence_field)
+    if evidence is None:
+        raise RunnerFailure(
+            "successful training terminal has no sealed training-success evidence"
+            if binding.plan_field == "resolved_execution"
+            else f"successful {label} terminal has no sealed {label} success evidence",
+            taxonomy=FailureTaxonomy.UPDATE_FAILURE,
+            stage=StageMarker.optimizer_step,
+        )
+    if len(parsed_artifacts) != 1 or parsed_artifacts[0].kind != kind:
+        raise _export_failure(f"successful {label} terminal must carry exactly one {kind} artifact")
+    artifact = parsed_artifacts[0]
+    try:
+        for observed_path in (manifest.output_dir, artifact.path):
             verify_run_scoped_output_path(
-                execution,
+                binding.config,
                 rid,
-                observed_path=manifest.output_dir,
+                observed_path=observed_path,
                 require_exists=True,
+                leaf=kind,
             )
-            for artifact in adapters:
-                verify_run_scoped_output_path(
-                    execution,
-                    rid,
-                    observed_path=artifact.path,
-                    require_exists=True,
-                )
-        except ExecutionConfigurationError as exc:
-            raise RunnerFailure(
-                str(exc),
-                taxonomy=FailureTaxonomy.ARTIFACT_FAILURE,
-                stage=StageMarker.export,
-            ) from exc
-        if any(
-            artifact.integrity is None
-            or artifact.integrity.current_integrity != "ok"
-            or artifact.integrity.content_hash is None
-            or artifact.integrity.metadata_hash is None
-            for artifact in adapters
-        ):
-            raise RunnerFailure(
-                "successful training terminal has no integrity-checked adapter bytes",
-                taxonomy=FailureTaxonomy.ARTIFACT_FAILURE,
-                stage=StageMarker.export,
-            )
-        from corpus_studio.training.artifact_registry import (  # noqa: PLC0415
-            compute_weight_content_hash,
+    except ExecutionConfigurationError as exc:
+        raise _export_failure(str(exc)) from exc
+    if binding.plan_field != "resolved_execution":
+        # Before any byte is hashed: the content hash follows linked files, so a link escaping the
+        # run scope must be refused before it can bind bytes that live outside the artifact.
+        _verify_variant_export_tree(binding, artifact)
+    integrity = artifact.integrity
+    if (
+        integrity is None
+        or integrity.current_integrity != "ok"
+        or integrity.content_hash is None
+        or (kind == "adapter" and integrity.metadata_hash is None)
+    ):
+        raise _export_failure(f"successful {label} terminal has no integrity-checked {kind} bytes")
+    from corpus_studio.training.artifact_registry import (  # noqa: PLC0415
+        compute_weight_content_hash,
+    )
+
+    if compute_weight_content_hash(artifact.path) != integrity.content_hash:
+        raise _export_failure(
+            f"successful {label} terminal {kind} weight bytes do not match its integrity hash"
         )
 
-        if any(
-            compute_weight_content_hash(artifact.path) != artifact.integrity.content_hash
-            for artifact in adapters
-            if artifact.integrity is not None
-        ):
-            raise RunnerFailure(
-                "successful training terminal adapter weight bytes do not match its integrity hash",
-                taxonomy=FailureTaxonomy.ARTIFACT_FAILURE,
-                stage=StageMarker.export,
-            )
+    if binding.plan_field == "resolved_execution":
         validated = validate_training_success_evidence(
             plan,
             rid,
             events,
             [
                 ProducedArtifact(
-                    artifact_id=artifact.artifact_id,
-                    kind=artifact.kind,
-                    path=artifact.path,
+                    artifact_id=artifact.artifact_id, kind=artifact.kind, path=artifact.path
                 )
-                for artifact in parsed_artifacts
             ],
             parsed_artifacts,
-            manifest.training_success_evidence.execution,
-            manifest.training_success_evidence.measured_peak,
+            evidence.execution,
+            evidence.measured_peak,
         )
-        if validated != manifest.training_success_evidence:
+        if validated != evidence:
             raise RunnerFailure(
                 "successful training terminal evidence does not match reconstructed admission",
                 taxonomy=FailureTaxonomy.UPDATE_FAILURE,
                 stage=StageMarker.optimizer_step,
             )
-        measured_peak = manifest.training_success_evidence.measured_peak
-        if (measured_peak is None) != (manifest.final_fit is None):
-            raise RunnerFailure(
-                "successful training terminal fit is not bound to raw peak-memory evidence",
-                taxonomy=FailureTaxonomy.ARTIFACT_FAILURE,
-                stage=StageMarker.export,
-            )
-        if measured_peak is not None:
-            from corpus_studio.platform.watchdog import (  # noqa: PLC0415
-                reconcile_measured_fit,
+    else:
+        _verify_variant_schedule(binding, evidence)
+        _verify_variant_export_bytes(binding, artifact, integrity.metadata_hash, evidence)
+
+    measured_peak = evidence.measured_peak
+    if (measured_peak is None) != (manifest.final_fit is None):
+        raise _export_failure(
+            f"successful {label} terminal fit is not bound to raw peak-memory evidence"
+        )
+    if measured_peak is not None:
+        from corpus_studio.platform.watchdog import reconcile_measured_fit  # noqa: PLC0415
+
+        if reconcile_measured_fit(measured_peak, proven=True) != manifest.final_fit:
+            raise _export_failure(
+                f"successful {label} terminal fit differs from parent-reconstructed evidence"
             )
 
-            if reconcile_measured_fit(measured_peak, proven=True) != manifest.final_fit:
-                raise RunnerFailure(
-                    "successful training terminal fit differs from parent-reconstructed evidence",
-                    taxonomy=FailureTaxonomy.ARTIFACT_FAILURE,
-                    stage=StageMarker.export,
+
+def _verify_variant_schedule(binding: ResolvedExecutionBinding, evidence: Any) -> None:
+    """The parent mirror of the inner validators' schedule gate for every non-SFT variant."""
+
+    steps = evidence.execution.completed_optimizer_steps
+    sealed_steps = binding.config.schedule.max_steps
+    if sealed_steps is not None and steps != sealed_steps:
+        raise RunnerFailure(
+            "completed optimizer steps do not match the sealed schedule",
+            taxonomy=FailureTaxonomy.OPTIMIZER_FAILURE,
+            stage=StageMarker.optimizer_step,
+        )
+    if sealed_steps is None and steps < 1:
+        raise RunnerFailure(
+            f"epoch-scheduled {binding.label} admitted zero completed optimizer steps",
+            taxonomy=FailureTaxonomy.OPTIMIZER_FAILURE,
+            stage=StageMarker.optimizer_step,
+        )
+
+
+def _verify_variant_export_tree(
+    binding: ResolvedExecutionBinding, artifact: ArtifactManifest
+) -> None:
+    """Every non-SFT export passes its kind's tree policy: no links, no checkpoint directory, and no
+    weights payload other than the one root Safetensors file the evidence digests."""
+
+    from corpus_studio.platform.artifacts import (  # noqa: PLC0415
+        _validate_adapter_tree,
+        _validate_model_tree,
+    )
+
+    kind = binding.artifact_kind
+    validate = _validate_adapter_tree if kind == "adapter" else _validate_model_tree
+    try:
+        validate(Path(artifact.path))
+    except ValueError as exc:
+        raise _export_failure(f"{binding.label} {kind} artifact failed admission: {exc}") from exc
+
+
+def _verify_variant_export_bytes(
+    binding: ResolvedExecutionBinding,
+    artifact: ArtifactManifest,
+    metadata_hash: str | None,
+    evidence: Any,
+) -> None:
+    """Torch-free equivalent of the worker's reload-verify for a non-SFT variant's saved export.
+
+    The weights file is parsed with the dependency-light Safetensors reader, which hashes every
+    tensor and recomputes the same canonical tensor-state identity the trainer captured as
+    ``after_sha256``; the full-file and config digests must equal the worker's proposal. The tree
+    policy already ran in :func:`_verify_variant_export_tree`; adapter exports also bind the config
+    bytes to the integrity metadata hash. Every mismatch fails closed as an artifact failure."""
+
+    import hashlib  # noqa: PLC0415
+
+    from corpus_studio.platform.parameter_accounting import (  # noqa: PLC0415
+        ParameterAccountingError,
+        validate_safetensors_tensor_file,
+    )
+
+    label, kind = binding.label, binding.artifact_kind
+    root = Path(artifact.path)
+    if kind == "adapter":
+        from corpus_studio.platform.artifacts import (  # noqa: PLC0415
+            _MAX_ADAPTER_CONFIG_BYTES,
+            _stable_bounded_file_bytes,
+        )
+
+        weights = root / "adapter_model.safetensors"
+        export = evidence.execution.adapter_export_state
+        proposed_weights = evidence.adapter_safetensors_sha256
+        proposed_config = evidence.adapter_config_sha256
+        try:
+            config_sha256 = hashlib.sha256(
+                _stable_bounded_file_bytes(
+                    root / "adapter_config.json", limit=_MAX_ADAPTER_CONFIG_BYTES
                 )
-    artifacts.extend(parsed_artifacts)
-    return manifest
+            ).hexdigest()
+        except ValueError as exc:
+            raise _export_failure(f"{label} adapter artifact failed admission: {exc}") from exc
+        if config_sha256 != metadata_hash:
+            raise _export_failure(f"{label} adapter config bytes changed before terminal admission")
+    else:
+        from corpus_studio.platform.execution_config import (  # noqa: PLC0415
+            ExecutionConfigurationError,
+            stable_file_sha256,
+        )
+
+        weights = root / "model.safetensors"
+        export = evidence.execution.model_export_state
+        proposed_weights = evidence.model_safetensors_sha256
+        proposed_config = evidence.model_config_sha256
+        try:
+            config_sha256 = stable_file_sha256(root / "config.json")
+        except ExecutionConfigurationError as exc:
+            raise _export_failure(f"{label} model config failed admission: {exc}") from exc
+    try:
+        state = validate_safetensors_tensor_file(weights)
+    except ParameterAccountingError as exc:
+        raise _export_failure(f"{label} {kind} Safetensors is invalid: {exc}") from exc
+    if state.content_sha256 != proposed_weights:
+        raise _export_failure(f"{label} {kind} Safetensors bytes do not match the proposed digest")
+    if config_sha256 != proposed_config:
+        raise _export_failure(f"{label} {kind} config bytes do not match the proposed digest")
+    if (
+        state.tensor_state_sha256 != export.after_sha256
+        or list(state.tensor_names) != export.tensor_names
+    ):
+        raise _export_failure(
+            f"saved {label} {kind} tensor state differs from the trained export state"
+        )
 
 
 def _finalize(

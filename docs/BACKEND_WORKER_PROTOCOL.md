@@ -52,7 +52,34 @@ parent rejects:
 - non-increasing `RunEvent.seq` values;
 - a terminal outcome inconsistent with its `RunManifest` or `FailureRecord`;
 - terminal plan/environment/dataset lineage that differs from the dispatched plan;
-- artifact records whose producer or ordered IDs disagree with the terminal manifest.
+- artifact records whose producer or ordered IDs disagree with the terminal manifest;
+- a `run_accepted.execution_configuration_hash` other than the sealed configuration hash of the one
+  execution variant the plan carries (adapter SFT, preference/DPO, pretraining, full-parameter SFT,
+  reward, or on-policy RL), or a non-null hash for an echo plan that carries none;
+- a succeeded terminal that carries any success-evidence family other than the dispatched variant's
+  (an echo plan admits none, and no artifact or fit either).
+
+Before spawning, the parent resolves that one variant (`resolved_execution_binding`), re-verifies its
+own configuration seal, and refuses a `max_steps` that differs from the sealed schedule, for every
+variant rather than only adapter SFT.
+
+A succeeded terminal is then re-derived in the parent, torch-free, for exactly the dispatched variant
+before its state or artifacts are admitted. It must carry that variant's evidence and exactly one
+artifact of its kind (`adapter` or `model`) at the exact sealed run-scoped path, with integrity-checked
+bytes whose weight content hash still matches. Adapter SFT keeps its event-bound loss and sealed-adapter
+admission. Every other variant first passes its kind's export-tree policy, before any byte is hashed
+(the content hash follows linked files): no link, no `checkpoint-*` directory, and no weights payload
+other than the one root Safetensors file (`adapter_model.safetensors` or `model.safetensors`; a model
+export also refuses shards, a sharding index, and PyTorch/TF/Flax alternates). It must then match the
+sealed step schedule, and its saved Safetensors and config bytes must equal the proposed digests. The
+Safetensors file is parsed by the dependency-light reader, and its canonical tensor state (names,
+dtypes, shapes, per-tensor bytes) must equal the trained export state. Adapter exports also bind the
+config bytes to the integrity metadata hash. A claimed fit must be reconstructed from the raw measured
+peak. A mismatch is an `ARTIFACT_FAILURE` (or `UPDATE_FAILURE` for missing evidence,
+`OPTIMIZER_FAILURE` for a schedule mismatch); a foreign evidence family is a protocol violation. No
+torch reload happens in the parent: the worker's own supervisor still performs its torch reload-verify
+before proposing success.
+Failed, cancelled, and interrupted terminals need no success evidence.
 
 stdout is reserved for one `WorkerMessage` JSON object per line. Worker diagnostics belong on stderr;
 non-JSON stdout is a protocol failure, not ignored telemetry.
@@ -87,6 +114,14 @@ Legacy unpinned RunPlans remain parseable and retain their historical hash verif
 still be inspected or used by the in-process compatibility path, but protocol-2 subprocess dispatch
 rejects them before sending a run. Regenerate the plan to obtain a hash-pinned backend ref.
 
+Workers built before the variant-hash echo (#860) send the adapter-SFT configuration hash in
+`run_accepted` and a null hash for every other variant. The parent now requires the dispatched
+variant's own hash, so such a pinned worker still runs adapter SFT unchanged but fails closed at
+`run_accepted` (an `ENVIRONMENT_FAILURE` protocol violation, before any run event is accepted) for
+preference/DPO, reward, full-parameter SFT, pretraining, and on-policy RL plans. Rebuild the pinned
+worker wheel and re-seal the managed environment locks before dispatching those lanes through a
+managed environment. An editable-install environment picks up both sides together.
+
 The protocol and contracts remain torch-free. The conformance suite uses the real echo worker plus
 small fake subprocesses for valid roundtrips, hangs, crashes, malformed bodies, wrong versions and
 directions, backend/environment mismatches, correlation and ID violations, ordering errors, and
@@ -99,3 +134,9 @@ These tests prove contract parsing, process supervision, identity binding, and d
 classification on the development host. They do **not** verify native-Linux RTX 5070 training,
 DeepSpeed or FSDP, FlashAttention on bare Linux, NVMe performance/offload, full-sequence 7B training,
 real offload fit, or MoE runtime capability.
+
+The per-variant terminal admission is proven against genuine-shaped, hand-built Safetensors exports
+driven through the real worker entrypoint (only the ML training call and the worker-side torch
+reload are substituted). That the parent's torch-free tensor-state identity equals the trained export
+state for real `save_pretrained` outputs, especially full-model exports with tied weights or
+persistent buffers, still needs a measured run on a rebuilt worker wheel.

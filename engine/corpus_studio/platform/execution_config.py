@@ -13,8 +13,9 @@ import json
 import os
 import re
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from .common import HashRef, Ref
 from .contracts import (
@@ -337,6 +338,121 @@ def verify_full_finetune_execution_configuration_hash(
     config: ResolvedFullFinetuneExecutionConfiguration,
 ) -> bool:
     return config.configuration_hash == full_finetune_execution_configuration_hash_for(config)
+
+
+ResolvedVariantConfiguration = (
+    ResolvedExecutionConfiguration
+    | ResolvedPreferenceExecutionConfiguration
+    | ResolvedPretrainingExecutionConfiguration
+    | ResolvedFullFinetuneExecutionConfiguration
+    | ResolvedRewardExecutionConfiguration
+    | ResolvedRolloutExecutionConfiguration
+)
+
+
+@dataclass(frozen=True)
+class ResolvedExecutionBinding:
+    """The single sealed execution variant a RunPlan carries, with the only success-evidence family
+    and artifact kind that variant may claim.
+
+    This is the one owner of variant dispatch for the process boundary: the worker echoes
+    ``configuration_hash`` in ``run_accepted``, and the subprocess parent binds that echo and
+    admits a terminal success only for ``evidence_field`` plus exactly one ``artifact_kind``
+    artifact. A new resolved variant that is not in this table has no parent admission, which the
+    coverage tests reject."""
+
+    plan_field: str
+    evidence_field: str
+    artifact_kind: Literal["adapter", "model"]
+    label: str
+    config: ResolvedVariantConfiguration
+    verifier: Callable[[Any], bool]
+
+    @property
+    def configuration_hash(self) -> str:
+        return self.config.configuration_hash
+
+    def verify_configuration_hash(self) -> bool:
+        """Recompute the variant's own seal; the per-variant seal functions stay decoupled."""
+        return self.verifier(self.config)
+
+
+# Rows: (RunPlan field, RunManifest success-evidence field, artifact kind (also the run-scoped
+# output leaf), message label, per-variant seal verifier).
+_EXECUTION_VARIANTS: tuple[
+    tuple[str, str, Literal["adapter", "model"], str, Callable[[Any], bool]], ...
+] = (
+    (
+        "resolved_execution",
+        "training_success_evidence",
+        "adapter",
+        "training",
+        verify_execution_configuration_hash,
+    ),
+    (
+        "resolved_preference_execution",
+        "preference_success_evidence",
+        "adapter",
+        "preference",
+        verify_preference_execution_configuration_hash,
+    ),
+    (
+        "resolved_pretraining_execution",
+        "pretraining_success_evidence",
+        "model",
+        "pretraining",
+        verify_pretraining_execution_configuration_hash,
+    ),
+    (
+        "resolved_full_finetune_execution",
+        "full_finetune_success_evidence",
+        "model",
+        "full-finetune",
+        verify_full_finetune_execution_configuration_hash,
+    ),
+    (
+        "resolved_reward_execution",
+        "reward_success_evidence",
+        "adapter",
+        "reward",
+        verify_reward_execution_configuration_hash,
+    ),
+    (
+        "resolved_rollout_execution",
+        "rollout_success_evidence",
+        "adapter",
+        "rollout",
+        verify_rollout_execution_configuration_hash,
+    ),
+)
+RESOLVED_EXECUTION_FIELDS: tuple[str, ...] = tuple(row[0] for row in _EXECUTION_VARIANTS)
+SUCCESS_EVIDENCE_FIELDS: tuple[str, ...] = tuple(row[1] for row in _EXECUTION_VARIANTS)
+
+
+def resolved_execution_binding(plan: RunPlan) -> ResolvedExecutionBinding | None:
+    """Return the plan's single sealed execution variant, or ``None`` for a plan without one (echo).
+
+    RunPlan validation already refuses two execution authorities; this re-check covers a plan object
+    built without validation (``model_copy``) so neither side of the process boundary guesses which
+    seal governs."""
+
+    selected = [
+        ResolvedExecutionBinding(
+            plan_field=plan_field,
+            evidence_field=evidence_field,
+            artifact_kind=artifact_kind,
+            label=label,
+            config=getattr(plan, plan_field),
+            verifier=verifier,
+        )
+        for plan_field, evidence_field, artifact_kind, label, verifier in _EXECUTION_VARIANTS
+        if getattr(plan, plan_field) is not None
+    ]
+    if len(selected) > 1:
+        raise ExecutionConfigurationError(
+            "a RunPlan carries more than one resolved execution configuration"
+        )
+    return selected[0] if selected else None
 
 
 def capability_report_hash_for(report: CapabilityReport) -> str:

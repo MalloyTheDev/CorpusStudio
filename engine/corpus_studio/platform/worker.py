@@ -2,7 +2,8 @@
 
 First emits a ``hello`` that binds its static backend manifest and environment identity, then reads a
 ``run_dispatch`` :class:`WorkerMessage` (the immutable RunPlan, by value) from stdin. After accepting
-the dispatch it streams JSON-lines on **stdout**: ``run_accepted`` (with the pid) → ``event`` per
+the dispatch it streams JSON-lines on **stdout**: ``run_accepted`` (with the pid and the sealed
+configuration hash of the one execution variant the plan carries, null for echo) → ``event`` per
 RunEvent → ``terminal_result`` (the RunManifest + a FailureTaxonomy outcome). stdout is exclusively
 the protocol channel (one JSON WorkerMessage per line, flushed); **stderr is free** for telemetry.
 
@@ -166,15 +167,21 @@ def run_worker(
 
         if not verify_run_plan_hash(plan):
             raise ValueError("plan_hash does not match the canonical plan body")
-        if plan.resolved_execution is not None:
-            from corpus_studio.platform.execution_config import (  # noqa: PLC0415
-                verify_execution_configuration_hash,
+        from corpus_studio.platform.execution_config import (  # noqa: PLC0415
+            resolved_execution_binding,
+            verify_runner_lane,
+        )
+
+        # The one sealed variant this dispatch executes. Its configuration hash is re-verified here
+        # and echoed in run_accepted, so the parent can bind acceptance to the exact variant it
+        # dispatched.
+        binding = resolved_execution_binding(plan)
+        if binding is not None and not binding.verify_configuration_hash():
+            raise ValueError(
+                "resolved execution configuration hash mismatch"
+                if binding.label == "training"
+                else f"resolved {binding.label} execution configuration hash mismatch"
             )
-
-            if not verify_execution_configuration_hash(plan.resolved_execution):
-                raise ValueError("resolved execution configuration hash mismatch")
-        from corpus_studio.platform.execution_config import verify_runner_lane  # noqa: PLC0415
-
         verify_runner_lane(plan, runner_name)
         backend = get_worker_backend(backend_id)
         if backend is None:
@@ -219,9 +226,7 @@ def run_worker(
             "run_id": run_id,
             "pid": os.getpid(),
             "execution_configuration_hash": (
-                plan.resolved_execution.configuration_hash
-                if plan.resolved_execution is not None
-                else None
+                binding.configuration_hash if binding is not None else None
             ),
             "applied_allocator_conf": applied_allocator_conf,
         },

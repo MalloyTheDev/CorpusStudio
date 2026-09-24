@@ -242,6 +242,21 @@ per-item error isolation, and off-thread document opens.
   Artifact and terminal manifests are persisted before terminal success is released, and a claimed
   proven fit is reconstructed from the raw measured peak. Failed non-spilling runs remain
   `NATIVE_UNPROVEN`, and structured failure taxonomy retains the last verified stage and child detail.
+- **Per-variant subprocess-parent admission (#860)**: the `platform-run --subprocess` parent re-derives a
+  succeeded terminal for every resolved variant (adapter SFT, preference/DPO, reward, on-policy RL,
+  full-parameter SFT, pretraining) through one binding table (`execution_config.resolved_execution_binding`),
+  torch-free. Before spawn it re-verifies the dispatched variant's seal and refuses a `max_steps` override;
+  `run_accepted` must echo that variant's configuration hash (null only for an echo plan). A succeeded
+  terminal must carry exactly that variant's evidence family (a foreign family is a protocol violation) and
+  exactly one run-scoped artifact of its kind whose integrity hash still matches. Adapter exports pass the
+  adapter-tree policy and full-model exports the model-tree policy (one root `model.safetensors`; no links,
+  shards, sharding index, alternate formats or `checkpoint-*` directories), both before any byte is hashed.
+  For non-SFT variants the parent also re-checks the sealed step schedule, the proposed Safetensors/config
+  digests and the canonical tensor state against the trained export state; a claimed fit is reconstructed
+  from the raw peak. An echo terminal may claim no evidence, artifact or fit. Compatibility: worker wheels
+  built before #860 echo only the adapter-SFT hash, so their DPO, reward, full-parameter SFT and pretraining
+  runs fail closed at `run_accepted` until the pinned worker wheel is rebuilt. Known limit: the full-model
+  tensor-state check has not yet been exercised against a real `save_pretrained` export on the GPU host.
 - **Versioned reasoning/tool trace foundation** — the language-neutral, hash-sealed `TraceRecord`
   preserves exact source-row lineage, ordered role context, reasoning/action/tool/result/final-answer
   boundaries, producer/model/prompt/request/response evidence, typed validation findings, and a
@@ -449,7 +464,9 @@ per-item error isolation, and off-thread document opens.
   plans remain readable but must be regenerated for protocol-2 subprocess dispatch. Both public run
   entry points verify the plan seal before a runner is invoked or spawned. Workers/installers own a
   POSIX session or Windows process group and use bounded process-tree termination; the fake-worker
-  suite verifies a timed-out descendant does not survive. See
+  suite verifies a timed-out descendant does not survive. `run_accepted` echoes the sealed
+  configuration hash of the one execution variant the plan carries (null only for echo), and the parent
+  binds it to the dispatched variant (#860). See
   [`BACKEND_WORKER_PROTOCOL.md`](BACKEND_WORKER_PROTOCOL.md).
 - **Effective execution contract (Phase 9B)**: every new first-party training plan embeds a separately
   hash-sealed `ResolvedExecutionConfiguration`. It pins exact dataset bytes, immutable model/tokenizer

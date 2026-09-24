@@ -88,8 +88,12 @@ Before model loading, the execution path:
    In particular, `logging_strategy="steps"`, `logging_steps=1`, and
    `logging_nan_inf_filter=false` are part of the execution meaning.
 
-For subprocess runs, protocol 2.0 includes the execution-configuration hash in `run_accepted`. The
-parent compares it with the dispatched plan before accepting any run events.
+For subprocess runs, protocol 2.0 includes the selected variant's execution-configuration hash in
+`run_accepted`: adapter SFT, preference/DPO, pretraining, full-parameter SFT, reward, or on-policy RL,
+and null only for an echo plan. The parent compares it with the sealed hash of the variant it
+dispatched (`execution_config.resolved_execution_binding`) before accepting any run events. A worker
+built before #860 echoes only the adapter-SFT hash, so it fails closed for every other variant until
+its pinned wheel is rebuilt.
 
 Resolved training setup is supervised separately from optimizer execution. Its first recognized
 setup stage starts one absolute `--preflight-timeout` budget; bounded same-thread dataset and
