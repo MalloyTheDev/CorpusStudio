@@ -67,7 +67,7 @@ from corpus_studio.platform.subprocess_supervisor import (
     execute_run_subprocess,
     worker_identity_argv,
 )
-from corpus_studio.platform.supervisor import RunnerFailure, demo_run_plan
+from corpus_studio.platform.supervisor import RunnerFailure, demo_run_plan, execute_run
 from corpus_studio.platform.watchdog import reconcile_measured_fit
 from corpus_studio.platform.worker import run_worker
 from corpus_studio.platform.worker_protocol import WorkerProtocolError
@@ -484,6 +484,47 @@ def test_parent_refuses_a_broken_variant_seal_before_spawn(tmp_path, lane):
     assert not marker.exists()
     durable = tmp_path / "records" / "runs" / result.manifest.run_id / "RunManifest.json"
     assert json.loads(durable.read_text(encoding="utf-8"))["state"] == "failed"
+
+
+@pytest.mark.parametrize("lane", ["training", *VARIANT_LANES])
+def test_execute_run_refuses_a_broken_variant_seal_in_process(tmp_path, lane):
+    """The in-process supervisor refuses the same tampered seal the parent refuses before spawn.
+
+    ``--subprocess`` is opt-in, so ``execute_run`` is the default ``platform-run`` route. It used to
+    re-verify only ``resolved_execution``; every other variant reached its runner unchecked. This
+    covers all six so the two paths cannot drift apart again.
+    """
+
+    plan = _plan(lane, tmp_path / "output-root")
+    binding = _binding(plan)
+    config = binding.config.model_copy(update={"seed": binding.config.seed + 1})
+    draft = plan.model_copy(update={binding.plan_field: config})
+    tampered = draft.model_copy(
+        update={"plan_hash": compute_plan_hash(run_plan_hash_payload(draft))}
+    )
+    assert verify_run_plan_hash(tampered)  # the plan seal alone does not catch it
+
+    dispatched: list[str] = []
+
+    class _Runner:
+        # Any lane name will do: the seal is re-verified before verify_runner_lane, so a refusal
+        # here also shows the seal check is not reachable only via a correctly matched runner.
+        name = "cpu_toy"
+
+        def run(self, _ctx):  # pragma: no cover - the refusal must precede dispatch
+            dispatched.append("ran")
+            return []
+
+    result = execute_run(tampered, _Runner(), run_id=f"run-{lane}-tampered")
+    assert result.manifest.state == "failed"
+    failure = result.manifest.failure
+    assert failure is not None
+    assert failure.taxonomy is FailureTaxonomy.UNSUPPORTED_CONFIGURATION
+    expected = "resolved execution configuration hash verification failed"
+    if binding.label != "training":
+        expected = f"resolved {binding.label} execution configuration hash verification failed"
+    assert failure.message == expected  # the same wording the parent reports
+    assert dispatched == []
 
 
 def test_parent_refuses_a_plan_with_two_execution_authorities_before_spawn(tmp_path):
