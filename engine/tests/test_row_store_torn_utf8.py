@@ -18,6 +18,7 @@ import pytest
 from typer.testing import CliRunner
 
 from corpus_studio.cli import app
+from corpus_studio.versions.gc import gc_row_store
 from corpus_studio.versions.row_store import (
     load_row_id_set,
     load_rows_by_id,
@@ -281,3 +282,63 @@ def test_a_torn_tail_on_an_unwritable_store_yields_a_fingerprint_only_version(
     assert version.rows_stored is False
     assert version.content_fingerprint == fingerprint_dataset(tmp_path / "examples.jsonl")[0]
     assert row_store_path(tmp_path).read_bytes() == before
+
+
+# --- GC keeps an undecodable line byte for byte -----------------------------------------------
+
+ROW_ORPHAN = {"instruction": "orphan", "output": "pruned"}
+
+
+def _line(row: dict[str, Any]) -> bytes:
+    return store_line(row_id(row), row).encode("utf-8")
+
+
+def test_gc_after_a_tear_prunes_orphans_and_keeps_the_fragment_byte_for_byte(
+    tmp_path: Path,
+) -> None:
+    project = _project(tmp_path / "proj")
+    _write_examples(project, [ROW_A])
+    version_a = _create(project, "A")
+    fragment = _tear(project, ROW_B, "\u4e2d")
+    _write_examples(project, [ROW_A, ROW_C])
+    version_c = _create(project, "A+C")
+    with row_store_path(project).open("ab") as handle:
+        handle.write(_line(ROW_ORPHAN))
+
+    gc = runner.invoke(app, ["dataset-version-gc", str(project), "--json"])
+
+    assert gc.exit_code == 0, gc.output
+    assert json.loads(gc.stdout)["pruned_rows"] == 1
+    assert row_store_path(project).read_bytes() == (
+        _line(ROW_A) + fragment + b"\n" + _line(ROW_C)
+    )
+    assert reconstruct_version_lines(project, version_a)
+    assert len(reconstruct_version_lines(project, version_c)) == 2
+    assert gc_row_store(project).pruned_rows == 0  # idempotent: the fragment is no refusal
+
+
+def test_gc_keeps_undecodable_lines_anywhere_and_rewrites_them_unchanged(tmp_path: Path) -> None:
+    _write_examples(tmp_path, [ROW_A, ROW_C])
+    keep = create_dataset_version(tmp_path, label="keep")
+    glued = _torn_line(ROW_EMOJI, "\U0001f600", 2) + _line(ROW_B)  # older damage, mid-store
+    encoded_surrogate = b'{"row_id": "\xed\xa0\x80"}\n'  # not valid UTF-8 either
+    no_row_id = b'{"row": 1}\n'  # valid JSON, but nothing GC can classify
+    store = row_store_path(tmp_path)
+    store.write_bytes(
+        b"\xef\xbb\xbf"
+        + _line(ROW_A)
+        + glued
+        + _line(ROW_C)
+        + _line(ROW_ORPHAN)
+        + encoded_surrogate
+        + no_row_id
+    )
+
+    result = gc_row_store(tmp_path)
+
+    assert (result.scanned_rows, result.kept_rows, result.pruned_rows) == (3, 2, 1)
+    assert store.read_bytes() == (
+        _line(ROW_A) + glued + _line(ROW_C) + encoded_surrogate + no_row_id
+    )
+    assert load_row_id_set(tmp_path) == {row_id(ROW_A), row_id(ROW_C)}
+    assert len(reconstruct_version_lines(tmp_path, keep.version_id)) == 2

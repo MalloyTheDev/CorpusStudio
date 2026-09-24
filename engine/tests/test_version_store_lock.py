@@ -778,15 +778,16 @@ def test_unreadable_record_keeps_its_manifest_live(tmp_path: Path) -> None:
     assert load_row_manifest(tmp_path, version_id) == [row_id(ROW_A), row_id(ROW_B)]
 
 
-def test_undecodable_store_refuses_gc(tmp_path: Path) -> None:
-    _version_id, _before = _store_with_version(tmp_path)
+def test_undecodable_store_line_is_kept_byte_for_byte_not_a_refusal(tmp_path: Path) -> None:
+    version_id, _before = _store_with_version(tmp_path)
     with row_store_path(tmp_path).open("ab") as handle:
         handle.write(b"\xff\xfe\n")
-    before = row_store_path(tmp_path).read_bytes()
 
-    with pytest.raises(RowStoreGcRefusedError, match="not valid UTF-8"):
-        gc_row_store(tmp_path)
-    assert row_store_path(tmp_path).read_bytes() == before
+    result = gc_row_store(tmp_path)
+
+    assert result.pruned_rows == 1  # only the orphan ROW_C
+    assert b"\xff\xfe" in row_store_path(tmp_path).read_bytes().split(b"\n")
+    assert reconstruct_version_lines(tmp_path, version_id)
 
 
 def test_gc_replace_uses_a_unique_temp_and_refuses_cleanly_on_failure(

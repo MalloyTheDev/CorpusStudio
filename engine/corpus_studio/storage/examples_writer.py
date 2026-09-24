@@ -126,17 +126,19 @@ def read_examples_page(
     return total, rows
 
 
-def atomic_write_lines(path: Path, lines: list[str]) -> None:
+def atomic_write_lines(path: Path, lines: list[str], *, errors: str = "strict") -> None:
     """Write each item of ``lines`` as one ``\\n``-terminated row to ``path``
     atomically: a uniquely named temp file in the same directory, ``fsync``, then
     ``os.replace``. Concurrent writers never share a temp file, and a failure before
-    the replace leaves ``path`` untouched and removes the temp file."""
+    the replace leaves ``path`` untouched and removes the temp file. ``errors`` is the
+    UTF-8 encoding error handler: ``"surrogateescape"`` writes lines that were decoded
+    with it back byte for byte (row-store GC keeps undecodable lines that way)."""
 
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp_name = tempfile.mkstemp(dir=str(path.parent), prefix=path.name + ".", suffix=".tmp")
     tmp = Path(tmp_name)
     try:
-        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
+        with os.fdopen(fd, "w", encoding="utf-8", errors=errors, newline="\n") as handle:
             for line in lines:
                 handle.write(line)
                 handle.write("\n")

@@ -15,7 +15,16 @@ Safety is the whole point, so this is deliberately fail-closed:
   reads but is not trustworthy (not UTF-8, a line that is not a sha256 row id, or an id count that
   disagrees with its record) raises :class:`IncompleteReferenceScanError` for the same reason.
 * A row-store line that can't be parsed into a ``row_id`` is **kept**, never pruned - GC only removes
-  lines it can positively identify as unreferenced.
+  lines it can positively identify as unreferenced. That includes a line that is not valid UTF-8 (a
+  capture killed mid-append can cut the store inside a multi-byte character): the store is decoded
+  with ``surrogateescape``, so such a line is never refused or classified - the store's readers skip
+  it too - and is written back byte for byte (like every kept line, only edge JSON whitespace such
+  as a CRLF terminator is normalized).
+* The store and the manifests are split on ``\\n`` only, never with ``str.splitlines()``, which also
+  breaks on U+2028, U+2029 and U+0085. ``json.dumps(ensure_ascii=False)`` writes those raw inside row
+  strings and the store's readers (``load_row_id_set`` / ``load_rows_by_id``) keep them inside the
+  row; splitting on them would cut a referenced row into unparseable fragments that the rewritten
+  store no longer holds as that row.
 * Concurrency (#859): the whole GC (manifest scan, store read, replace) runs under the
   version-store lock (``versions/store_lock.py``), which every store append and manifest publication
   also holds. A capture can therefore never append and publish between GC's scan and its replace,
@@ -44,6 +53,9 @@ from corpus_studio.versions.version_registry import (
 # sha256-exact-v1 row ids: 64 lowercase hex characters (hashlib hexdigest). A future identity
 # algorithm must extend this check, or GC (correctly) refuses its manifests.
 _ROW_ID_PATTERN = re.compile(r"[0-9a-f]{64}")
+# JSON's own insignificant whitespace (RFC 8259): stripping only these (never Unicode separators)
+# cannot change what a line parses to, and leaves a kept unclassifiable line's content intact.
+_JSON_WHITESPACE = " \t\r\n"
 
 
 class RowStoreGcRefusedError(RuntimeError):
@@ -60,6 +72,38 @@ class RowStoreGcResult(BaseModel):
     kept_rows: int = 0  # referenced rows kept (unclassifiable lines are always preserved, not counted)
     pruned_rows: int = 0  # unreferenced rows removed
     dry_run: bool = False
+
+
+def _read_lines(path: Path, *, errors: str = "strict") -> list[str]:
+    """``path`` decoded as UTF-8 (BOM-tolerant) and split on ``\\n`` ONLY.
+
+    Decoded from bytes, so no universal-newline translation happens either: a stray ``\\r`` inside
+    a line stays in that line (a CRLF terminator is dropped by the caller's whitespace strip).
+    ``\\n`` is a single byte that never occurs inside a multi-byte sequence, so splitting after a
+    ``surrogateescape`` decode cuts the same lines as splitting the raw bytes. Raises ``OSError`` if
+    unreadable and, with the default strict ``errors``, ``UnicodeDecodeError`` if not UTF-8."""
+
+    return path.read_bytes().decode("utf-8-sig", errors).split("\n")
+
+
+def _row_id_of(line: str) -> str | None:
+    """The ``row_id`` a stripped store line declares, or ``None`` when GC cannot classify it.
+
+    A line holding lone surrogates came from bytes that are not valid UTF-8 (the store is decoded
+    with ``surrogateescape``). The store's readers skip such a line, so GC never classifies it
+    either: it stays unclassifiable, and therefore kept."""
+
+    try:
+        line.encode("utf-8")
+    except UnicodeEncodeError:
+        return None
+    try:
+        entry = json.loads(line)
+    except json.JSONDecodeError:
+        return None
+    if isinstance(entry, dict) and isinstance(entry.get("row_id"), str):
+        return str(entry["row_id"])
+    return None
 
 
 def _check_manifest_against_record(manifest_file: Path, id_count: int) -> None:
@@ -95,14 +139,14 @@ def collect_referenced_row_ids(project_dir: Path | str) -> set[str]:
         return live
     for manifest_file in sorted(directory.glob(f"*{ROW_MANIFEST_SUFFIX}")):
         try:
-            text = manifest_file.read_text(encoding="utf-8-sig")  # OSError propagates -> abort
+            lines = _read_lines(manifest_file)  # OSError propagates -> abort
         except UnicodeDecodeError as exc:
             raise IncompleteReferenceScanError(
                 f"manifest '{manifest_file.name}' is not valid UTF-8; nothing was pruned"
             ) from exc
         ids: list[str] = []
-        for number, line in enumerate(text.splitlines(), start=1):
-            row_id = line.strip()
+        for number, line in enumerate(lines, start=1):
+            row_id = line.strip(_JSON_WHITESPACE)
             if not row_id:
                 continue
             if not _ROW_ID_PATTERN.fullmatch(row_id):
@@ -124,8 +168,9 @@ def gc_row_store(project_dir: Path | str, dry_run: bool = False) -> RowStoreGcRe
     :class:`~corpus_studio.versions.store_lock.VersionStoreBusyError` (or its base
     ``VersionStoreLockError``) when the lock cannot be acquired. Raises ``OSError`` if a manifest is
     unreadable, :class:`IncompleteReferenceScanError` if a manifest cannot be trusted, and
-    :class:`RowStoreGcRefusedError` if the store is not UTF-8 or cannot be replaced. In every one of
-    those cases nothing is pruned."""
+    :class:`RowStoreGcRefusedError` if the store cannot be replaced. In every one of those cases
+    nothing is pruned. Store lines that are not valid UTF-8 are not a refusal: they are kept byte for
+    byte like any other unclassifiable line."""
     if not registry_dir(project_dir).is_dir():
         # No version store at all: nothing to prune, and no lock file is created as a side effect.
         return RowStoreGcResult(dry_run=dry_run)
@@ -140,31 +185,19 @@ def _gc_row_store_locked(project_dir: Path | str, dry_run: bool) -> RowStoreGcRe
     if not path.exists():
         return RowStoreGcResult(referenced_row_ids=len(referenced), dry_run=dry_run)
 
-    try:
-        # BOM-tolerant read, matching the store's other readers, so a BOM-prefixed store isn't
-        # misread.
-        text = path.read_text(encoding="utf-8-sig")
-    except UnicodeDecodeError as exc:
-        raise RowStoreGcRefusedError(
-            f"the row store is not valid UTF-8 ({exc}); nothing was pruned"
-        ) from exc
+    # BOM-tolerant, so a BOM-prefixed store isn't misread; split on "\n" only, like the store's
+    # readers. surrogateescape: an undecodable line survives the decode and the rewrite unchanged.
+    lines = _read_lines(path, errors="surrogateescape")
 
     kept: list[str] = []
     scanned = 0
     pruned = 0
-    for line in text.splitlines():
-        stripped = line.strip()
+    for line in lines:
+        stripped = line.strip(_JSON_WHITESPACE)
         if not stripped:
             continue  # blank line: carries no row, safe to drop
 
-        row_id: str | None = None
-        try:
-            entry = json.loads(stripped)
-        except json.JSONDecodeError:
-            entry = None
-        if isinstance(entry, dict) and isinstance(entry.get("row_id"), str):
-            row_id = entry["row_id"]
-
+        row_id = _row_id_of(stripped)
         if row_id is None:
             # Can't identify this line - KEEP it. GC never prunes what it can't classify.
             kept.append(stripped)
@@ -178,7 +211,7 @@ def _gc_row_store_locked(project_dir: Path | str, dry_run: bool) -> RowStoreGcRe
 
     if pruned and not dry_run:
         try:
-            atomic_write_lines(path, kept)
+            atomic_write_lines(path, kept, errors="surrogateescape")
         except OSError as exc:
             raise RowStoreGcRefusedError(
                 f"the row store could not be replaced ({exc}); nothing was pruned"

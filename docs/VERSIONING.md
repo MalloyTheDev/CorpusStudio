@@ -203,7 +203,7 @@ busy version store makes those commands refuse with "nothing committed" /
 
 | Interrupted at | Left on disk | Recovery |
 |---|---|---|
-| Mid-append | Complete orphan rows, possibly a torn last line (the cut can fall inside a multi-byte UTF-8 character) | The next capture newline-terminates the torn line before appending, at the byte level, so it cannot swallow a row. Every store reader decodes line by line and skips an undecodable or torn line, so capture, diff, and restore keep working. GC prunes the orphan rows and keeps the unclassifiable fragment. |
+| Mid-append | Complete orphan rows, possibly a torn last line (the cut can fall inside a multi-byte UTF-8 character) | The next capture newline-terminates the torn line before appending, at the byte level, so it cannot swallow a row. Every store reader decodes line by line and skips an undecodable or torn line, so capture, diff, and restore keep working. GC prunes the orphan rows and keeps the unclassifiable fragment byte for byte. |
 | After the append, before the manifest | Orphan rows (and possibly a stray temp file nothing reads) | GC prunes the orphans. It can do so safely only because it holds the lock, which proves no publication is in flight. |
 | After the manifest, before the record | A manifest with no record | GC keeps its rows (it never prunes on a guess); the version is invisible to list/restore. |
 | During GC | The original store, intact (atomic replace) | Re-run GC. |
@@ -212,10 +212,11 @@ busy version store makes those commands refuse with "nothing committed" /
 **GC refuses an incomplete reference scan** (exit 1, nothing pruned) when a manifest
 cannot be read, is not valid UTF-8, has a line that is not a sha256 row id (torn or
 corrupt), or lists a different number of rows than its record's
-`stored_row_count`; it also refuses when the store itself is not valid UTF-8, when
-the store cannot be replaced (e.g. held open on Windows), or when the version store
-stays busy. A manifest whose record is missing or unreadable stays live as read, so
-it can only keep rows.
+`stored_row_count`; it also refuses when the store cannot be replaced (e.g. held
+open on Windows), or when the version store stays busy. A manifest whose record is
+missing or unreadable stays live as read, so it can only keep rows. A store line
+that is not valid UTF-8 is not a refusal: like any line GC cannot classify, it is
+kept, written back byte for byte, and skipped by the readers.
 
 ## Hard boundaries
 
