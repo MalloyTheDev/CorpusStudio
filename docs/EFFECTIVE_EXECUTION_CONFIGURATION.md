@@ -37,6 +37,44 @@ The configuration pins:
 `RunPlan.training_config_snapshot` remains only as a legacy read-compatibility field. Newly generated
 plans leave it empty and use `resolved_execution`.
 
+## Dataset consumption
+
+The sealed dataset digest is enforced where the bytes are consumed, on every lane that trains from one
+pinned dataset file: adapter SFT, offline DPO (preference), the pairwise reward model, full-parameter
+SFT, and on-policy RL (GRPO, once that lane is admitted at execution). Each lane reads the dataset
+exactly once through `training/sealed_inputs.py`:
+
+1. `stable_file_bytes` checks the file identity before, at, and after open, reads exactly the size
+   observed at open (a file that keeps growing, or shrinks, is refused instead of being read without
+   bound), hashes incrementally, and captures the bytes;
+2. the digest must equal `inputs.dataset.content_sha256`;
+3. the rows are parsed from those captured bytes. The path is never reopened, so there is no window
+   between the check and the use, and no second full-corpus pass.
+
+Adapter SFT performs this read inside the trainer (`verify_sealed_runtime`). The DPO, reward,
+full-parameter SFT, and on-policy RL runners perform it before they import or call the worker, so a
+refusal happens before any heavy import, tokenizer or model load (for full-parameter SFT, before any
+weights load), and before any output directory exists. The worker accepts only those verified rows,
+and only when their digest and location match its own sealed binding.
+
+A post-plan or mid-read change, a missing file, a link, and a sealed but malformed or empty file are
+refused as `UNSUPPORTED_CONFIGURATION` at stage `dataset_verification`. On the DPO, reward,
+full-parameter SFT, and on-policy RL lanes the consumed digest is recorded as structured evidence: the
+final `dataset_verification` stage event carries
+`payload = {content_sha256, byte_count, row_count, execution_configuration_hash}`, which the subprocess
+worker streams to the parent and `platform-run --out` persists in `RunEvents.jsonl` (the adapter SFT
+lane emits the same stage without a payload). Byte progress is capped at 20 events per read, so a long
+read keeps the silence timer honest without flooding the stream. Because any mismatch refuses the run,
+a succeeded run consumed exactly the sealed bytes; the typed success evidence does not yet carry that
+digest itself.
+
+Byte-level parsing (`read_jsonl_bytes`) splits lines exactly like the path reader and the planning
+conformance check: only `\n`, `\r`, and `\r\n` end a row. A raw U+2028, U+2029, or U+0085 inside a
+JSON string therefore no longer splits a row that planning accepted.
+
+Not yet covered: pretraining corpus shards (`PretrainingShard.content_sha256`) and the pinned
+architecture config are not verified at consumption; that gap is tracked as a follow-up.
+
 ## Plan-time admission
 
 An explicit request is not permission to bypass evidence. The selected backend must declare the

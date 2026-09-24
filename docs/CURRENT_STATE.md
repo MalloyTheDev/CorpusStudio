@@ -427,6 +427,13 @@ per-item error isolation, and off-thread document opens.
   504/504 LoRA tensors changed with observed gradients, peak 5.79 GiB; see [`HOST_STATE.md`](HOST_STATE.md)).
   A PRODUCT claim, not a sealed IEEE cell. The managed `platform-run --subprocess` route (a DPO worker
   wheel + sealed env) is the deployment follow-up, exactly as for pretraining (in-process routes now).
+  Consumption guard (#862): the `PreferenceRunner` reads the sealed dataset ONCE before it dispatches the
+  worker (`training/sealed_inputs.py`: one stable read, sha256 compared with
+  `inputs.dataset.content_sha256`, the same bytes parsed), and the worker consumes only those verified rows.
+  A post-plan or mid-read change, a missing or linked file, or a malformed or empty file is refused as
+  `UNSUPPORTED_CONFIGURATION` at `dataset_verification` before any tokenizer or model load or output
+  directory; the verified digest, byte/row counts and configuration hash are recorded in that stage event's
+  payload. The GPU bring-up above predates this guard.
 - **Pairwise reward model (`reward_model`, `workload_verified`, EXECUTABLE)**: `platform-plan --task-type
   reward --objective reward_model` admits a plan AT PLANNING and lowers it into a sealed
   `ResolvedRewardExecutionConfiguration` (its own byte-locked seal, sibling to the DPO config) - a
@@ -443,6 +450,13 @@ per-item error isolation, and off-thread document opens.
   loss 0.7563->0.0, score margin -0.07->46.65, held-out accuracy 1.0/2, 337/337 tensors changed, NATIVE_SAFE,
   peak 0.95 GiB; see [`HOST_STATE.md`](HOST_STATE.md)). A PRODUCT claim, not a sealed IEEE cell. The managed
   `platform-run --subprocess` route (a reward worker wheel + sealed env) is the deployment follow-up.
+  Consumption guard (#862): the `RewardRunner` reads the sealed dataset ONCE before it dispatches the worker
+  (`training/sealed_inputs.py`: one stable read, sha256 compared with `inputs.dataset.content_sha256`, the
+  same bytes parsed), and the worker consumes only those verified rows. A post-plan or mid-read change, a
+  missing or linked file, or a malformed or empty file is refused as `UNSUPPORTED_CONFIGURATION` at
+  `dataset_verification` before any tokenizer or model load or output directory; the verified digest,
+  byte/row counts and configuration hash are recorded in that stage event's payload. The GPU bring-up above
+  predates this guard.
 - **Full-parameter SFT (`dense_full_finetune`, `workload_verified`, EXECUTABLE)**: `platform-plan
   --task-type sft --adapter-method full_finetune --export-format merged_safetensors` seals a full-MODEL
   `ResolvedFullFinetuneExecutionConfiguration` (its own byte-locked seal, sibling to the adapter SFT config)
@@ -455,6 +469,13 @@ per-item error isolation, and off-thread document opens.
   2.28->0.17, 290/290 tensors with observed gradients, peak 5.01 GiB; see [`HOST_STATE.md`](HOST_STATE.md)).
   This also FIXED a latent mis-seal (`full_parameter_sft` previously lowered silently to QLoRA). A PRODUCT
   claim, not a sealed IEEE cell; the managed subprocess wheel route is the deployment follow-up.
+  Consumption guard (#862): the `FullFinetuneRunner` reads the sealed dataset ONCE before it dispatches the
+  worker (`training/sealed_inputs.py`: one stable read, sha256 compared with
+  `inputs.dataset.content_sha256`, the same bytes parsed), and the worker consumes only those verified rows.
+  A post-plan or mid-read change, a missing or linked file, or a malformed or empty file is refused as
+  `UNSUPPORTED_CONFIGURATION` at `dataset_verification` before any weights or tokenizer load or output
+  directory; the verified digest, byte/row counts and configuration hash are recorded in that stage event's
+  payload. The GPU bring-up above predates this guard.
 - **Identity-bound backend worker protocol 2.0**: every newly generated RunPlan hash-pins the exact
   static BackendManifest. A subprocess worker must send `hello` first with that manifest and its exact
   environment/lock ref; only then can the core dispatch. The parent enforces protocol/direction/body,
@@ -489,7 +510,14 @@ per-item error isolation, and off-thread document opens.
   off by default and opt-in via `--checkpoint-cadence` on the adapter SFT lane, with exact-lineage
   `--resume-from` now shipped (#486, `workload_verified` at 7B/seq-4096). Adapter IDs include the
   run, role, and weight-content hash; persisted manifests live under `<record-root>/runs/<run-id>/`.
-  Legacy plans remain readable but are not executable by the training runner; regenerate them. See
+  Legacy plans remain readable but are not executable by the training runner; regenerate them.
+  Consumption verification (#862) covers every single-file dataset lane (adapter SFT in the trainer;
+  DPO, reward, full-parameter SFT and, once admitted, on-policy RL in their runners) through the shared
+  torch-free `training/sealed_inputs.py`. `read_jsonl_bytes` splits lines exactly like `read_jsonl`
+  (universal newlines only, so raw U+2028/U+2029/U+0085 inside a JSON string no longer split a row that
+  planning accepted), and the stable read is bounded to the size seen at open. Known gap: pretraining
+  corpus shards (`PretrainingShard.content_sha256`) and the pinned architecture config are not yet
+  verified at consumption. See
   [`EFFECTIVE_EXECUTION_CONFIGURATION.md`](EFFECTIVE_EXECUTION_CONFIGURATION.md).
 - **Reliability**: an in-process watchdog detects a stall/spill + captures a measured fit; the
   subprocess worker can **KILL a hung run** (→ `KERNEL_STALL`) and isolates a crash. The pre-Phase-9B

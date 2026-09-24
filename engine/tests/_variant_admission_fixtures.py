@@ -219,7 +219,9 @@ def write_lane_export(lane: str, out: Path, steps: int) -> Any:
 # The child runs the REAL worker entrypoint (hello -> run_dispatch -> run_worker -> execute_run ->
 # the lane runner). Only the lane's ML training function (replaced by a writer of genuine-shaped
 # bytes and evidence) and the worker-side torch reload-verify are substituted: this interpreter has
-# no torch. The subprocess PARENT, which is what the tests exercise, runs unmodified.
+# no torch. The fakes accept the runner's extra keyword arguments (the verified dataset rows, stage
+# callbacks) without using them. The subprocess PARENT, which is what the tests exercise, runs
+# unmodified.
 _CHILD_TEMPLATE = r'''
 import sys
 sys.path.insert(0, {tests_dir!r})
@@ -233,25 +235,25 @@ def _steps(execution):
     return execution.schedule.max_steps or 1
 if LANE == "preference":
     import corpus_studio.training.preference_worker as m
-    def fake(execution, *, output_dir):
+    def fake(execution, *, output_dir, **_kwargs):
         ev = fx.write_adapter_export("preference", Path(output_dir), _steps(execution))
         return m.PreferenceRunResult(output_dir=output_dir, success_evidence=ev)
     m.run_preference = fake
 elif LANE == "reward":
     import corpus_studio.training.reward_worker as m
-    def fake(execution, *, output_dir):
+    def fake(execution, *, output_dir, **_kwargs):
         ev = fx.write_adapter_export("reward", Path(output_dir), _steps(execution))
         return m.RewardRunResult(output_dir=output_dir, success_evidence=ev)
     m.run_reward = fake
 elif LANE == "full_finetune":
     import corpus_studio.training.full_finetune_trainer as m
-    def fake(execution, *, output_dir, cpu_toy=False):
+    def fake(execution, *, output_dir, **_kwargs):
         ev = fx.write_model_export(Path(output_dir), _steps(execution))
         return m.FullFinetuneRunResult(output_dir=output_dir, success_evidence=ev)
     m.run_full_finetune = fake
 else:
     import corpus_studio.training.pretraining_trainer as m
-    def fake(execution, *, corpus_root=".", output_dir=None):
+    def fake(execution, *, corpus_root=".", output_dir=None, **_kwargs):
         ev = fx.write_model_export(Path(output_dir), _steps(execution))
         return m.PretrainResult(
             output_dir=output_dir, cpu_toy=True, steps=ev.execution.completed_optimizer_steps,

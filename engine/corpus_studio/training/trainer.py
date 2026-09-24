@@ -551,22 +551,21 @@ def verify_sealed_runtime(
             raise TrainerEnvironmentError(
                 f"sealed package drift: {package} expected {expected}, observed {observed}"
             )
-    if config.dataset_sha256 is None:
-        raise TrainerError("sealed execution omitted the dataset content digest")
-    from corpus_studio.platform.execution_config import (  # noqa: PLC0415
-        ExecutionConfigurationError,
-        stable_file_bytes,
+    # The same one-read verification every other first-party lane uses (training/sealed_inputs.py),
+    # so the digest comparison and its refusal wording cannot drift between lanes.
+    from corpus_studio.training.sealed_inputs import (  # noqa: PLC0415
+        SealedInputError,
+        verify_sealed_dataset_bytes,
     )
 
     try:
-        dataset_bytes, observed_dataset = stable_file_bytes(
+        dataset_bytes, _observed_dataset = verify_sealed_dataset_bytes(
             config.dataset_path,
+            config.dataset_sha256,
             progress_callback=dataset_progress_callback,
         )
-    except ExecutionConfigurationError as exc:
+    except SealedInputError as exc:
         raise TrainerError(str(exc)) from exc
-    if observed_dataset != config.dataset_sha256:
-        raise TrainerError("dataset bytes changed after the execution configuration was sealed")
     return dataset_bytes
 
 
@@ -4442,23 +4441,12 @@ def run_training(  # pragma: no cover - optional training-stack integration
             "checkpoints root; none may be derived inside the trainer"
         )
 
-    dataset_progress_bucket = 0
+    from corpus_studio.training.sealed_inputs import bounded_byte_progress  # noqa: PLC0415
 
-    def _dataset_progress(completed: int, total: int) -> None:
-        nonlocal dataset_progress_bucket
-        if total <= 0:
-            return
-        bucket = min(
-            _MAX_PREFLIGHT_PROGRESS_EVENTS,
-            max(1, completed * _MAX_PREFLIGHT_PROGRESS_EVENTS // total),
-        )
-        if bucket <= dataset_progress_bucket:
-            return
-        dataset_progress_bucket = bucket
-        _stage(
-            "dataset_verification",
-            f"read and hashed {completed}/{total} sealed dataset bytes",
-        )
+    _dataset_progress = bounded_byte_progress(
+        lambda message: _stage("dataset_verification", message),
+        max_events=_MAX_PREFLIGHT_PROGRESS_EVENTS,
+    )
 
     if config.execution_configuration_hash is not None:
         _stage("dataset_verification", "reading and hashing the sealed dataset once")

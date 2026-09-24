@@ -4,6 +4,8 @@ routed run (execute_run -> RewardRunner -> run_reward -> independent re-verify -
 the promoting wheel, so it is proven by the PR 3c-2 GPU run; here the dispatch is exercised with a fake
 worker. Reward stays gated upstream (required_runner_lane still refuses) until that run promotes it."""
 
+import json
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -18,6 +20,8 @@ from corpus_studio.platform.contracts import (
     RewardSuccessEvidence,
     TrainableStateChangeEvidence,
 )
+from corpus_studio.platform.enums import FailureTaxonomy, StageMarker
+from corpus_studio.platform.execution_config import local_input_binding
 from corpus_studio.platform.runners import RewardRunner, build_lane_runner
 from corpus_studio.platform.supervisor import (
     ProducedArtifact,
@@ -144,34 +148,54 @@ class _RecordingCtx:
         self.reward_success_evidence = None
         self.measured_peak = None
         self.stages: list[str] = []
+        self.payloads: list[dict] = []
         self.artifacts: list[object] = []
 
-    def emit_stage(self, _marker, message: str) -> None:
+    def emit_stage(self, _marker, message: str, *, payload=None) -> None:
         self.stages.append(message)
+        if payload is not None:
+            self.payloads.append(payload)
 
     def emit_artifact(self, artifact) -> None:
         self.artifacts.append(artifact)
 
 
-def _reward_execution() -> SimpleNamespace:
-    return SimpleNamespace(output_dir="/tmp/out", output_layout="run_scoped_v1")
+_PAIR = {"prompt": "p", "chosen": "c", "rejected": "r"}
 
 
-def test_reward_runner_dispatches_and_reports_worker_evidence(monkeypatch) -> None:
+def _reward_execution(tmp_path) -> SimpleNamespace:
+    # A real sealed dataset binding: the runner verifies these bytes before it dispatches the worker.
+    dataset = tmp_path / "pairs.jsonl"
+    dataset.write_text(json.dumps(_PAIR) + "\n", encoding="utf-8")
+    binding = local_input_binding(
+        kind="dataset", location=str(dataset), ref_id="dataset", directory=False
+    )
+    return SimpleNamespace(
+        output_dir="/tmp/out",
+        output_layout="run_scoped_v1",
+        inputs=SimpleNamespace(dataset=binding),
+        configuration_hash="e" * 64,
+    )
+
+
+def test_reward_runner_dispatches_and_reports_worker_evidence(monkeypatch, tmp_path) -> None:
     import corpus_studio.platform.execution_config as exec_cfg
     import corpus_studio.training.reward_worker as reward_worker
 
     success = _success()
-    monkeypatch.setattr(
-        reward_worker, "run_reward",
-        lambda execution, output_dir=None: SimpleNamespace(
-            output_dir=output_dir, success_evidence=success
-        ),
-    )
+
+    def _fake_run_reward(execution, *, dataset, output_dir=None):
+        # the worker receives the rows parsed from the verified sealed bytes, never a path to reopen
+        assert dataset.content_sha256 == execution.inputs.dataset.content_sha256
+        assert dataset.rows == (_PAIR,)
+        return SimpleNamespace(output_dir=output_dir, success_evidence=success)
+
+    monkeypatch.setattr(reward_worker, "run_reward", _fake_run_reward)
     monkeypatch.setattr(exec_cfg, "run_scoped_training_output", lambda execution, run_id, leaf="adapter": "/tmp/out/runs/run-x/artifacts/adapter")
     monkeypatch.setattr(exec_cfg, "verify_run_scoped_output_path", lambda *a, **k: None)
 
-    ctx = _RecordingCtx(_reward_execution())
+    execution = _reward_execution(tmp_path)
+    ctx = _RecordingCtx(execution)
     runner = RewardRunner(memory_sampler=lambda: None)
     produced = runner.run(ctx)  # type: ignore[arg-type]
 
@@ -179,18 +203,48 @@ def test_reward_runner_dispatches_and_reports_worker_evidence(monkeypatch) -> No
     assert len(produced) == 1 and produced[0].kind == "adapter"
     assert produced[0].artifact_id.startswith("run-x-adapter-")
     assert any("reward adapter saved" in message for message in ctx.stages)
+    assert ctx.payloads == [
+        {
+            "content_sha256": execution.inputs.dataset.content_sha256,
+            "byte_count": len(json.dumps(_PAIR)) + 1,
+            "row_count": 1,
+            "execution_configuration_hash": "e" * 64,
+        }
+    ]
 
 
-def test_reward_runner_maps_a_worker_error_to_a_classified_failure(monkeypatch) -> None:
+def test_reward_runner_maps_a_worker_error_to_a_classified_failure(monkeypatch, tmp_path) -> None:
     import corpus_studio.platform.execution_config as exec_cfg
     import corpus_studio.training.reward_worker as reward_worker
 
-    def _boom(execution, output_dir=None):
+    def _boom(execution, *, dataset, output_dir=None):
         raise reward_worker.RewardWorkerError("nf4 requires CUDA")
 
     monkeypatch.setattr(reward_worker, "run_reward", _boom)
     monkeypatch.setattr(exec_cfg, "run_scoped_training_output", lambda execution, run_id, leaf="adapter": "/tmp/out/runs/run-x/artifacts/adapter")
 
-    ctx = _RecordingCtx(_reward_execution())
+    ctx = _RecordingCtx(_reward_execution(tmp_path))
     with pytest.raises(RunnerFailure, match="nf4 requires CUDA"):
         RewardRunner(memory_sampler=lambda: None).run(ctx)  # type: ignore[arg-type]
+
+
+def test_reward_runner_refuses_a_changed_dataset_before_dispatch(monkeypatch, tmp_path) -> None:
+    import corpus_studio.platform.execution_config as exec_cfg
+    import corpus_studio.training.reward_worker as reward_worker
+
+    def _must_not_dispatch(*_a, **_k):
+        pytest.fail("the reward worker ran on a dataset that no longer matches its seal")
+
+    monkeypatch.setattr(reward_worker, "run_reward", _must_not_dispatch)
+    monkeypatch.setattr(exec_cfg, "run_scoped_training_output", lambda execution, run_id, leaf="adapter": "/tmp/out/runs/run-x/artifacts/adapter")
+
+    execution = _reward_execution(tmp_path)
+    Path(execution.inputs.dataset.location).write_text(
+        json.dumps({**_PAIR, "chosen": "TAMPERED"}) + "\n", encoding="utf-8"
+    )
+    ctx = _RecordingCtx(execution)
+    with pytest.raises(RunnerFailure, match="dataset bytes changed after") as refused:
+        RewardRunner(memory_sampler=lambda: None).run(ctx)  # type: ignore[arg-type]
+    assert refused.value.taxonomy == FailureTaxonomy.UNSUPPORTED_CONFIGURATION
+    assert refused.value.stage == StageMarker.dataset_verification
+    assert ctx.payloads == []

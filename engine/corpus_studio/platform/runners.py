@@ -39,6 +39,8 @@ from corpus_studio.platform.supervisor import (
 from corpus_studio.platform.watchdog import MemorySampler, RunWatchdog, sample_gpu_memory
 
 if TYPE_CHECKING:
+    from corpus_studio.platform.contracts import ExecutionInputBinding
+    from corpus_studio.training.sealed_inputs import VerifiedDataset
     from corpus_studio.training.trainer import TrainResult, TrainRunConfig
 
     TrainerFn = Callable[..., TrainResult]
@@ -722,7 +724,8 @@ class TrainingRunner:
         # lane, whose worker does not yet write checkpoints.
         try:
             # The trainer owns one stable read/hash/capture of the dataset and parses those exact
-            # bytes. Revalidating it here would create a redundant full-corpus pass.
+            # bytes (training.sealed_inputs, shared with the non-SFT lanes' _verify_sealed_dataset).
+            # Revalidating it here would create a redundant full-corpus pass.
             verify_execution_non_dataset_inputs(execution)
             verify_execution_objective(execution, task_type=plan.task_type.value)
             config = train_config_from_resolved(execution)
@@ -838,6 +841,60 @@ class PretrainingRunner:
         return [artifact]
 
 
+_SEALED_DATASET_REMEDIATION = (
+    "restore the exact sealed dataset bytes, or fix the dataset and regenerate the RunPlan; a dataset "
+    "must not change after its plan is sealed"
+)
+
+
+def _verify_sealed_dataset(
+    ctx: RunContext, binding: ExecutionInputBinding, *, configuration_hash: str
+) -> VerifiedDataset:
+    """The dataset consumption gate of the DPO, reward, full-parameter SFT and on-policy RL lanes.
+
+    Reads the sealed dataset ONCE, compares its sha256 with the sealed ``content_sha256`` and parses
+    those exact bytes (``training.sealed_inputs``) before the worker module is imported, so a refusal
+    precedes every heavy import, tokenizer or model load, and output directory. A missing digest or
+    file, a link, a post-plan or mid-read change, or a malformed or empty file is an
+    UNSUPPORTED_CONFIGURATION at ``dataset_verification``. The verified digest is recorded as structured
+    evidence in the stage payload (streamed to the parent and persisted in RunEvents.jsonl), and the
+    worker receives the parsed rows, never a path to reopen. Byte progress is capped so a large read
+    keeps the subprocess parent's silence timer honest without flooding the stream."""
+    from corpus_studio.training.sealed_inputs import (  # noqa: PLC0415 - torch-free
+        SealedInputError,
+        bounded_byte_progress,
+        read_verified_dataset,
+    )
+
+    ctx.emit_stage(StageMarker.dataset_verification, "reading and hashing the sealed dataset once")
+    try:
+        dataset = read_verified_dataset(
+            binding,
+            progress_callback=bounded_byte_progress(
+                lambda message: ctx.emit_stage(StageMarker.dataset_verification, message)
+            ),
+        )
+    except SealedInputError as exc:
+        raise RunnerFailure(
+            str(exc),
+            taxonomy=FailureTaxonomy.UNSUPPORTED_CONFIGURATION,
+            stage=StageMarker.dataset_verification,
+            remediation=_SEALED_DATASET_REMEDIATION,
+        ) from exc
+    ctx.emit_stage(
+        StageMarker.dataset_verification,
+        f"verified and parsed {dataset.row_count} sealed dataset rows "
+        f"(sha256 {dataset.content_sha256})",
+        payload={
+            "content_sha256": dataset.content_sha256,
+            "byte_count": dataset.byte_count,
+            "row_count": dataset.row_count,
+            "execution_configuration_hash": configuration_hash,
+        },
+    )
+    return dataset
+
+
 class FullFinetuneRunner:
     """Executes a sealed full-parameter SFT run through ``training.full_finetune_trainer.run_full_finetune``
     - the full-MODEL sibling of ``TrainingRunner`` (adapter) using the same SFT data. It dispatches the
@@ -873,6 +930,9 @@ class FullFinetuneRunner:
             StageMarker.process_start,
             f"full-parameter SFT run [{self.name}]: dispatching the full-parameter worker",
         )
+        dataset = _verify_sealed_dataset(
+            ctx, execution.inputs.dataset, configuration_hash=execution.configuration_hash
+        )
         from corpus_studio.training.full_finetune_trainer import (  # noqa: PLC0415
             FullFinetuneError,
             run_full_finetune,
@@ -880,7 +940,7 @@ class FullFinetuneRunner:
 
         try:
             result = run_full_finetune(
-                execution, output_dir=str(scoped_output), cpu_toy=self.cpu_toy
+                execution, dataset=dataset, output_dir=str(scoped_output), cpu_toy=self.cpu_toy
             )
         except FullFinetuneError as exc:
             raise RunnerFailure(
@@ -955,13 +1015,16 @@ class PreferenceRunner:
             StageMarker.process_start,
             f"preference (DPO) run [{self.name}]: dispatching the config-consuming worker",
         )
+        dataset = _verify_sealed_dataset(
+            ctx, execution.inputs.dataset, configuration_hash=execution.configuration_hash
+        )
         from corpus_studio.training.preference_worker import (  # noqa: PLC0415
             PreferenceWorkerError,
             run_preference,
         )
 
         try:
-            result = run_preference(execution, output_dir=str(scoped_output))
+            result = run_preference(execution, dataset=dataset, output_dir=str(scoped_output))
         except PreferenceWorkerError as exc:
             raise RunnerFailure(
                 str(exc),
@@ -1035,13 +1098,16 @@ class RewardRunner:
             StageMarker.process_start,
             f"reward-model run [{self.name}]: dispatching the config-consuming worker",
         )
+        dataset = _verify_sealed_dataset(
+            ctx, execution.inputs.dataset, configuration_hash=execution.configuration_hash
+        )
         from corpus_studio.training.reward_worker import (  # noqa: PLC0415
             RewardWorkerError,
             run_reward,
         )
 
         try:
-            result = run_reward(execution, output_dir=str(scoped_output))
+            result = run_reward(execution, dataset=dataset, output_dir=str(scoped_output))
         except RewardWorkerError as exc:
             raise RunnerFailure(
                 str(exc),
@@ -1116,13 +1182,16 @@ class RolloutRunner:
             StageMarker.process_start,
             f"on-policy RL run [{self.name}]: dispatching the config-consuming worker",
         )
+        dataset = _verify_sealed_dataset(
+            ctx, execution.inputs.dataset, configuration_hash=execution.configuration_hash
+        )
         from corpus_studio.training.rollout_worker import (  # noqa: PLC0415
             RolloutWorkerError,
             run_rollout,
         )
 
         try:
-            result = run_rollout(execution, output_dir=str(scoped_output))
+            result = run_rollout(execution, dataset=dataset, output_dir=str(scoped_output))
         except RolloutWorkerError as exc:
             raise RunnerFailure(
                 str(exc),

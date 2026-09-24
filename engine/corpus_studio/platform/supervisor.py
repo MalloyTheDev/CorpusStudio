@@ -243,8 +243,16 @@ class RunContext:
         self._sink(event)
         return event
 
-    def emit_stage(self, marker: StageMarker, message: str | None = None) -> RunEvent:
-        return self._event("stage", stage=marker, message=message)
+    def emit_stage(
+        self,
+        marker: StageMarker,
+        message: str | None = None,
+        *,
+        payload: dict[str, Any] | None = None,
+    ) -> RunEvent:
+        """Emit a stage event. ``payload`` carries structured evidence for that stage (for example the
+        digest of the dataset bytes a worker verified and consumed) on the durable event stream."""
+        return self._event("stage", stage=marker, message=message, payload=payload)
 
     def emit_metric(
         self,

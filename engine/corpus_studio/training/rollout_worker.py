@@ -9,6 +9,10 @@ provenance-bound nf4 SEQ_CLS reward model (served, inference-only) that scores e
 with ``trust_remote_code`` honored from the seal (audit F1). The KL reference is the frozen policy base via
 ``disable_adapter`` (no third model).
 
+The prompts are the rows the ``RolloutRunner`` parsed from its single verified read of the sealed dataset
+(``training.sealed_inputs``: one stable read, sha256 compared with the seal, the same bytes parsed); the
+worker accepts only rows bound to its own sealed binding and never reopens the dataset path.
+
 ``torch`` is lazy-imported inside ``run_rollout``; the training path is ``# pragma: no cover`` (proven by a
 GPU run). Only the small pure helper is base-gate tested."""
 
@@ -16,12 +20,15 @@ from __future__ import annotations
 
 import types
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from corpus_studio.platform.contracts import (
     ResolvedRolloutExecutionConfiguration,
     RolloutSuccessEvidence,
 )
+
+if TYPE_CHECKING:
+    from corpus_studio.training.sealed_inputs import VerifiedDataset
 
 
 class RolloutWorkerError(RuntimeError):
@@ -54,12 +61,28 @@ def concrete_rollout_max_steps(
 def run_rollout(  # pragma: no cover - optional training-stack integration; proven by a GPU run
     execution: ResolvedRolloutExecutionConfiguration,
     *,
+    dataset: VerifiedDataset,
     output_dir: str | None = None,
 ) -> RolloutRunResult:
     """Load the sealed nf4 policy (+ LoRA) and the provenance-bound served reward model, format the sealed
     chat prompts, hold out a deterministic seeded split, train via ``run_rollout_training`` (GRPO), assemble
     the formal execution evidence, save the policy adapter, measure the held-out mean-reward LIFT + max KL,
     and seal the proposed success evidence. Refuses ``cpu_toy`` (nf4 requires CUDA)."""
+    # Rows come only from the runner's single verified read of the sealed dataset (the bytes whose sha256
+    # matched the seal). The mutable dataset path is never reopened here, and the binding is checked
+    # before anything heavy is imported or loaded.
+    from corpus_studio.training.sealed_inputs import (  # noqa: PLC0415
+        SealedInputError,
+        require_verified_dataset,
+    )
+
+    try:
+        rows = list(require_verified_dataset(dataset, execution.inputs.dataset).rows)
+    except SealedInputError as exc:
+        raise RolloutWorkerError(str(exc)) from exc
+    if not rows:
+        raise RolloutWorkerError("the sealed rollout prompt dataset is empty")
+
     from pathlib import Path
 
     import torch
@@ -77,7 +100,6 @@ def run_rollout(  # pragma: no cover - optional training-stack integration; prov
         BitsAndBytesConfig,
     )
 
-    from corpus_studio.importers.jsonl_importer import read_jsonl  # noqa: PLC0415
     from corpus_studio.platform.enums import StageMarker  # noqa: PLC0415
     from corpus_studio.platform.objectives import get_objective  # noqa: PLC0415
     from corpus_studio.training.optimizer_config import build_torch_optimizer  # noqa: PLC0415
@@ -131,10 +153,7 @@ def run_rollout(  # pragma: no cover - optional training-stack integration; prov
     seq_len = execution.sequence.max_sequence_len
     max_prompt_length = execution.experience.max_prompt_length
 
-    # --- data: chat prompts from the sealed ExperienceSource dataset binding ---
-    rows = list(read_jsonl(Path(execution.inputs.dataset.location)))
-    if not rows:
-        raise RolloutWorkerError("the sealed rollout prompt dataset is empty")
+    # --- data: chat prompts from the sealed ExperienceSource dataset binding (verified rows) ---
     base_model = execution.inputs.model.location
     tokenizer = AutoTokenizer.from_pretrained(
         base_model, trust_remote_code=execution.trust_remote_code

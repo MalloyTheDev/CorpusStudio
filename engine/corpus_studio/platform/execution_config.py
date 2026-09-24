@@ -39,6 +39,7 @@ _FORMATTER_IDENTITIES = {
     "rollout": "corpus-studio:rollout-generation-prompt-v1",
 }
 _RUNTIME_ID = re.compile(r"^[A-Za-z0-9._-]+$")
+_STABLE_READ_CHUNK_BYTES = 1024 * 1024
 
 
 class ExecutionConfigurationError(ValueError):
@@ -653,14 +654,25 @@ def _stable_file_read(
                 raise ExecutionConfigurationError(
                     f"execution input was replaced while opening: {candidate}"
                 )
+            # Read exactly the size observed at open, never "until EOF": a writer that keeps appending
+            # would otherwise hold the reader (and the captured buffer) for as long as it writes. Any
+            # byte beyond that size, or a short read, means the file changed while it was hashed.
+            expected_size = opened_before.st_size
             bytes_read = 0
-            while chunk := handle.read(1024 * 1024):
+            while bytes_read < expected_size:
+                chunk = handle.read(min(_STABLE_READ_CHUNK_BYTES, expected_size - bytes_read))
+                if not chunk:
+                    break
                 digest.update(chunk)
                 if captured is not None:
                     captured.extend(chunk)
                 bytes_read += len(chunk)
                 if progress_callback is not None:
-                    progress_callback(bytes_read, opened_before.st_size)
+                    progress_callback(bytes_read, expected_size)
+            if bytes_read != expected_size or handle.read(1):
+                raise ExecutionConfigurationError(
+                    f"execution input changed while hashing: {candidate}"
+                )
             opened_after = os.fstat(handle.fileno())
         after = candidate.stat()
     except OSError as exc:

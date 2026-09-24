@@ -35,6 +35,7 @@ from corpus_studio.platform.artifacts import build_artifact_manifest
 from corpus_studio.platform.common import HashRef, MemoryMetrics, Ref
 from corpus_studio.platform.contracts import (
     ArtifactManifest,
+    ExecutionInputBinding,
     FailureRecord,
     RunManifest,
     RunPlan,
@@ -47,9 +48,13 @@ from corpus_studio.platform.execution_config import (
     SUCCESS_EVIDENCE_FIELDS,
     ExecutionConfigurationError,
     execution_configuration_hash_for,
+    full_finetune_execution_configuration_hash_for,
+    preference_execution_configuration_hash_for,
     required_runner_lane,
     resolved_execution_binding,
+    reward_execution_configuration_hash_for,
     run_scoped_training_output,
+    stable_file_sha256,
 )
 from corpus_studio.platform.planner import (
     compute_plan_hash,
@@ -173,6 +178,49 @@ def _binding(plan: RunPlan):
     binding = resolved_execution_binding(plan)
     assert binding is not None
     return binding
+
+
+# The dataset-consuming lanes whose runner verifies the sealed dataset bytes before dispatch.
+_DATASET_CONFIG_HASHERS = {
+    "resolved_preference_execution": preference_execution_configuration_hash_for,
+    "resolved_reward_execution": reward_execution_configuration_hash_for,
+    "resolved_full_finetune_execution": full_finetune_execution_configuration_hash_for,
+}
+
+
+def _with_sealed_dataset(plan: RunPlan, directory: Path) -> RunPlan:
+    """Rebind a dataset-consuming lane to a real local dataset file and reseal the plan.
+
+    Those runners read and hash the sealed dataset before they dispatch the worker, so an end-to-end
+    run needs bytes that match the seal. The binding keeps its logical ``ref`` (the RunPlan requires
+    it to equal ``dataset_ref``); only the location, source and content digest change."""
+
+    binding = _binding(plan)
+    hasher = _DATASET_CONFIG_HASHERS.get(binding.plan_field)
+    if hasher is None:
+        return plan
+    directory.mkdir(parents=True, exist_ok=True)
+    data = directory / "sealed-dataset.jsonl"
+    data.write_text(
+        '{"prompt": "p", "chosen": "a", "rejected": "b", "instruction": "i", "output": "o"}\n',
+        encoding="utf-8",
+    )
+    config = binding.config
+    dataset = ExecutionInputBinding.model_validate(
+        {
+            **config.inputs.dataset.model_dump(mode="json"),
+            "source": "local_file",
+            "location": str(data),
+            "content_sha256": stable_file_sha256(data),
+        }
+    )
+    rebound = config.model_copy(
+        update={"inputs": config.inputs.model_copy(update={"dataset": dataset})}
+    )
+    rebound = rebound.model_copy(update={"configuration_hash": hasher(rebound)})
+    payload = plan.model_dump(mode="json")
+    payload[binding.plan_field] = rebound.model_dump(mode="json")
+    return _reseal(payload)
 
 
 def _manifest(plan: RunPlan, rid: str, *, state: str = "succeeded", **extra: Any) -> RunManifest:
@@ -554,7 +602,7 @@ def test_parent_requires_a_null_accepted_hash_for_an_echo_plan():
 
 @pytest.mark.parametrize("lane", sorted(EXECUTABLE_LANES))
 def test_genuine_variant_success_is_admitted_through_the_real_worker(tmp_path, lane):
-    plan = _plan(lane, tmp_path / "output-root")
+    plan = _with_sealed_dataset(_plan(lane, tmp_path / "output-root"), tmp_path / "data")
     runner = required_runner_lane(plan)
     assert runner == EXECUTABLE_LANES[lane]
     records = tmp_path / "records"
@@ -585,6 +633,18 @@ def test_genuine_variant_success_is_admitted_through_the_real_worker(tmp_path, l
     )
     assert tripwire.attempts == []
     assert not {name.split(".")[0] for name in set(sys.modules) - before} & HEAVY_MODULES
+    if _binding(plan).plan_field in _DATASET_CONFIG_HASHERS:
+        # The child's runner verified the sealed dataset bytes and the digest reached the parent.
+        verified = [
+            event
+            for event in result.events
+            if event.stage == StageMarker.dataset_verification and event.payload
+        ]
+        assert verified
+        assert (
+            verified[-1].payload["content_sha256"]
+            == _binding(plan).config.inputs.dataset.content_sha256
+        )
     field = EVIDENCE_FIELD[lane]
     assert getattr(result.manifest, field) is not None
     assert all(

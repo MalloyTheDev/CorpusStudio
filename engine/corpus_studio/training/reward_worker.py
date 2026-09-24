@@ -6,6 +6,10 @@ measure the held-out pairwise ranking accuracy (the PROMOTION GATE), and seal a 
 the sealed config DIRECTLY (no lossy mirror), and the ``RewardRunner`` + supervisor independently re-verify
 before the evidence is admitted.
 
+The preference pairs are the rows the ``RewardRunner`` parsed from its single verified read of the sealed
+dataset (``training.sealed_inputs``: one stable read, sha256 compared with the seal, the same bytes
+parsed); the worker accepts only rows bound to its own sealed binding and never reopens the dataset path.
+
 A reward model is CHEAPER than DPO: no reference model, no [seq x vocab] log-prob. The randomly-initialized
 score head trains alongside the LoRA adapter - PEFT keeps it trainable because the adapter is sealed
 ``task_type=SEQ_CLS`` - and both are saved into the ``reward_model`` artifact family.
@@ -17,12 +21,15 @@ from __future__ import annotations
 
 import types
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from corpus_studio.platform.contracts import (
     ResolvedRewardExecutionConfiguration,
     RewardSuccessEvidence,
 )
+
+if TYPE_CHECKING:
+    from corpus_studio.training.sealed_inputs import VerifiedDataset
 
 
 class RewardWorkerError(RuntimeError):
@@ -55,6 +62,7 @@ def concrete_reward_max_steps(
 def run_reward(  # pragma: no cover - optional training-stack integration; proven by a GPU run
     execution: ResolvedRewardExecutionConfiguration,
     *,
+    dataset: VerifiedDataset,
     output_dir: str | None = None,
 ) -> RewardRunResult:
     """Load the sealed nf4 SEQ_CLS base + LoRA score head, tokenize the sealed preference pairs, hold out a
@@ -62,6 +70,21 @@ def run_reward(  # pragma: no cover - optional training-stack integration; prove
     execution evidence, save the adapter + score head, measure held-out pairwise accuracy, and seal the
     proposed success evidence. Refuses ``cpu_toy`` (nf4 requires CUDA; a CPU reward smoke path is a
     follow-up)."""
+    # Rows come only from the runner's single verified read of the sealed dataset (the bytes whose sha256
+    # matched the seal). The mutable dataset path is never reopened here, and the binding is checked
+    # before anything heavy is imported or loaded.
+    from corpus_studio.training.sealed_inputs import (  # noqa: PLC0415
+        SealedInputError,
+        require_verified_dataset,
+    )
+
+    try:
+        rows = list(require_verified_dataset(dataset, execution.inputs.dataset).rows)
+    except SealedInputError as exc:
+        raise RewardWorkerError(str(exc)) from exc
+    if not rows:
+        raise RewardWorkerError("the sealed preference dataset is empty")
+
     from pathlib import Path
 
     import torch
@@ -77,7 +100,6 @@ def run_reward(  # pragma: no cover - optional training-stack integration; prove
         BitsAndBytesConfig,
     )
 
-    from corpus_studio.importers.jsonl_importer import read_jsonl  # noqa: PLC0415
     from corpus_studio.platform.enums import StageMarker  # noqa: PLC0415
     from corpus_studio.platform.objectives import get_objective  # noqa: PLC0415
     from corpus_studio.training.optimizer_config import build_torch_optimizer  # noqa: PLC0415
@@ -109,10 +131,7 @@ def run_reward(  # pragma: no cover - optional training-stack integration; prove
         raise RewardWorkerError(f"unknown sealed reward objective {execution.objective_ref.id!r}")
     out = Path(output_dir or execution.output_dir)
 
-    # --- data: preference pairs from the sealed PreferenceDataPolicy dataset binding ---
-    rows = list(read_jsonl(Path(execution.inputs.dataset.location)))
-    if not rows:
-        raise RewardWorkerError("the sealed preference dataset is empty")
+    # --- data: preference pairs from the sealed PreferenceDataPolicy dataset binding (verified rows) ---
     base_model = execution.inputs.model.location
     # SECURITY: honor the sealed trust_remote_code (Literal[False]) explicitly - never execute a downloaded
     # repo's custom code - exactly as the SFT trainer + merge do; do not rely on the library default.

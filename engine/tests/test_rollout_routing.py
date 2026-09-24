@@ -4,6 +4,8 @@ routed run (execute_run -> RolloutRunner -> run_rollout -> independent re-verify
 the promoting wheel, so it is proven by the S5b-6 GPU run; here the dispatch is exercised with a fake
 worker. On-policy RL stays gated upstream (required_runner_lane still refuses) until that run promotes it."""
 
+import json
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -18,6 +20,8 @@ from corpus_studio.platform.contracts import (
     RolloutSuccessEvidence,
     TrainableStateChangeEvidence,
 )
+from corpus_studio.platform.enums import FailureTaxonomy, StageMarker
+from corpus_studio.platform.execution_config import local_input_binding
 from corpus_studio.platform.runners import RolloutRunner, build_lane_runner
 from corpus_studio.platform.supervisor import (
     ProducedArtifact,
@@ -150,34 +154,54 @@ class _RecordingCtx:
         self.rollout_success_evidence = None
         self.measured_peak = None
         self.stages: list[str] = []
+        self.payloads: list[dict] = []
         self.artifacts: list[object] = []
 
-    def emit_stage(self, _marker, message: str) -> None:
+    def emit_stage(self, _marker, message: str, *, payload=None) -> None:
         self.stages.append(message)
+        if payload is not None:
+            self.payloads.append(payload)
 
     def emit_artifact(self, artifact) -> None:
         self.artifacts.append(artifact)
 
 
-def _rollout_execution() -> SimpleNamespace:
-    return SimpleNamespace(output_dir="/tmp/out", output_layout="run_scoped_v1")
+_PROMPT = {"messages": [{"role": "user", "content": "Say hi."}]}
 
 
-def test_rollout_runner_dispatches_and_reports_worker_evidence(monkeypatch) -> None:
+def _rollout_execution(tmp_path) -> SimpleNamespace:
+    # A real sealed dataset binding: the runner verifies these bytes before it dispatches the worker.
+    dataset = tmp_path / "prompts.jsonl"
+    dataset.write_text(json.dumps(_PROMPT) + "\n", encoding="utf-8")
+    binding = local_input_binding(
+        kind="dataset", location=str(dataset), ref_id="dataset", directory=False
+    )
+    return SimpleNamespace(
+        output_dir="/tmp/out",
+        output_layout="run_scoped_v1",
+        inputs=SimpleNamespace(dataset=binding),
+        configuration_hash="e" * 64,
+    )
+
+
+def test_rollout_runner_dispatches_and_reports_worker_evidence(monkeypatch, tmp_path) -> None:
     import corpus_studio.platform.execution_config as exec_cfg
     import corpus_studio.training.rollout_worker as rollout_worker
 
     success = _success()
-    monkeypatch.setattr(
-        rollout_worker, "run_rollout",
-        lambda execution, output_dir=None: SimpleNamespace(
-            output_dir=output_dir, success_evidence=success
-        ),
-    )
+
+    def _fake_run_rollout(execution, *, dataset, output_dir=None):
+        # the worker receives the rows parsed from the verified sealed bytes, never a path to reopen
+        assert dataset.content_sha256 == execution.inputs.dataset.content_sha256
+        assert dataset.rows == (_PROMPT,)
+        return SimpleNamespace(output_dir=output_dir, success_evidence=success)
+
+    monkeypatch.setattr(rollout_worker, "run_rollout", _fake_run_rollout)
     monkeypatch.setattr(exec_cfg, "run_scoped_training_output", lambda execution, run_id, leaf="adapter": "/tmp/out/runs/run-x/artifacts/adapter")
     monkeypatch.setattr(exec_cfg, "verify_run_scoped_output_path", lambda *a, **k: None)
 
-    ctx = _RecordingCtx(_rollout_execution())
+    execution = _rollout_execution(tmp_path)
+    ctx = _RecordingCtx(execution)
     runner = RolloutRunner(memory_sampler=lambda: None)
     produced = runner.run(ctx)  # type: ignore[arg-type]
 
@@ -185,18 +209,40 @@ def test_rollout_runner_dispatches_and_reports_worker_evidence(monkeypatch) -> N
     assert len(produced) == 1 and produced[0].kind == "adapter"
     assert produced[0].artifact_id.startswith("run-x-adapter-")
     assert any("rollout policy adapter saved" in message for message in ctx.stages)
+    assert [payload["content_sha256"] for payload in ctx.payloads] == [
+        execution.inputs.dataset.content_sha256
+    ]
 
 
-def test_rollout_runner_maps_a_worker_error_to_a_classified_failure(monkeypatch) -> None:
+def test_rollout_runner_maps_a_worker_error_to_a_classified_failure(monkeypatch, tmp_path) -> None:
     import corpus_studio.platform.execution_config as exec_cfg
     import corpus_studio.training.rollout_worker as rollout_worker
 
-    def _boom(execution, output_dir=None):
+    def _boom(execution, *, dataset, output_dir=None):
         raise rollout_worker.RolloutWorkerError("nf4 requires CUDA")
 
     monkeypatch.setattr(rollout_worker, "run_rollout", _boom)
     monkeypatch.setattr(exec_cfg, "run_scoped_training_output", lambda execution, run_id, leaf="adapter": "/tmp/out/runs/run-x/artifacts/adapter")
 
-    ctx = _RecordingCtx(_rollout_execution())
+    ctx = _RecordingCtx(_rollout_execution(tmp_path))
     with pytest.raises(RunnerFailure, match="nf4 requires CUDA"):
         RolloutRunner(memory_sampler=lambda: None).run(ctx)  # type: ignore[arg-type]
+
+
+def test_rollout_runner_refuses_a_changed_dataset_before_dispatch(monkeypatch, tmp_path) -> None:
+    import corpus_studio.platform.execution_config as exec_cfg
+    import corpus_studio.training.rollout_worker as rollout_worker
+
+    def _must_not_dispatch(*_a, **_k):
+        pytest.fail("the rollout worker ran on a prompt set that no longer matches its seal")
+
+    monkeypatch.setattr(rollout_worker, "run_rollout", _must_not_dispatch)
+    monkeypatch.setattr(exec_cfg, "run_scoped_training_output", lambda execution, run_id, leaf="adapter": "/tmp/out/runs/run-x/artifacts/adapter")
+
+    execution = _rollout_execution(tmp_path)
+    Path(execution.inputs.dataset.location).unlink()
+    ctx = _RecordingCtx(execution)
+    with pytest.raises(RunnerFailure, match="does not exist") as refused:
+        RolloutRunner(memory_sampler=lambda: None).run(ctx)  # type: ignore[arg-type]
+    assert refused.value.taxonomy == FailureTaxonomy.UNSUPPORTED_CONFIGURATION
+    assert refused.value.stage == StageMarker.dataset_verification

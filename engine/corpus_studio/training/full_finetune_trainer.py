@@ -7,6 +7,11 @@ machinery verbatim (gradient-observation hooks, the execution tracker, the singl
 independent success-evidence build) - the ONLY differences from ``run_pretraining`` are ``from_pretrained``
 (a real base model, not a random-init config) and an SFT-formatted text dataset (not a packed corpus).
 
+The SFT rows are the ones the ``FullFinetuneRunner`` parsed from its single verified read of the sealed
+dataset (``training.sealed_inputs``: one stable read, sha256 compared with the seal, the same bytes
+parsed), so a changed dataset is refused before any weights load; the worker accepts only rows bound to
+its own sealed binding and never reopens the dataset path.
+
 ``torch`` + ``transformers`` are lazy-imported; the training loop is ``# pragma: no cover`` (proven by a
 run). The pure row-padding helper is base-gate tested. This slice is UNROUTED: ``required_runner_lane``
 still refuses a full-finetune plan at execution, so nothing runs it in production and no wheel is needed
@@ -15,12 +20,15 @@ until the (gated) promotion."""
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from corpus_studio.platform.contracts import (
     PretrainingSuccessEvidence,
     ResolvedFullFinetuneExecutionConfiguration,
 )
+
+if TYPE_CHECKING:
+    from corpus_studio.training.sealed_inputs import VerifiedDataset
 
 
 class FullFinetuneError(RuntimeError):
@@ -56,6 +64,7 @@ def pad_sft_row(input_ids: list[int], seq_len: int, pad_id: int) -> dict[str, li
 def run_full_finetune(  # pragma: no cover - torch/transformers integration; proven by a run
     execution: ResolvedFullFinetuneExecutionConfiguration,
     *,
+    dataset: VerifiedDataset,
     output_dir: str | None = None,
     cpu_toy: bool = False,
 ) -> FullFinetuneRunResult:
@@ -63,6 +72,21 @@ def run_full_finetune(  # pragma: no cover - torch/transformers integration; pro
     dataset, train full-parameter via the HF Trainer, capture the full-model execution evidence, save the
     full model, and seal the proposed success evidence. Refuses a quantized config (the contract guarantees
     unquantized, but fail closed anyway)."""
+    # Rows come only from the runner's single verified read of the sealed dataset (the bytes whose sha256
+    # matched the seal). The mutable dataset path is never reopened here, and the binding is checked
+    # before anything heavy is imported or loaded.
+    from corpus_studio.training.sealed_inputs import (  # noqa: PLC0415
+        SealedInputError,
+        require_verified_dataset,
+    )
+
+    try:
+        rows = list(require_verified_dataset(dataset, execution.inputs.dataset).rows)
+    except SealedInputError as exc:
+        raise FullFinetuneError(str(exc)) from exc
+    if not rows:
+        raise FullFinetuneError("the sealed full-finetune dataset is empty")
+
     from pathlib import Path
 
     import torch
@@ -76,7 +100,6 @@ def run_full_finetune(  # pragma: no cover - torch/transformers integration; pro
         set_seed,
     )
 
-    from corpus_studio.importers.jsonl_importer import read_jsonl
     from corpus_studio.platform.enums import StageMarker
     from corpus_studio.training.optimizer_config import hf_training_arguments_optimizer_kwargs
     from corpus_studio.training.pretraining_evidence import (
@@ -122,10 +145,8 @@ def run_full_finetune(  # pragma: no cover - torch/transformers integration; pro
             "padded; the base is unusable (a from-scratch tokenizer must declare an eos token)"
         )
 
-    # --- data: the sealed SFT rows, formatted + tokenized to fixed length (whole-sequence loss, per above) ---
-    rows = list(read_jsonl(Path(execution.inputs.dataset.location)))
-    if not rows:
-        raise FullFinetuneError("the sealed full-finetune dataset is empty")
+    # --- data: the sealed SFT rows (verified above), formatted + tokenized to fixed length (whole-sequence
+    # loss, per above) ---
     seq_len = execution.sequence.max_sequence_len
     built = [
         pad_sft_row(
@@ -138,7 +159,8 @@ def run_full_finetune(  # pragma: no cover - torch/transformers integration; pro
         )
         for row in rows
     ]
-    dataset = Dataset.from_list(built)
+    # Named apart from the ``dataset`` parameter (the verified sealed rows) so the two never blur.
+    train_dataset = Dataset.from_list(built)
 
     def _collate(features: list[dict[str, Any]]) -> dict[str, Any]:
         return {
@@ -195,7 +217,7 @@ def run_full_finetune(  # pragma: no cover - torch/transformers integration; pro
         gradient_checkpointing=execution.gradient_checkpointing and not cpu_toy,
     )
     trainer = Trainer(
-        model=model, args=arguments, train_dataset=dataset,
+        model=model, args=arguments, train_dataset=train_dataset,
         data_collator=_collate, callbacks=[_EvidenceCallback()],
     )
     train_output = trainer.train()

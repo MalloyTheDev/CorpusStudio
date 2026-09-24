@@ -5,18 +5,25 @@ formal :class:`PreferenceExecutionEvidence` via the #814 tracker, save the PEFT 
 the sealed config DIRECTLY (no lossy mirror), and the ``PreferenceRunner`` + supervisor independently
 re-verify before the evidence is admitted.
 
+The preference pairs are the rows the ``PreferenceRunner`` parsed from its single verified read of the
+sealed dataset (``training.sealed_inputs``: one stable read, sha256 compared with the seal, the same bytes
+parsed); the worker accepts only rows bound to its own sealed binding and never reopens the dataset path.
+
 ``torch`` is lazy-imported inside ``run_preference``; the training path is ``# pragma: no cover`` (proven by
 a GPU run). Only the small pure helpers are base-gate tested."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from corpus_studio.platform.contracts import (
     PreferenceSuccessEvidence,
     ResolvedPreferenceExecutionConfiguration,
 )
+
+if TYPE_CHECKING:
+    from corpus_studio.training.sealed_inputs import VerifiedDataset
 
 
 class PreferenceWorkerError(RuntimeError):
@@ -59,11 +66,27 @@ def concrete_max_steps(execution: ResolvedPreferenceExecutionConfiguration, pair
 def run_preference(  # pragma: no cover - optional training-stack integration; proven by a GPU run
     execution: ResolvedPreferenceExecutionConfiguration,
     *,
+    dataset: VerifiedDataset,
     output_dir: str | None = None,
 ) -> PreferenceRunResult:
     """Load the sealed nf4 base + LoRA adapter, tokenize the sealed preference pairs, train via
     ``run_dpo_training``, assemble the formal execution evidence, save the adapter, and seal the proposed
     success evidence. Refuses ``cpu_toy`` (nf4 requires CUDA; a CPU DPO smoke path is a follow-up)."""
+    # Rows come only from the runner's single verified read of the sealed dataset (the bytes whose sha256
+    # matched the seal). The mutable dataset path is never reopened here, and the binding is checked
+    # before anything heavy is imported or loaded.
+    from corpus_studio.training.sealed_inputs import (  # noqa: PLC0415
+        SealedInputError,
+        require_verified_dataset,
+    )
+
+    try:
+        rows = list(require_verified_dataset(dataset, execution.inputs.dataset).rows)
+    except SealedInputError as exc:
+        raise PreferenceWorkerError(str(exc)) from exc
+    if not rows:
+        raise PreferenceWorkerError("the sealed preference dataset is empty")
+
     import types
     from pathlib import Path
 
@@ -80,7 +103,6 @@ def run_preference(  # pragma: no cover - optional training-stack integration; p
         BitsAndBytesConfig,
     )
 
-    from corpus_studio.importers.jsonl_importer import read_jsonl  # noqa: PLC0415
     from corpus_studio.platform.enums import StageMarker  # noqa: PLC0415
     from corpus_studio.platform.objectives import get_objective  # noqa: PLC0415
     from corpus_studio.training.pretraining_evidence import (  # noqa: PLC0415
@@ -110,10 +132,7 @@ def run_preference(  # pragma: no cover - optional training-stack integration; p
         raise PreferenceWorkerError(f"unknown sealed preference objective {execution.objective_ref.id!r}")
     out = Path(output_dir or execution.output_dir)
 
-    # --- data: preference pairs from the sealed PreferenceDataPolicy dataset binding ---
-    rows = list(read_jsonl(Path(execution.inputs.dataset.location)))
-    if not rows:
-        raise PreferenceWorkerError("the sealed preference dataset is empty")
+    # --- data: preference pairs from the sealed PreferenceDataPolicy dataset binding (verified rows) ---
     base_model = execution.inputs.model.location
     # SECURITY: honor the sealed trust_remote_code (Literal[False]) explicitly - never execute a downloaded
     # repo's custom code - exactly as the SFT trainer + merge do; do not rely on the library default.
