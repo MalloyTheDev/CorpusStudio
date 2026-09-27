@@ -17,6 +17,7 @@ across verbatim as text.
 import csv
 import json
 import os
+import stat
 import tempfile
 from collections.abc import Iterator
 from dataclasses import dataclass
@@ -111,6 +112,22 @@ def read_tabular(path: Path) -> Iterator[dict[str, str]]:
             yield row
 
 
+def _match_output_mode(tmp_path: Path, output_path: Path) -> None:
+    """Give ``tmp_path`` the permissions ``output_path`` would normally have.
+
+    ``tempfile.mkstemp`` always creates its file mode ``0600``; without this, the
+    atomic ``os.replace`` below would silently narrow a pre-existing output's mode,
+    or a new output's umask-derived default, down to owner-only.
+    """
+    if output_path.exists():
+        mode = stat.S_IMODE(output_path.stat().st_mode)
+    else:
+        umask = os.umask(0)
+        os.umask(umask)
+        mode = 0o666 & ~umask
+    os.chmod(tmp_path, mode)
+
+
 @dataclass(frozen=True)
 class TabularConversion:
     """Result of converting a tabular file to a staging JSONL."""
@@ -146,6 +163,7 @@ def convert_tabular_to_jsonl(input_path: Path, output_path: Path) -> TabularConv
                     columns = list(row.keys())
                 out.write(json.dumps(row, ensure_ascii=False) + "\n")
                 rows_converted += 1
+        _match_output_mode(tmp_path, output_path)
         os.replace(tmp_path, output_path)
     finally:
         tmp_path.unlink(missing_ok=True)
