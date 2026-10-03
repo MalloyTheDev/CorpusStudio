@@ -21,6 +21,11 @@ from pathlib import Path
 from typing import Any, get_args
 
 import pytest
+# The detection schema fixture is shared with the validation suite. Imported by BARE module name,
+# as the other cross-test imports here are: pytest's prepend import mode puts tests/ on sys.path,
+# but engine/ is only there under `python -m pytest`, so a `tests.` prefix breaks the bare `pytest`
+# the CI job runs.
+from test_detection_schema_validation import DETECTION_SCHEMA
 from typer.testing import CliRunner
 
 from corpus_studio.cli import app
@@ -39,8 +44,6 @@ from corpus_studio.quality.basic_quality import (
 from corpus_studio.reporting.debt_report import build_debt_report, render_debt_report_markdown
 from corpus_studio.schemas.base import DatasetSchema, FieldType
 from corpus_studio.schemas.registry import load_builtin_schema
-
-from tests.test_detection_schema_validation import DETECTION_SCHEMA
 
 runner = CliRunner()
 
