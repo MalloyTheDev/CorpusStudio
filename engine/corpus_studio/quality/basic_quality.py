@@ -419,8 +419,25 @@ def cluster_synthetic_pattern_issues(
 # would be harmful to ship into training data, not to be an exhaustive scanner.
 _PII_EMAIL_RE = re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")
 _PII_AWS_KEY_RE = re.compile(r"\bAKIA[0-9A-Z]{16}\b")
+# PEM / armor labels of private-key blocks (PKCS#1 RSA, SEC1 EC, DSA, OpenSSH, PKCS#8 plain and
+# ENCRYPTED, and PGP, whose armor label ends in " BLOCK").
+_PEM_PRIVATE_KEY_LABEL = r"(?:(?:RSA|EC|DSA|OPENSSH|ENCRYPTED|PGP) )?PRIVATE KEY(?: BLOCK)?"
+# One match spans the WHOLE key, because redaction masks exactly what matches (in the same joined
+# row text _detect_pii scans, so a key split across fields is one match): a header-only match would
+# mask the BEGIN line and leave the key body and END line in the deliverable.
+#   1. A BEGIN marker through the first END marker; with no END marker, through the end of the text
+#      (an unterminated block is still key material, so it must not survive by losing its footer).
+#   2. An END marker not consumed by branch 1, i.e. key material whose BEGIN marker is not in the
+#      text (a key cut off before its header, or a header masked by an earlier header-only
+#      redaction). Detecting it keeps the gate from passing on that leftover body; redaction masks
+#      the body before it.
+# Linear time: both branches start with a literal "-----", and branch 1's `.*` fallback consumes the
+# rest of the text whenever no END marker follows, so a BEGIN never rescans text another BEGIN has
+# already scanned. There are no capture groups, so findall() returns whole matches.
 _PII_PRIVATE_KEY_RE = re.compile(
-    r"-----BEGIN (?:RSA |EC |DSA |OPENSSH |PGP )?PRIVATE KEY-----"
+    rf"-----BEGIN {_PEM_PRIVATE_KEY_LABEL}-----(?:.*?-----END {_PEM_PRIVATE_KEY_LABEL}-----|.*)"
+    rf"|-----END {_PEM_PRIVATE_KEY_LABEL}-----",
+    re.DOTALL,
 )
 _PII_API_KEY_RE = re.compile(
     r"\b(?:sk|pk|rk)-[A-Za-z0-9]{16,}\b|\bxox[baprs]-[A-Za-z0-9-]{10,}\b|\bghp_[A-Za-z0-9]{20,}\b"
@@ -515,7 +532,13 @@ def _detect_pii(rows: list[dict]) -> list["PiiFinding"]:
         for kind, severity, regex, suggestion in _PII_PATTERNS:
             matches = regex.findall(text)
             if matches:
-                _record(kind, severity, suggestion, row_number, len(matches), matches[0])
+                sample = matches[0]
+                if kind == "private_key":
+                    # A private-key match is the whole block (or the rest of an unterminated one), so
+                    # sample only its "-----BEGIN/END <label>-----" marker: _mask_secret keeps the
+                    # edge characters, which must never be key body, and the sample stays short.
+                    sample = sample[: sample.index("-----", len("-----")) + len("-----")]
+                _record(kind, severity, suggestion, row_number, len(matches), sample)
 
         credit_cards = [
             digits

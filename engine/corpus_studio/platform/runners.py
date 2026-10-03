@@ -39,7 +39,10 @@ from corpus_studio.platform.supervisor import (
 from corpus_studio.platform.watchdog import MemorySampler, RunWatchdog, sample_gpu_memory
 
 if TYPE_CHECKING:
-    from corpus_studio.training.trainer import TrainResult, TrainRunConfig
+    from corpus_studio.platform.contracts import ExecutionInputBinding
+    from corpus_studio.platform.execution_config import LoaderLane, LoaderLaneExecution
+    from corpus_studio.training.sealed_inputs import VerifiedDataset
+    from corpus_studio.training.trainer import TrainerError, TrainResult, TrainRunConfig
 
     TrainerFn = Callable[..., TrainResult]
 
@@ -151,6 +154,66 @@ def _classify_progress_name(name: str) -> tuple[StageMarker | None, bool]:
         return None, name in _INTENTIONAL_PROGRESS_NOTES
 
 
+def _trainer_failure(exc: TrainerError, *, stage: StageMarker) -> RunnerFailure:
+    """Classify a first-party trainer refusal exactly as the adapter SFT lane does: a placement
+    deviation, a classified evidence failure at its own stage, an unavailable or drifted runtime, or
+    (for any other trainer refusal) a configuration the worker cannot honor. Shared by every lane that
+    lowers its sealed loader policy through the trainer helpers."""
+    from corpus_studio.training.trainer import (  # noqa: PLC0415 - import-light trainer module
+        ExecutionPlacementDeviation,
+        TrainerEnvironmentError,
+        TrainingEvidenceError,
+    )
+
+    if isinstance(exc, ExecutionPlacementDeviation):
+        return RunnerFailure(
+            str(exc),
+            taxonomy=FailureTaxonomy.UNSUPPORTED_CONFIGURATION,
+            stage=StageMarker.placement_deviation,
+            remediation="regenerate the RunPlan or use a backend that enforces its device map",
+        )
+    if isinstance(exc, TrainingEvidenceError):
+        return RunnerFailure(
+            str(exc), taxonomy=exc.taxonomy, stage=exc.stage, remediation=exc.remediation
+        )
+    if isinstance(exc, TrainerEnvironmentError):
+        return RunnerFailure(
+            str(exc),
+            taxonomy=FailureTaxonomy.ENVIRONMENT_FAILURE,
+            stage=stage,
+            remediation="run 'corpus-studio train-check' and verify the sealed environment",
+        )
+    # Unclassified trainer refusals are configuration deviations. Actual missing runtime paths use
+    # RunnerFailure/TrainerEnvironmentError explicitly; never label every semantic evidence failure as
+    # an environment problem.
+    return RunnerFailure(
+        str(exc),
+        taxonomy=FailureTaxonomy.UNSUPPORTED_CONFIGURATION,
+        stage=stage,
+        remediation="preserve the failed run and inspect the sealed execution contract",
+    )
+
+
+class _LaneStages:
+    """The ``stage_callback`` handed to a DPO, reward, full-parameter SFT or on-policy RL worker: a typed
+    progress name becomes a stage RunEvent (and the last reached stage, which a trainer refusal is
+    attributed to); a known intentional note or an unrecognized name becomes a log, exactly as on the
+    adapter SFT lane."""
+
+    def __init__(self, ctx: RunContext) -> None:
+        self._ctx = ctx
+        self.last = StageMarker.process_start
+
+    def __call__(self, name: str, message: str) -> None:
+        marker, intentional_note = _classify_progress_name(name)
+        if marker is None:
+            prefix = "" if intentional_note else "unrecognized progress stage "
+            self._ctx.emit_log(f"{prefix}{name}: {message}")
+            return
+        self.last = marker
+        self._ctx.emit_stage(marker, message)
+
+
 class TrainingRunner:
     """Executes a real training run through ``training.trainer.run_training`` under the supervisor.
 
@@ -211,12 +274,7 @@ class TrainingRunner:
         trainer_fn, backend_label = self._resolve_trainer(ctx.plan)
         # The manifest target reflects the backend that actually ran ("cpu_toy" for the smoke path).
         self.name = backend_label
-        from corpus_studio.training.trainer import (  # noqa: PLC0415
-            ExecutionPlacementDeviation,
-            TrainingEvidenceError,
-            TrainerEnvironmentError,
-            TrainerError,
-        )
+        from corpus_studio.training.trainer import TrainerError  # noqa: PLC0415
 
         ctx.emit_stage(
             StageMarker.process_start,
@@ -397,37 +455,8 @@ class TrainingRunner:
                 )
         except _CancelTraining:
             raise RunCancelled from None
-        except ExecutionPlacementDeviation as exc:
-            raise RunnerFailure(
-                str(exc),
-                taxonomy=FailureTaxonomy.UNSUPPORTED_CONFIGURATION,
-                stage=StageMarker.placement_deviation,
-                remediation="regenerate the RunPlan or use a backend that enforces its device map",
-            ) from exc
-        except TrainingEvidenceError as exc:
-            raise RunnerFailure(
-                str(exc),
-                taxonomy=exc.taxonomy,
-                stage=exc.stage,
-                remediation=exc.remediation,
-            ) from exc
-        except TrainerEnvironmentError as exc:
-            raise RunnerFailure(
-                str(exc),
-                taxonomy=FailureTaxonomy.ENVIRONMENT_FAILURE,
-                stage=last_stage,
-                remediation="run 'corpus-studio train-check' and verify the sealed environment",
-            ) from exc
         except TrainerError as exc:
-            # Unclassified trainer refusals are configuration deviations. Actual missing runtime
-            # paths use RunnerFailure/TrainerEnvironmentError explicitly; never label every semantic
-            # evidence failure as an environment problem.
-            raise RunnerFailure(
-                str(exc),
-                taxonomy=FailureTaxonomy.UNSUPPORTED_CONFIGURATION,
-                stage=last_stage,
-                remediation="preserve the failed run and inspect the sealed execution contract",
-            ) from exc
+            raise _trainer_failure(exc, stage=last_stage) from exc
         except Exception as exc:  # noqa: BLE001 — classify the runtime failure, don't leak it as FAIL
             taxonomy, remediation = classify_training_error(exc)
             raise RunnerFailure(
@@ -722,7 +751,8 @@ class TrainingRunner:
         # lane, whose worker does not yet write checkpoints.
         try:
             # The trainer owns one stable read/hash/capture of the dataset and parses those exact
-            # bytes. Revalidating it here would create a redundant full-corpus pass.
+            # bytes (training.sealed_inputs, shared with the non-SFT lanes' _verify_sealed_dataset).
+            # Revalidating it here would create a redundant full-corpus pass.
             verify_execution_non_dataset_inputs(execution)
             verify_execution_objective(execution, task_type=plan.task_type.value)
             config = train_config_from_resolved(execution)
@@ -838,6 +868,127 @@ class PretrainingRunner:
         return [artifact]
 
 
+_SEALED_DATASET_REMEDIATION = (
+    "restore the exact sealed dataset bytes, or fix the dataset and regenerate the RunPlan; a dataset "
+    "must not change after its plan is sealed"
+)
+
+
+def _verify_sealed_dataset(
+    ctx: RunContext, binding: ExecutionInputBinding, *, configuration_hash: str
+) -> VerifiedDataset:
+    """The dataset consumption gate of the DPO, reward, full-parameter SFT and on-policy RL lanes.
+
+    Reads the sealed dataset ONCE, compares its sha256 with the sealed ``content_sha256`` and parses
+    those exact bytes (``training.sealed_inputs``) before the worker module is imported, so a refusal
+    precedes every heavy import, tokenizer or model load, and output directory. A missing digest or
+    file, a link, a post-plan or mid-read change, or a malformed or empty file is an
+    UNSUPPORTED_CONFIGURATION at ``dataset_verification``. The verified digest is recorded as structured
+    evidence in the stage payload (streamed to the parent and persisted in RunEvents.jsonl), and the
+    worker receives the parsed rows, never a path to reopen. Byte progress is capped so a large read
+    keeps the subprocess parent's silence timer honest without flooding the stream."""
+    from corpus_studio.training.sealed_inputs import (  # noqa: PLC0415 - torch-free
+        SealedInputError,
+        bounded_byte_progress,
+        read_verified_dataset,
+    )
+
+    ctx.emit_stage(StageMarker.dataset_verification, "reading and hashing the sealed dataset once")
+    try:
+        dataset = read_verified_dataset(
+            binding,
+            progress_callback=bounded_byte_progress(
+                lambda message: ctx.emit_stage(StageMarker.dataset_verification, message)
+            ),
+        )
+    except SealedInputError as exc:
+        raise RunnerFailure(
+            str(exc),
+            taxonomy=FailureTaxonomy.UNSUPPORTED_CONFIGURATION,
+            stage=StageMarker.dataset_verification,
+            remediation=_SEALED_DATASET_REMEDIATION,
+        ) from exc
+    ctx.emit_stage(
+        StageMarker.dataset_verification,
+        f"verified and parsed {dataset.row_count} sealed dataset rows "
+        f"(sha256 {dataset.content_sha256})",
+        payload={
+            "content_sha256": dataset.content_sha256,
+            "byte_count": dataset.byte_count,
+            "row_count": dataset.row_count,
+            "execution_configuration_hash": configuration_hash,
+        },
+    )
+    return dataset
+
+
+_SEALED_LOADER_REMEDIATION = (
+    "restore the exact sealed model/tokenizer bytes, or regenerate the RunPlan with a model/tokenizer "
+    "identity and loader policy (placement, precision, attention) this lane's worker implements"
+)
+
+
+def _binding_evidence(binding: ExecutionInputBinding) -> dict[str, Any]:
+    return {
+        "source": binding.source,
+        "location": binding.location,
+        "resolved_revision": binding.resolved_revision,
+        "content_sha256": binding.content_sha256,
+    }
+
+
+def _admit_sealed_loader(
+    ctx: RunContext, execution: LoaderLaneExecution, *, lane: LoaderLane
+) -> None:
+    """The model/tokenizer admission gate of the DPO, reward, full-parameter SFT and on-policy RL lanes.
+
+    Before the dataset is read or the worker module imported, refuse a sealed identity or loader policy
+    the lane's worker cannot lower (``verify_loader_policy_supported``) and re-hash local model/tokenizer
+    bindings (``verify_execution_non_dataset_inputs``, the same pre-load check the adapter SFT lane
+    makes), so a post-plan change of local weights or tokenizer files is refused before any load. The
+    admitted identity is recorded as structured evidence in the ``execution_config_verified`` stage
+    payload (streamed to the parent and persisted in RunEvents.jsonl). Torch-free."""
+    from corpus_studio.platform.execution_config import (  # noqa: PLC0415 - torch-free
+        ExecutionConfigurationError,
+        verify_execution_non_dataset_inputs,
+        verify_loader_policy_supported,
+    )
+
+    try:
+        verify_loader_policy_supported(execution, lane=lane)
+        verify_execution_non_dataset_inputs(execution)
+    except ExecutionConfigurationError as exc:
+        raise RunnerFailure(
+            str(exc),
+            taxonomy=FailureTaxonomy.UNSUPPORTED_CONFIGURATION,
+            stage=StageMarker.env_loaded,
+            remediation=_SEALED_LOADER_REMEDIATION,
+        ) from exc
+    ctx.emit_stage(
+        StageMarker.execution_config_verified,
+        "verified the pinned model/tokenizer identity and the sealed loader policy "
+        f"(execution {execution.configuration_hash})",
+        payload={
+            "model": _binding_evidence(execution.inputs.model),
+            "tokenizer": _binding_evidence(execution.inputs.tokenizer),
+            "execution_configuration_hash": execution.configuration_hash,
+        },
+    )
+
+
+_FULL_FINETUNE_DATA_REMEDIATION = (
+    "split or shorten the over-length records (structure-aware chunking) and fix unrenderable rows, or "
+    "raise the sealed sequence length; to accept a lossy cut, regenerate the RunPlan with "
+    "--allow-truncation so the policy and its token coverage are sealed and recorded"
+)
+# A formatter or tokenizer failure, or a row with no ids, is not something a lossy policy can admit.
+_FULL_FINETUNE_DATA_FAILURE_REMEDIATION = (
+    "fix the rows the sealed formatter or the pinned tokenizer could not render or tokenize (the "
+    "refusal names the failure), or regenerate the RunPlan with a tokenizer and chat template that can; "
+    "a truncation policy does not change this outcome"
+)
+
+
 class FullFinetuneRunner:
     """Executes a sealed full-parameter SFT run through ``training.full_finetune_trainer.run_full_finetune``
     - the full-MODEL sibling of ``TrainingRunner`` (adapter) using the same SFT data. It dispatches the
@@ -846,10 +997,8 @@ class FullFinetuneRunner:
     before the evidence may reach the manifest. Selected only once ``dense_full_finetune`` is
     workload_verified."""
 
-    def __init__(
-        self, *, cpu_toy: bool = False, memory_sampler: MemorySampler = sample_gpu_memory
-    ) -> None:
-        self.cpu_toy = cpu_toy
+    def __init__(self, *, memory_sampler: MemorySampler = sample_gpu_memory) -> None:
+        # No cpu_toy knob: the CPU smoke path is the sealed runtime_mode, which the worker reads itself.
         self.memory_sampler = memory_sampler
         self.name = "full_finetune"
 
@@ -873,15 +1022,50 @@ class FullFinetuneRunner:
             StageMarker.process_start,
             f"full-parameter SFT run [{self.name}]: dispatching the full-parameter worker",
         )
+        _admit_sealed_loader(ctx, execution, lane="full_finetune")
+        dataset = _verify_sealed_dataset(
+            ctx, execution.inputs.dataset, configuration_hash=execution.configuration_hash
+        )
         from corpus_studio.training.full_finetune_trainer import (  # noqa: PLC0415
+            FullFinetuneDataRefusal,
             FullFinetuneError,
+            FullFinetuneTokenCoverage,
             run_full_finetune,
         )
+        from corpus_studio.training.trainer import TrainerError  # noqa: PLC0415
+
+        stages = _LaneStages(ctx)
+
+        def _record_coverage(coverage: FullFinetuneTokenCoverage) -> None:
+            # The measured token coverage (and, under a sealed lossy policy, exactly what was cut) is
+            # structured evidence on the durable event stream, bound to the execution hash, recorded
+            # before any weights load.
+            ctx.emit_stage(
+                StageMarker.truncation_analysis, coverage.summary(), payload=coverage.evidence()
+            )
 
         try:
             result = run_full_finetune(
-                execution, output_dir=str(scoped_output), cpu_toy=self.cpu_toy
+                execution,
+                dataset=dataset,
+                output_dir=str(scoped_output),
+                stage_callback=stages,
+                coverage_callback=_record_coverage,
             )
+        except FullFinetuneDataRefusal as exc:
+            # The sealed data policy refused the dataset in the pre-weight preflight: a configuration
+            # the worker cannot honor, attributed to the preflight stage it reached (the adapter SFT
+            # lane classifies the same refusal the same way), never an update failure.
+            raise RunnerFailure(
+                str(exc),
+                taxonomy=FailureTaxonomy.UNSUPPORTED_CONFIGURATION,
+                stage=stages.last,
+                remediation=(
+                    _FULL_FINETUNE_DATA_REMEDIATION
+                    if exc.policy_refusal
+                    else _FULL_FINETUNE_DATA_FAILURE_REMEDIATION
+                ),
+            ) from exc
         except FullFinetuneError as exc:
             raise RunnerFailure(
                 str(exc),
@@ -889,6 +1073,8 @@ class FullFinetuneRunner:
                 stage=StageMarker.optimizer_step,
                 remediation="preserve the failed run and inspect the first-party full-finetune worker",
             ) from exc
+        except TrainerError as exc:
+            raise _trainer_failure(exc, stage=stages.last) from exc
 
         try:
             verify_run_scoped_output_path(
@@ -955,13 +1141,21 @@ class PreferenceRunner:
             StageMarker.process_start,
             f"preference (DPO) run [{self.name}]: dispatching the config-consuming worker",
         )
+        _admit_sealed_loader(ctx, execution, lane="preference")
+        dataset = _verify_sealed_dataset(
+            ctx, execution.inputs.dataset, configuration_hash=execution.configuration_hash
+        )
         from corpus_studio.training.preference_worker import (  # noqa: PLC0415
             PreferenceWorkerError,
             run_preference,
         )
+        from corpus_studio.training.trainer import TrainerError  # noqa: PLC0415
 
+        stages = _LaneStages(ctx)
         try:
-            result = run_preference(execution, output_dir=str(scoped_output))
+            result = run_preference(
+                execution, dataset=dataset, output_dir=str(scoped_output), stage_callback=stages
+            )
         except PreferenceWorkerError as exc:
             raise RunnerFailure(
                 str(exc),
@@ -969,6 +1163,8 @@ class PreferenceRunner:
                 stage=StageMarker.optimizer_step,
                 remediation="preserve the failed run and inspect the first-party DPO worker",
             ) from exc
+        except TrainerError as exc:
+            raise _trainer_failure(exc, stage=stages.last) from exc
 
         try:
             verify_run_scoped_output_path(
@@ -1035,13 +1231,21 @@ class RewardRunner:
             StageMarker.process_start,
             f"reward-model run [{self.name}]: dispatching the config-consuming worker",
         )
+        _admit_sealed_loader(ctx, execution, lane="reward")
+        dataset = _verify_sealed_dataset(
+            ctx, execution.inputs.dataset, configuration_hash=execution.configuration_hash
+        )
         from corpus_studio.training.reward_worker import (  # noqa: PLC0415
             RewardWorkerError,
             run_reward,
         )
+        from corpus_studio.training.trainer import TrainerError  # noqa: PLC0415
 
+        stages = _LaneStages(ctx)
         try:
-            result = run_reward(execution, output_dir=str(scoped_output))
+            result = run_reward(
+                execution, dataset=dataset, output_dir=str(scoped_output), stage_callback=stages
+            )
         except RewardWorkerError as exc:
             raise RunnerFailure(
                 str(exc),
@@ -1049,6 +1253,8 @@ class RewardRunner:
                 stage=StageMarker.optimizer_step,
                 remediation="preserve the failed run and inspect the first-party reward worker",
             ) from exc
+        except TrainerError as exc:
+            raise _trainer_failure(exc, stage=stages.last) from exc
 
         try:
             verify_run_scoped_output_path(
@@ -1116,13 +1322,21 @@ class RolloutRunner:
             StageMarker.process_start,
             f"on-policy RL run [{self.name}]: dispatching the config-consuming worker",
         )
+        _admit_sealed_loader(ctx, execution, lane="rollout")
+        dataset = _verify_sealed_dataset(
+            ctx, execution.inputs.dataset, configuration_hash=execution.configuration_hash
+        )
         from corpus_studio.training.rollout_worker import (  # noqa: PLC0415
             RolloutWorkerError,
             run_rollout,
         )
+        from corpus_studio.training.trainer import TrainerError  # noqa: PLC0415
 
+        stages = _LaneStages(ctx)
         try:
-            result = run_rollout(execution, output_dir=str(scoped_output))
+            result = run_rollout(
+                execution, dataset=dataset, output_dir=str(scoped_output), stage_callback=stages
+            )
         except RolloutWorkerError as exc:
             raise RunnerFailure(
                 str(exc),
@@ -1130,6 +1344,8 @@ class RolloutRunner:
                 stage=StageMarker.optimizer_step,
                 remediation="preserve the failed run and inspect the first-party rollout worker",
             ) from exc
+        except TrainerError as exc:
+            raise _trainer_failure(exc, stage=stages.last) from exc
 
         try:
             verify_run_scoped_output_path(

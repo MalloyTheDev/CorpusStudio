@@ -5,9 +5,21 @@ held-out mean-reward LIFT under a bounded KL (the PROMOTION GATE), and seal a pr
 :class:`RolloutSuccessEvidence`. The on-policy sibling of ``reward_worker.run_reward``.
 
 Unlike the other workers this loads TWO models: the nf4 CAUSAL_LM policy (+ LoRA) that trains, and the
-provenance-bound nf4 SEQ_CLS reward model (served, inference-only) that scores each rollout. Both are loaded
-with ``trust_remote_code`` honored from the seal (audit F1). The KL reference is the frozen policy base via
-``disable_adapter`` (no third model).
+provenance-bound nf4 SEQ_CLS reward model (served, inference-only) that scores each rollout. The KL
+reference is the frozen policy base via ``disable_adapter`` (no third model).
+
+Both models and the tokenizer are loaded through ``training.sealed_loader``: the tokenizer from its OWN
+sealed binding and revision, each model with the sealed revision, safetensors-only policy, nf4
+dequantization dtype, root device and attention API, after the SDPA toggles are applied and the sealed
+kernel is probed; placement and attention are observed after each load and the policy's master dtype and
+nf4 state after PEFT attachment. ``RewardSourceRef`` names the served reward base only by location, so it
+is loaded only when it is the policy's own pinned base (the planner additionally requires the reward
+run's bindings to equal the policy's); any other reward base is refused rather than loaded at an unpinned
+identity. Training and the held-out promotion measurements run inside the exclusive sealed-kernel context.
+
+The prompts are the rows the ``RolloutRunner`` parsed from its single verified read of the sealed dataset
+(``training.sealed_inputs``: one stable read, sha256 compared with the seal, the same bytes parsed); the
+worker accepts only rows bound to its own sealed binding and never reopens the dataset path.
 
 ``torch`` is lazy-imported inside ``run_rollout``; the training path is ``# pragma: no cover`` (proven by a
 GPU run). Only the small pure helper is base-gate tested."""
@@ -16,12 +28,16 @@ from __future__ import annotations
 
 import types
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from corpus_studio.platform.contracts import (
     ResolvedRolloutExecutionConfiguration,
     RolloutSuccessEvidence,
 )
+
+if TYPE_CHECKING:
+    from corpus_studio.training.sealed_inputs import VerifiedDataset
+    from corpus_studio.training.sealed_loader import StageFn
 
 
 class RolloutWorkerError(RuntimeError):
@@ -54,12 +70,42 @@ def concrete_rollout_max_steps(
 def run_rollout(  # pragma: no cover - optional training-stack integration; proven by a GPU run
     execution: ResolvedRolloutExecutionConfiguration,
     *,
+    dataset: VerifiedDataset,
     output_dir: str | None = None,
+    stage_callback: StageFn | None = None,
 ) -> RolloutRunResult:
     """Load the sealed nf4 policy (+ LoRA) and the provenance-bound served reward model, format the sealed
     chat prompts, hold out a deterministic seeded split, train via ``run_rollout_training`` (GRPO), assemble
     the formal execution evidence, save the policy adapter, measure the held-out mean-reward LIFT + max KL,
-    and seal the proposed success evidence. Refuses ``cpu_toy`` (nf4 requires CUDA)."""
+    and seal the proposed success evidence. Refuses ``cpu_toy`` (nf4 requires CUDA), a served reward base
+    that is not the pinned policy base, and any other sealed loader value it cannot lower.
+    ``stage_callback(name, message)`` receives the loader and verification stages."""
+    # Rows come only from the runner's single verified read of the sealed dataset (the bytes whose sha256
+    # matched the seal). The mutable dataset path is never reopened here, and the binding is checked
+    # before anything heavy is imported or loaded.
+    from corpus_studio.training.sealed_inputs import (  # noqa: PLC0415
+        SealedInputError,
+        require_verified_dataset,
+    )
+
+    try:
+        rows = list(require_verified_dataset(dataset, execution.inputs.dataset).rows)
+    except SealedInputError as exc:
+        raise RolloutWorkerError(str(exc)) from exc
+    if not rows:
+        raise RolloutWorkerError("the sealed rollout prompt dataset is empty")
+    # The same loader-policy refusal the planner and runner apply, repeated for a direct caller. It covers
+    # nf4-only storage for BOTH models and the served reward base identity.
+    from corpus_studio.platform.execution_config import (  # noqa: PLC0415
+        ExecutionConfigurationError,
+        verify_loader_policy_supported,
+    )
+
+    try:
+        verify_loader_policy_supported(execution, lane="rollout")
+    except ExecutionConfigurationError as exc:
+        raise RolloutWorkerError(str(exc)) from exc
+
     from pathlib import Path
 
     import torch
@@ -77,7 +123,6 @@ def run_rollout(  # pragma: no cover - optional training-stack integration; prov
         BitsAndBytesConfig,
     )
 
-    from corpus_studio.importers.jsonl_importer import read_jsonl  # noqa: PLC0415
     from corpus_studio.platform.enums import StageMarker  # noqa: PLC0415
     from corpus_studio.platform.objectives import get_objective  # noqa: PLC0415
     from corpus_studio.training.optimizer_config import build_torch_optimizer  # noqa: PLC0415
@@ -88,12 +133,21 @@ def run_rollout(  # pragma: no cover - optional training-stack integration; prov
         RolloutExecutionTracker,
         build_rollout_success_evidence,
     )
+    from corpus_studio.training.sealed_loader import (  # noqa: PLC0415
+        load_sealed_model,
+        load_sealed_tokenizer,
+        no_stage,
+        prepare_sealed_attention,
+        sealed_loader_view,
+        verify_sealed_adapter_precision,
+    )
     from corpus_studio.training.trainer import (  # noqa: PLC0415
         TrainerError,
         _score_reward_branch,
         _seqcls_backbone_and_score_head,
         capture_adapter_export_state,
         capture_trainable_state,
+        enforced_attention_training_kernel,
         evaluate_rollout_kl,
         evaluate_rollout_reward,
         expected_saved_adapter_config_sha256,
@@ -102,23 +156,11 @@ def run_rollout(  # pragma: no cover - optional training-stack integration; prov
         run_rollout_training,
     )
 
-    if execution.runtime_mode != "training":
-        raise RolloutWorkerError(
-            f"the rollout worker runs on GPU (runtime_mode='training'); got {execution.runtime_mode!r} - "
-            "nf4 4-bit requires CUDA, so a cpu_toy rollout smoke path is a separate follow-up."
-        )
+    _stage = stage_callback or no_stage
+    view = sealed_loader_view(execution)
     objective = get_objective(execution.objective_ref.id)
     if objective is None:
         raise RolloutWorkerError(f"unknown sealed rollout objective {execution.objective_ref.id!r}")
-    # Defense-in-depth: this worker hardcodes nf4 loaders for BOTH the policy and the served reward model.
-    # Refuse any other sealed quantization rather than silently run nf4 on a differently-sealed config (the
-    # planner already pins grpo to nf4; a hand-built or future int4 config must fail closed here, not lie).
-    if execution.precision.quantized_storage_format.value != "nf4":
-        raise RolloutWorkerError(
-            "the rollout worker loads nf4 4-bit models only; the sealed quantization is "
-            f"{execution.precision.quantized_storage_format.value!r} - refuse rather than run a different "
-            "precision than the seal declares."
-        )
     # The rollout loop processes ONE prompt per microbatch (a group of rollouts already fills memory); a
     # larger per-device batch must be expressed via gradient accumulation, not silently ignored.
     if execution.batching.micro_batch_size != 1:
@@ -131,14 +173,11 @@ def run_rollout(  # pragma: no cover - optional training-stack integration; prov
     seq_len = execution.sequence.max_sequence_len
     max_prompt_length = execution.experience.max_prompt_length
 
-    # --- data: chat prompts from the sealed ExperienceSource dataset binding ---
-    rows = list(read_jsonl(Path(execution.inputs.dataset.location)))
-    if not rows:
-        raise RolloutWorkerError("the sealed rollout prompt dataset is empty")
+    # --- data: chat prompts from the sealed ExperienceSource dataset binding (verified rows) ---
     base_model = execution.inputs.model.location
-    tokenizer = AutoTokenizer.from_pretrained(
-        base_model, trust_remote_code=execution.trust_remote_code
-    )
+    # The sealed TOKENIZER binding (its own location + immutable revision or directory digest), with the
+    # sealed trust_remote_code (Literal[False]) passed explicitly - never the model location or HEAD.
+    tokenizer = load_sealed_tokenizer(AutoTokenizer, view, stage=_stage)
     if tokenizer.pad_token_id is None:
         tokenizer.pad_token = tokenizer.eos_token
 
@@ -163,21 +202,22 @@ def run_rollout(  # pragma: no cover - optional training-stack integration; prov
         raise RolloutWorkerError(
             "the served reward source must seal a reward_base_model + reward_adapter_location"
         )
-    reward_base_model = reward_source.reward_base_model
     reward_adapter_location = reward_source.reward_adapter_location
-    reward_bnb = BitsAndBytesConfig(
-        load_in_4bit=True, bnb_4bit_quant_type="nf4", bnb_4bit_compute_dtype=torch.bfloat16,
-        bnb_4bit_use_double_quant=execution.bnb_4bit_use_double_quant,
-    )
-    reward_tokenizer = AutoTokenizer.from_pretrained(
-        reward_base_model, trust_remote_code=execution.trust_remote_code
-    )
+    # The loader-policy check above admitted the served reward base only because it IS the policy's pinned
+    # base, so it is loaded at that pinned identity (tokenizer binding included) with the same sealed
+    # loader policy. The SDPA toggles and kernel probe run once, before the first model allocation.
+    reward_tokenizer = load_sealed_tokenizer(AutoTokenizer, view, stage=_stage)
     if reward_tokenizer.pad_token_id is None:
         reward_tokenizer.pad_token = reward_tokenizer.eos_token
-    reward_base = AutoModelForSequenceClassification.from_pretrained(
-        reward_base_model, num_labels=1, quantization_config=reward_bnb,
-        device_map={"": 0}, trust_remote_code=execution.trust_remote_code,
-        use_safetensors=execution.use_safetensors,
+    prepare_sealed_attention(torch, view, stage=_stage)
+    reward_base = load_sealed_model(
+        AutoModelForSequenceClassification,
+        torch,
+        view,
+        stage=_stage,
+        bitsandbytes_config_cls=BitsAndBytesConfig,
+        label="served reward base",
+        num_labels=1,
     )
     reward_base.config.pad_token_id = reward_tokenizer.pad_token_id
     # Provenance integrity: the reward adapter ON DISK must match the sha256 the resolver pinned into
@@ -204,7 +244,7 @@ def run_rollout(  # pragma: no cover - optional training-stack integration; prov
     reward_backbone, reward_score_head = _seqcls_backbone_and_score_head(reward_model)
     reward_device = next(reward_model.parameters()).device
 
-    truncation_allowed = execution.sequence.truncation_allowed
+    truncation_allowed = view.truncation_allowed
 
     def _reward_scorer(prompt: str, completion: str) -> float:
         ids = reward_tokenizer(prompt + completion, add_special_tokens=False)["input_ids"]
@@ -226,14 +266,13 @@ def run_rollout(  # pragma: no cover - optional training-stack integration; prov
         return float(score)
 
     # --- policy: nf4 CAUSAL_LM base + LoRA adapter from the sealed adapter spec (bias-free reference) ---
-    bnb = BitsAndBytesConfig(
-        load_in_4bit=True, bnb_4bit_quant_type="nf4", bnb_4bit_compute_dtype=torch.bfloat16,
-        bnb_4bit_use_double_quant=execution.bnb_4bit_use_double_quant,
-    )
-    policy = AutoModelForCausalLM.from_pretrained(
-        base_model, quantization_config=bnb, device_map={"": 0},
-        trust_remote_code=execution.trust_remote_code,
-        use_safetensors=execution.use_safetensors,
+    policy = load_sealed_model(
+        AutoModelForCausalLM,
+        torch,
+        view,
+        stage=_stage,
+        bitsandbytes_config_cls=BitsAndBytesConfig,
+        label="policy",
     )
     policy = prepare_model_for_kbit_training(
         policy, use_gradient_checkpointing=execution.gradient_checkpointing
@@ -261,6 +300,9 @@ def run_rollout(  # pragma: no cover - optional training-stack integration; prov
 
     # --- evidence capture: register gradient hooks + snapshot BEFORE training ---
     gradient_tracker = register_full_model_gradient_hooks(policy, torch)
+    # Lower the sealed master dtype on the identity-bound trainable parameters, then observe post-adapter
+    # placement, nf4 storage, dequantization dtype and trainable dtypes before the first backward pass.
+    verify_sealed_adapter_precision(policy, torch, view, gradient_tracker, stage=_stage)
     before_trainable = capture_trainable_state(policy, torch, stage=StageMarker.adapter_attached)
     before_export = capture_adapter_export_state(
         get_peft_model_state_dict(policy), torch, stage=StageMarker.adapter_attached
@@ -275,35 +317,39 @@ def run_rollout(  # pragma: no cover - optional training-stack integration; prov
     tracker = RolloutExecutionTracker(expected_steps=max_steps, gradients=gradient_tracker)
     tracker.on_train_begin(optimizer)
 
-    # --- train via the GRPO primitive ---
-    try:
-        result = run_rollout_training(
-            policy,
-            tokenizer,
-            train_prompts,
-            _reward_scorer,
-            seq_len=seq_len,
-            max_new_tokens=execution.rollout.max_new_tokens,
-            group_size=execution.rollout.rollouts_per_prompt,
-            max_steps=max_steps,
-            sampling_temperature=execution.rollout.sampling_temperature,
-            sampling_top_p=execution.rollout.sampling_top_p,
-            kl_coefficient=execution.stability.kl_coefficient,
-            clip_range=execution.stability.clip_range,
-            entropy_bonus=execution.stability.entropy_bonus,
-            advantage_normalization=execution.stability.advantage_normalization,
-            max_prompt_length=max_prompt_length,
-            truncation_allowed=execution.sequence.truncation_allowed,
-            seed=execution.seed,
-            learning_rate=opt.learning_rate,
-            lr_scheduler=opt.lr_scheduler or "linear",
-            warmup_ratio=opt.warmup_ratio if opt.warmup_ratio is not None else 0.0,
-            gradient_accumulation_steps=execution.batching.fallback_grad_accumulation_steps or 1,
-            max_grad_norm=opt.max_grad_norm,
-            optimizer=optimizer,
-        )
-    except TrainerError as exc:
-        raise RolloutWorkerError(f"the GRPO training primitive refused the run: {exc}") from exc
+    # --- train via the GRPO primitive (generation, reward scoring and updates all under the sealed kernel;
+    # a context failure propagates unwrapped) ---
+    with enforced_attention_training_kernel(torch, view):
+        try:
+            result = run_rollout_training(
+                policy,
+                tokenizer,
+                train_prompts,
+                _reward_scorer,
+                seq_len=seq_len,
+                max_new_tokens=execution.rollout.max_new_tokens,
+                group_size=execution.rollout.rollouts_per_prompt,
+                max_steps=max_steps,
+                sampling_temperature=execution.rollout.sampling_temperature,
+                sampling_top_p=execution.rollout.sampling_top_p,
+                kl_coefficient=execution.stability.kl_coefficient,
+                clip_range=execution.stability.clip_range,
+                entropy_bonus=execution.stability.entropy_bonus,
+                advantage_normalization=execution.stability.advantage_normalization,
+                max_prompt_length=max_prompt_length,
+                truncation_allowed=view.truncation_allowed,
+                seed=execution.seed,
+                learning_rate=opt.learning_rate,
+                lr_scheduler=opt.lr_scheduler or "linear",
+                warmup_ratio=opt.warmup_ratio if opt.warmup_ratio is not None else 0.0,
+                gradient_accumulation_steps=execution.batching.fallback_grad_accumulation_steps or 1,
+                max_grad_norm=opt.max_grad_norm,
+                optimizer=optimizer,
+            )
+        except TrainerError as exc:
+            raise RolloutWorkerError(
+                f"the GRPO training primitive refused the run: {exc}"
+            ) from exc
 
     # --- replay the per-step evidence into the tracker, snapshot AFTER, seal the execution evidence ---
     for index in range(len(result["losses"])):
@@ -340,24 +386,28 @@ def run_rollout(  # pragma: no cover - optional training-stack integration; prov
     max_new_tokens = execution.rollout.max_new_tokens
     temperature = execution.rollout.sampling_temperature
     top_p = execution.rollout.sampling_top_p
-    truncation_allowed = execution.sequence.truncation_allowed
-    try:
-        policy_reward = evaluate_rollout_reward(
-            policy, tokenizer, heldout_prompts, _reward_scorer, max_new_tokens=max_new_tokens,
-            sampling_temperature=temperature, sampling_top_p=top_p,
-            max_prompt_length=max_prompt_length, truncation_allowed=truncation_allowed,
-            use_reference=False)
-        baseline_reward = evaluate_rollout_reward(
-            policy, tokenizer, heldout_prompts, _reward_scorer, max_new_tokens=max_new_tokens,
-            sampling_temperature=temperature, sampling_top_p=top_p,
-            max_prompt_length=max_prompt_length, truncation_allowed=truncation_allowed,
-            use_reference=True)
-        max_kl = evaluate_rollout_kl(
-            policy, tokenizer, heldout_prompts, max_new_tokens=max_new_tokens,
-            max_prompt_length=max_prompt_length, truncation_allowed=truncation_allowed,
-            seed=execution.seed)
-    except TrainerError as exc:
-        raise RolloutWorkerError(f"the held-out rollout evaluation refused the prompts: {exc}") from exc
+    truncation_allowed = view.truncation_allowed
+    # The promotion gate is measured with the same sealed kernel the policy was trained with.
+    with enforced_attention_training_kernel(torch, view):
+        try:
+            policy_reward = evaluate_rollout_reward(
+                policy, tokenizer, heldout_prompts, _reward_scorer, max_new_tokens=max_new_tokens,
+                sampling_temperature=temperature, sampling_top_p=top_p,
+                max_prompt_length=max_prompt_length, truncation_allowed=truncation_allowed,
+                use_reference=False)
+            baseline_reward = evaluate_rollout_reward(
+                policy, tokenizer, heldout_prompts, _reward_scorer, max_new_tokens=max_new_tokens,
+                sampling_temperature=temperature, sampling_top_p=top_p,
+                max_prompt_length=max_prompt_length, truncation_allowed=truncation_allowed,
+                use_reference=True)
+            max_kl = evaluate_rollout_kl(
+                policy, tokenizer, heldout_prompts, max_new_tokens=max_new_tokens,
+                max_prompt_length=max_prompt_length, truncation_allowed=truncation_allowed,
+                seed=execution.seed)
+        except TrainerError as exc:
+            raise RolloutWorkerError(
+                f"the held-out rollout evaluation refused the prompts: {exc}"
+            ) from exc
 
     # PROMOTION GATE: a non-improving RL bring-up is not a success - refuse a non-positive held-out lift.
     lift = policy_reward["mean_reward"] - baseline_reward["mean_reward"]

@@ -1,7 +1,10 @@
 """The full-parameter SFT worker's torch-free surface: the fixed-length row padding (the training loop is
-# pragma, proven by a run - mirrors the pretraining worker's base-gate coverage)."""
+# pragma, proven by a run - mirrors the pretraining worker's base-gate coverage). The sealed truncation
+policy and the full-content preflight are covered in ``test_full_finetune_preflight.py``."""
 
-from corpus_studio.training.full_finetune_trainer import pad_sft_row
+import pytest
+
+from corpus_studio.training.full_finetune_trainer import FullFinetuneDataRefusal, pad_sft_row
 
 
 def test_pad_sft_row_pads_and_masks_to_seq_len():
@@ -11,11 +14,17 @@ def test_pad_sft_row_pads_and_masks_to_seq_len():
     assert out["attention_mask"] == [1, 1, 1, 0, 0, 0]
 
 
-def test_pad_sft_row_right_truncates_overlength():
-    out = pad_sft_row([1, 2, 3, 4, 5], seq_len=3, pad_id=0)
-    assert out["input_ids"] == [1, 2, 3]
-    assert out["labels"] == [1, 2, 3]
-    assert out["attention_mask"] == [1, 1, 1]
+def test_pad_sft_row_refuses_overlength_instead_of_slicing():
+    # Truncation is a sealed-policy decision made (and counted) before padding; the row builder never
+    # hides it by slicing (#861).
+    with pytest.raises(FullFinetuneDataRefusal, match="5 tokens, beyond max_sequence_len=3") as refused:
+        pad_sft_row([1, 2, 3, 4, 5], seq_len=3, pad_id=0)
+    assert str(refused.value).isascii()
+
+
+def test_pad_sft_row_refuses_an_empty_row_instead_of_training_padding():
+    with pytest.raises(FullFinetuneDataRefusal, match="zero tokens"):
+        pad_sft_row([], seq_len=3, pad_id=0)
 
 
 def test_pad_sft_row_exact_length_has_no_padding():

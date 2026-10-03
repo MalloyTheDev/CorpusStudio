@@ -109,6 +109,8 @@ from corpus_studio.platform.enums import (
 )
 from corpus_studio.platform.execution_config import (
     ExecutionConfigurationError,
+    LoaderLane,
+    LoaderLaneExecution,
     canonical_sha256,
     capability_report_ref_for,
     execution_configuration_hash_for,
@@ -123,6 +125,7 @@ from corpus_studio.platform.execution_config import (
     rollout_execution_configuration_hash_for,
     run_scoped_training_output,
     stable_file_sha256,
+    verify_loader_policy_supported,
 )
 from corpus_studio.schemas.project_schemas import resolve_schema
 from corpus_studio.platform.host_platform import flash_sdpa_deadlocks
@@ -884,6 +887,18 @@ def _precision_policy(precision: str, quantization: str, optimizer: str) -> dict
     }
 
 
+def _refuse_unlowerable_loader_policy(draft: LoaderLaneExecution, *, lane: LoaderLane) -> None:
+    """Planning-time half of the loader-policy refusal: never seal a model/tokenizer identity or loader
+    policy (placement, precision, attention) the lane's first-party worker cannot lower exactly. The
+    runner and the worker repeat the same check at execution."""
+    try:
+        verify_loader_policy_supported(draft, lane=lane)
+    except ExecutionConfigurationError as exc:
+        raise PlannerError(
+            f"the resolved execution cannot be executed by the first-party worker: {exc}"
+        ) from exc
+
+
 def _resolve_preference_execution(
     *,
     plan_id: str,
@@ -992,6 +1007,7 @@ def _resolve_preference_execution(
         raise PlannerError(
             f"the resolved preference execution configuration is invalid: {exc}"
         ) from exc
+    _refuse_unlowerable_loader_policy(draft, lane="preference")
     return draft.model_copy(
         update={"configuration_hash": preference_execution_configuration_hash_for(draft)}
     )
@@ -1080,17 +1096,21 @@ def _resolve_reward_execution(
         )
     except ValidationError as exc:
         raise PlannerError(f"the resolved reward execution configuration is invalid: {exc}") from exc
+    _refuse_unlowerable_loader_policy(draft, lane="reward")
     return draft.model_copy(
         update={"configuration_hash": reward_execution_configuration_hash_for(draft)}
     )
 
 
-def _resolve_reward_source(constraints: PlannerConstraints) -> RewardSourceRef:
+def _resolve_reward_source(
+    constraints: PlannerConstraints,
+) -> tuple[RewardSourceRef, ExecutionInputs]:
     """Bind the served reward source BY PROVENANCE (the chosen on-policy design, RL slice S5b): load the
     reward run's ``RunManifest`` (whose supervisor-admitted ``reward_success_evidence`` PROVES it came from
     an admitted reward run) + its ``RunPlan`` (for the reward base model + adapter location), cross-check
     they pair, and seal a hash-pinned, loadable :class:`RewardSourceRef`. Fail-closed on a missing /
-    non-admitted / mismatched source - an unproven reward function must never silently drive an RL run."""
+    non-admitted / mismatched source - an unproven reward function must never silently drive an RL run.
+    Also returns the reward run's sealed inputs, so the caller can bind the reward base identity."""
     from pathlib import Path  # noqa: PLC0415
 
     manifest_path = constraints.reward_source_manifest
@@ -1139,7 +1159,7 @@ def _resolve_reward_source(constraints: PlannerConstraints) -> RewardSourceRef:
         )
     except ExecutionConfigurationError as exc:
         raise PlannerError(f"cannot resolve the reward adapter location: {exc}") from exc
-    return RewardSourceRef(
+    source = RewardSourceRef(
         kind="served_reward_model",
         reward_ref=Ref(
             id=f"reward-adapter-{adapter_sha256[:12]}", hash=HashRef(value=adapter_sha256)
@@ -1150,6 +1170,7 @@ def _resolve_reward_source(constraints: PlannerConstraints) -> RewardSourceRef:
             id=f"reward-run-{manifest.run_id}", hash=HashRef(value=manifest_sha256)
         ),
     )
+    return source, reward_cfg.inputs
 
 
 def _resolve_rollout_execution(
@@ -1214,7 +1235,21 @@ def _resolve_rollout_execution(
     )
     stability = StabilityController(kl_coefficient=0.05, clip_range=0.2)
     policy = PolicyOptimizationSpec(algorithm="grpo", use_critic=False)
-    reward_source = _resolve_reward_source(constraints)
+    reward_source, reward_inputs = _resolve_reward_source(constraints)
+    # RewardSourceRef names the served reward base only by location (no revision or digest), so the worker
+    # can load it at a pinned identity only as the policy's own sealed base. Bind that here: the reward run
+    # must have trained on exactly the policy's model AND tokenizer bindings, or the plan is refused rather
+    # than sealing a reward model the worker would load at a different (unpinned) identity.
+    policy_inputs = ExecutionInputs.model_validate(shared_fields["inputs"])
+    if (reward_inputs.model, reward_inputs.tokenizer) != (
+        policy_inputs.model,
+        policy_inputs.tokenizer,
+    ):
+        raise PlannerError(
+            "the served reward model must share the policy's pinned model and tokenizer bindings "
+            f"(reward base {reward_inputs.model.location!r}, policy base "
+            f"{policy_inputs.model.location!r}) until RewardSourceRef carries its own pinned binding"
+        )
     try:
         draft = ResolvedRolloutExecutionConfiguration.model_validate(
             {
@@ -1235,6 +1270,7 @@ def _resolve_rollout_execution(
         # the refusal also covers imported/hand-built plans, not just this resolver; surfaces here as a
         # PlannerError via this ValidationError wrap.
         raise PlannerError(f"the resolved rollout execution configuration is invalid: {exc}") from exc
+    _refuse_unlowerable_loader_policy(draft, lane="rollout")
     return draft.model_copy(
         update={"configuration_hash": rollout_execution_configuration_hash_for(draft)}
     )
@@ -2304,6 +2340,7 @@ def build_run_plan(
             raise PlannerError(
                 f"the resolved full-finetune configuration is invalid: {exc}"
             ) from exc
+        _refuse_unlowerable_loader_policy(full_finetune_draft, lane="full_finetune")
         full_finetune_execution = full_finetune_draft.model_copy(
             update={
                 "configuration_hash": full_finetune_execution_configuration_hash_for(

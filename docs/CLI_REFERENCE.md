@@ -139,12 +139,12 @@ The core stays dependency-light: torch is never imported until a worker invokes 
 
 | Command | What it does |
 |---|---|
-| `dataset-version-create <project_dir> …` | Capture a version: fingerprint + row count of `examples.jsonl` with pinned lineage. |
+| `dataset-version-create <project_dir> …` | Capture a version: fingerprint + row count of `examples.jsonl` with pinned lineage. Capture, manifest and record are published under the version-store lock; a busy store refuses (exit 1, nothing written). `--stamp-run` is validated before capture. |
 | `dataset-version-list <project_dir>` | List versions (newest first) with live integrity. |
 | `dataset-version-show <project_dir> --version-id …` | Render a version card (live projection). |
-| `dataset-version-diff <project_dir> --base-version-id … --other-version-id …` | Diff two versions by their stored row manifests (read-only). |
+| `dataset-version-diff <project_dir> --version-id <base> --other <other>` | Diff two versions by their stored row manifests (read-only). |
 | `dataset-version-restore <project_dir> --version-id … --output …` | Reconstruct a version's exact rows from the row store (verified against the recorded fingerprint). |
-| `dataset-version-gc <project_dir>` | Prune row-store rows no version references (fail-closed; never touches referenced rows). |
+| `dataset-version-gc <project_dir>` | Prune row-store rows no version references (fail-closed; never touches referenced rows). Holds the version-store lock, so it never races a capture; waits up to 60 s and refuses (exit 1, nothing pruned) if the store stays busy or a manifest cannot be trusted. |
 
 ## Arena
 
