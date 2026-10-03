@@ -16,6 +16,9 @@ callers get a clear ``ParquetSupportError`` (see ``corpus_studio.parquet_support
 from __future__ import annotations
 
 import json
+import os
+import stat
+import tempfile
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
@@ -37,6 +40,22 @@ def read_parquet(path: Path) -> Iterator[dict[str, Any]]:
             yield row
 
 
+def _match_output_mode(tmp_path: Path, output_path: Path) -> None:
+    """Give ``tmp_path`` the permissions ``output_path`` would normally have.
+
+    ``tempfile.mkstemp`` always creates its file mode ``0600``; without this, the
+    atomic ``os.replace`` below would silently narrow a pre-existing output's mode,
+    or a new output's umask-derived default, down to owner-only.
+    """
+    if output_path.exists():
+        mode = stat.S_IMODE(output_path.stat().st_mode)
+    else:
+        umask = os.umask(0)
+        os.umask(umask)
+        mode = 0o666 & ~umask
+    os.chmod(tmp_path, mode)
+
+
 @dataclass(frozen=True)
 class ParquetConversion:
     """Result of converting a Parquet file to a staging JSONL."""
@@ -53,18 +72,30 @@ def convert_parquet_to_jsonl(input_path: Path, output_path: Path) -> ParquetConv
     columns). Values are written verbatim; the few non-JSON scalars a typed column
     can hold (bytes / datetime / Decimal) are handled by ``json_default``. This only
     reshapes Parquet → JSONL — schema validation is the import-preview's job, so a
-    value that violates the target schema quarantines exactly like a JSONL row."""
+    value that violates the target schema quarantines exactly like a JSONL row.
+    Written atomically (unique temp file beside ``output_path``, then
+    ``os.replace``) so a mid-stream failure leaves ``output_path`` exactly as it
+    was before the call, never a partial prefix of the source."""
     _, pq = load_pyarrow()
     parquet_file = pq.ParquetFile(str(input_path))
     columns = list(parquet_file.schema_arrow.names)
 
     rows_converted = 0
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    with output_path.open("w", encoding="utf-8") as out:
-        for batch in parquet_file.iter_batches():
-            for row in batch.to_pylist():
-                out.write(json.dumps(row, ensure_ascii=False, default=json_default) + "\n")
-                rows_converted += 1
+    fd, tmp_name = tempfile.mkstemp(
+        dir=str(output_path.parent), prefix=output_path.name + ".", suffix=".tmp"
+    )
+    tmp_path = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as out:
+            for batch in parquet_file.iter_batches():
+                for row in batch.to_pylist():
+                    out.write(json.dumps(row, ensure_ascii=False, default=json_default) + "\n")
+                    rows_converted += 1
+        _match_output_mode(tmp_path, output_path)
+        os.replace(tmp_path, output_path)
+    finally:
+        tmp_path.unlink(missing_ok=True)
 
     return ParquetConversion(
         output_path=str(output_path),
