@@ -12,8 +12,12 @@ false assurance twice over, and these tests pin both halves of the fix:
 * structural repetition - a field that is constant across the dataset, or path-shaped, is required
   to repeat, so templating detection must not read it. This half needs no schema.
 
-The existing text-corpus behaviour must be unchanged by both: ``examples/wbg/data/wbg_clean_522.jsonl``
-still grades D on 62 synthetic-pattern issues, and that verdict is correct for a text corpus.
+The existing text-corpus behaviour must be unchanged by both, pinned on the 522-row chat corpus
+that ships in the repo: it still grades D on 62 synthetic-pattern issues. That is a fixed INPUT for
+a behaviour test, not a judgement about anyone's data - and note what those 62 actually are. Without
+a schema they come from the undeclared ``meta`` lineage sidecar (module/desiredType/hasCtx/teacher),
+not from the conversations; with ``--schema chat`` the signal reads the user and assistant turns
+instead. The grade is the same either way, but only the second one assessed the data.
 """
 
 import json
@@ -272,11 +276,27 @@ def test_a_field_null_in_some_rows_and_a_list_in_others_keeps_its_list_contents(
 
 @pytest.mark.skipif(not WBG_CORPUS.exists(), reason="the WBG example corpus is not present")
 def test_wbg_text_corpus_verdict_is_unchanged():
-    # The non-goal, pinned on the real corpus: 522 chat rows, grade D on 62 synthetic-pattern
-    # issues plus 12 token-length outliers. That verdict is correct for a text corpus and neither
-    # the applicability gate nor the structural-repetition fix may move it.
+    """The in-repo chat corpus still gets the verdict it got before this change.
+
+    This pins BEHAVIOUR against a fixed input, not data quality. The fixture is the 522-row
+    example snapshot that ships in the repo (see examples/wbg/README.md: "small enough to live in
+    the repo so it clones with CorpusStudio"), NOT a production corpus - a real one lives outside
+    the repo and is not available to this suite. So these numbers say what the signals do to this
+    file, and nothing about how good anyone's current data is.
+
+    If this fails, it is one of two things, and they are not the same:
+      * a CODE regression - the applicability gate or the structural-repetition fix moved a
+        text-corpus verdict it must not move. Fix the code.
+      * a refreshed FIXTURE - examples/wbg/data/ was re-exported, so the input changed under a
+        pinned expectation. Re-derive the four numbers from the new file and update them here in
+        the same commit that refreshes it, after confirming by inspection that the change is the
+        data's and not the detector's.
+    """
     rows = [json.loads(line) for line in WBG_CORPUS.read_text(encoding="utf-8").splitlines() if line.strip()]
-    assert len(rows) == 522
+    assert len(rows) == 522, (
+        f"{WBG_CORPUS.name} now has {len(rows)} rows, not 522: the fixture was refreshed, so the "
+        "pinned verdict below describes a different input. See this test's docstring."
+    )
     quality = build_basic_quality_report(rows)
     assert quality.synthetic_pattern_count == 62
     assert quality.token_length_outlier_count == 12

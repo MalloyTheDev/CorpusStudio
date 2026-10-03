@@ -128,6 +128,11 @@ per-item error isolation, and off-thread document opens.
   declared prose leaves, and without one it drops the leaves measured as constant across the
   dataset or path-shaped. A stable `source_dataset` / `source_version` / `source_url` across a
   licensing lane is mandatory, not debt.
+  Without a schema the templating signal reads whatever the row carries, which on a chat corpus
+  with a generation-metadata sidecar means the sidecar: the in-repo WBG example's 62 flagged
+  openings come from `meta.module` / `meta.desiredType` / `meta.hasCtx` / `meta.teacher`, not from
+  its conversations. `--schema chat` reads the turns instead. Prefer the schema-aware invocation
+  for any real verdict; the bare one is a weaker fallback that says so.
 - Leakage-checked splits: `detect_split_leakage` reports exact and
   near-duplicate rows shared across train/validation/test.
 - Validation failures name the **field path** that failed, including the list index
