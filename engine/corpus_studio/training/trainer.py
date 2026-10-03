@@ -551,22 +551,21 @@ def verify_sealed_runtime(
             raise TrainerEnvironmentError(
                 f"sealed package drift: {package} expected {expected}, observed {observed}"
             )
-    if config.dataset_sha256 is None:
-        raise TrainerError("sealed execution omitted the dataset content digest")
-    from corpus_studio.platform.execution_config import (  # noqa: PLC0415
-        ExecutionConfigurationError,
-        stable_file_bytes,
+    # The same one-read verification every other first-party lane uses (training/sealed_inputs.py),
+    # so the digest comparison and its refusal wording cannot drift between lanes.
+    from corpus_studio.training.sealed_inputs import (  # noqa: PLC0415
+        SealedInputError,
+        verify_sealed_dataset_bytes,
     )
 
     try:
-        dataset_bytes, observed_dataset = stable_file_bytes(
+        dataset_bytes, _observed_dataset = verify_sealed_dataset_bytes(
             config.dataset_path,
+            config.dataset_sha256,
             progress_callback=dataset_progress_callback,
         )
-    except ExecutionConfigurationError as exc:
+    except SealedInputError as exc:
         raise TrainerError(str(exc)) from exc
-    if observed_dataset != config.dataset_sha256:
-        raise TrainerError("dataset bytes changed after the execution configuration was sealed")
     return dataset_bytes
 
 
@@ -2446,12 +2445,12 @@ def analyze_truncation(token_lengths: list[int], seq_len: int) -> TruncationRepo
 
 
 def truncation_warning(report: TruncationReport) -> str | None:
-    """The operator-facing warning for a truncating ``seq_len`` — or None when nothing is cut."""
+    """The operator-facing warning for a truncating ``seq_len`` - or None when nothing is cut."""
     if not report.truncates:
         return None
     return (
         f"[WARNING] TRUNCATION: {report.n_truncated}/{report.n_examples} examples "
-        f"({report.pct_truncated:.0f}%) exceed sequence_len={report.seq_len} and will be CUT — the end "
+        f"({report.pct_truncated:.0f}%) exceed sequence_len={report.seq_len} and will be CUT - the end "
         f"of each (including the assistant/output) is lost, so the model learns incomplete outputs. "
         f"Longest example is {report.max_tokens} tokens; raise sequence_len to "
         f">= {report.seq_len_for_zero_truncation} to keep every example whole (costs more VRAM), or "
@@ -4227,14 +4226,51 @@ def evaluate_rollout_kl(  # pragma: no cover - generation + optional training-st
     return max_kl
 
 
-def _prepare_training_texts(
-    rows: list[dict[str, Any]],
-    config: TrainRunConfig,
-    tokenizer: Any,
+class SftDataPolicyRefusal(TrainerError):
+    """The sealed no-truncation policy refused the SFT dataset: a row renders to nothing, or a row drops
+    supervised tokens past the sealed sequence length. Only different data, a longer sealed sequence, or
+    a sealed lossy policy admits it, unlike a formatter or tokenizer failure, which no policy fixes."""
+
+
+@dataclass(frozen=True)
+class SftDatasetPreflight:
+    """What the full-content SFT preflight measured over every sealed row.
+
+    ``texts`` is index-aligned with the input rows; ``""`` marks a row that rendered to nothing (only
+    possible when truncation is allowed, otherwise the preflight refuses it). ``token_ids`` holds the
+    exact, untruncated ids measured for each RENDERED text, in order, when the caller asked to keep them,
+    so a caller that trains those ids trains exactly what the ledger counted."""
+
+    texts: list[str]
+    report: TruncationReport
+    ledger: TokenCoverageLedger
+    unrenderable_rows: int
+    token_ids: list[list[int]] | None
+
+
+def preflight_sft_dataset(
+    rows: Sequence[dict[str, Any]],
     *,
+    dataset_format: str,
+    sequence_len: int,
+    truncation_allowed: bool,
+    tokenizer: Any,
+    encode: Callable[[str], Sequence[int]] | None = None,
+    keep_token_ids: bool = False,
     stage_callback: StageCallback | None = None,
-) -> tuple[list[str], TruncationReport]:
-    """Format and tokenize every row with bounded, same-thread progress events.
+) -> SftDatasetPreflight:
+    """The full-content SFT preflight shared by the adapter SFT and full-parameter SFT lanes.
+
+    Formats every row with the sealed formatter and the bound tokenizer (chat template included),
+    refuses rows that render to nothing, tokenizes every rendered row at FULL length, and refuses any
+    dropped supervised token through the token-coverage ledger, unless ``truncation_allowed`` (a
+    sealed lossy policy), in which case the drops are reported on stderr. Callers run it before any
+    model weights are allocated.
+
+    ``encode`` maps one rendered text to its ids; by default ``tokenizer(text)["input_ids"]``. A caller
+    that builds its own training rows passes an explicit full-length encode and ``keep_token_ids`` so
+    the ids it trains are the ids measured here (one tokenization, never a second, possibly different
+    one).
 
     A callback fires only after actual rows complete. At most
     ``_MAX_PREFLIGHT_PROGRESS_EVENTS`` progress events are emitted per phase, so a hung formatter or
@@ -4258,7 +4294,7 @@ def _prepare_training_texts(
     _stage("dataset_formatting", f"formatting {total_rows} sealed dataset rows")
     try:
         for index, row in enumerate(rows, start=1):
-            texts.append(format_example_text(row, config.dataset_format, tokenizer))
+            texts.append(format_example_text(row, dataset_format, tokenizer))
             if index % formatting_interval == 0 or index == total_rows:
                 _stage("dataset_formatting", f"formatted {index}/{total_rows} dataset rows")
     except TrainerError:
@@ -4273,27 +4309,31 @@ def _prepare_training_texts(
     # keeps the run from silently training on a subset while provenance seals total_rows - the same
     # no-silent-truncation stance the token-coverage ledger takes below (#565).
     drop_refusal = unrenderable_row_refusal(
-        total_rows, rendered_count, dataset_format=config.dataset_format
+        total_rows, rendered_count, dataset_format=dataset_format
     )
     if drop_refusal is not None:
-        if not config.truncation_allowed:
-            raise TrainerError(drop_refusal.removeprefix("REFUSED: "))
+        if not truncation_allowed:
+            raise SftDataPolicyRefusal(drop_refusal.removeprefix("REFUSED: "))
         print(drop_refusal, file=sys.stderr)
     truncation_interval = _interval(rendered_count)
     lengths: list[int] = []
+    kept: list[list[int]] = []
     _stage(
         "truncation_analysis",
         f"tokenizing all {rendered_count} rendered rows for truncation analysis",
     )
     try:
         for index, text in enumerate(rendered, start=1):
-            lengths.append(len(tokenizer(text)["input_ids"]))
+            ids = encode(text) if encode is not None else tokenizer(text)["input_ids"]
+            lengths.append(len(ids))
+            if keep_token_ids:
+                kept.append(list(ids))
             if index % truncation_interval == 0 or index == rendered_count:
                 _stage(
                     "truncation_analysis",
                     f"tokenized {index}/{rendered_count} rendered rows",
                 )
-        report = analyze_truncation(lengths, config.sequence_len)
+        report = analyze_truncation(lengths, sequence_len)
         # Token-level coverage ledger - the no-silent-truncation authority (PR #618), now the gate.
         # Until the first-party trainer applies a completion-only loss mask, the loss covers the whole
         # rendered text, so supervised_tokens == total_tokens and dropped_supervised is exactly the
@@ -4303,15 +4343,15 @@ def _prepare_training_texts(
             ExampleTokenSpan(
                 total_tokens=length,
                 supervised_tokens=length,
-                dropped_supervised_tokens=max(0, length - config.sequence_len),
+                dropped_supervised_tokens=max(0, length - sequence_len),
             )
             for length in lengths
         ]
-        ledger = compute_token_coverage(spans, config.sequence_len)
+        ledger = compute_token_coverage(spans, sequence_len)
         refusal = token_coverage_refusal(ledger)
         if refusal is not None:
-            if not config.truncation_allowed:
-                raise TrainerError(refusal.removeprefix("REFUSED: "))
+            if not truncation_allowed:
+                raise SftDataPolicyRefusal(refusal.removeprefix("REFUSED: "))
             # Operator opted into a lossy policy at plan time: record it, do not raise.
             print(refusal, file=sys.stderr)
             warning = truncation_warning(report)
@@ -4325,7 +4365,34 @@ def _prepare_training_texts(
         "truncation_analysis",
         f"verified {rendered_count} rendered rows; maximum {report.max_tokens} tokens",
     )
-    return texts, report
+    return SftDatasetPreflight(
+        texts=texts,
+        report=report,
+        ledger=ledger,
+        unrenderable_rows=total_rows - rendered_count,
+        token_ids=kept if keep_token_ids else None,
+    )
+
+
+def _prepare_training_texts(
+    rows: list[dict[str, Any]],
+    config: TrainRunConfig,
+    tokenizer: Any,
+    *,
+    stage_callback: StageCallback | None = None,
+) -> tuple[list[str], TruncationReport]:
+    """The adapter SFT lane's view of :func:`preflight_sft_dataset`: the sealed format, sequence length
+    and truncation policy come from ``config``, the tokenizer measures with its default call, and only
+    the rendered texts and the example-level report are returned."""
+    preflight = preflight_sft_dataset(
+        rows,
+        dataset_format=config.dataset_format,
+        sequence_len=config.sequence_len,
+        truncation_allowed=config.truncation_allowed,
+        tokenizer=tokenizer,
+        stage_callback=stage_callback,
+    )
+    return preflight.texts, preflight.report
 
 
 def resolve_run_plan(config: TrainRunConfig, report: Any) -> dict[str, Any]:
@@ -4442,23 +4509,12 @@ def run_training(  # pragma: no cover - optional training-stack integration
             "checkpoints root; none may be derived inside the trainer"
         )
 
-    dataset_progress_bucket = 0
+    from corpus_studio.training.sealed_inputs import bounded_byte_progress  # noqa: PLC0415
 
-    def _dataset_progress(completed: int, total: int) -> None:
-        nonlocal dataset_progress_bucket
-        if total <= 0:
-            return
-        bucket = min(
-            _MAX_PREFLIGHT_PROGRESS_EVENTS,
-            max(1, completed * _MAX_PREFLIGHT_PROGRESS_EVENTS // total),
-        )
-        if bucket <= dataset_progress_bucket:
-            return
-        dataset_progress_bucket = bucket
-        _stage(
-            "dataset_verification",
-            f"read and hashed {completed}/{total} sealed dataset bytes",
-        )
+    _dataset_progress = bounded_byte_progress(
+        lambda message: _stage("dataset_verification", message),
+        max_events=_MAX_PREFLIGHT_PROGRESS_EVENTS,
+    )
 
     if config.execution_configuration_hash is not None:
         _stage("dataset_verification", "reading and hashing the sealed dataset once")

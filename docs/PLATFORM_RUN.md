@@ -109,6 +109,18 @@ corpus-studio platform-run ./plan/RunPlan.json --subprocess --out ./run
   before dispatch; the worker verifies them again and echoes the effective hash before model loading.
   Editing an input, dtype, attention toggle, trainer field, device/placement, rank, selector, or
   offload rule after planning is refused.
+- Consumes only the sealed dataset bytes. Every lane that trains from one pinned dataset file (adapter
+  SFT, DPO, reward, full-parameter SFT, and on-policy RL once admitted) reads the dataset once,
+  compares its sha256 with the sealed `inputs.dataset.content_sha256`, and parses exactly those bytes.
+  A changed, missing, linked, or malformed dataset is refused as `UNSUPPORTED_CONFIGURATION` at
+  `dataset_verification` before any tokenizer or model load. On the DPO, reward, full-parameter SFT,
+  and on-policy RL lanes the verified digest, byte and row counts, and the execution-configuration hash
+  are recorded in that stage event's `payload` (persisted in `RunEvents.jsonl`). Pretraining corpus
+  shards and the pinned architecture config are not yet verified at consumption (a tracked follow-up).
+  This check is worker code: a managed `--subprocess` run imports `corpus_studio` from the sealed
+  environment's pinned worker wheel, so it applies there only once that wheel is rebuilt from source
+  that contains it. See
+  [`EFFECTIVE_EXECUTION_CONFIGURATION.md`](EFFECTIVE_EXECUTION_CONFIGURATION.md#dataset-consumption).
 - Newly planned runs hash-pin the exact static `BackendManifest`. Subprocess protocol 2.0 waits for a
   worker-first `hello`, validates backend and environment/lock identity, and only then dispatches.
   Correlation/run IDs, message order, event sequence, terminal lineage, and artifacts are fail-closed.

@@ -10,7 +10,15 @@ a partial file.
 
 Torch-free. Writes only ``examples.jsonl`` and its sibling ``.lock`` file. This
 module owns *durability and atomicity*; schema validation is the caller's job
-(rows are validated against the project schema before they reach here).
+(rows are validated against the project schema before they reach here). Its
+:func:`atomic_write_lines` primitive is also reused by the dataset version store
+(``versions/``) for manifests, records, and the GC'd row store.
+
+Lock order (#859): this writer lock is always acquired BEFORE the dataset
+version-store lock (``versions.store_lock.version_store_lock``), never while that
+lock is held. A compound section such as import-commit (append + version capture)
+takes this lock first, then the version-store lock; version capture, publication and
+row-store GC never request this lock.
 """
 
 from __future__ import annotations
@@ -118,15 +126,19 @@ def read_examples_page(
     return total, rows
 
 
-def _atomic_write_lines(path: Path, lines: list[str]) -> None:
+def atomic_write_lines(path: Path, lines: list[str], *, errors: str = "strict") -> None:
     """Write each item of ``lines`` as one ``\\n``-terminated row to ``path``
-    atomically: a temp file in the same directory, ``fsync``, then ``os.replace``."""
+    atomically: a uniquely named temp file in the same directory, ``fsync``, then
+    ``os.replace``. Concurrent writers never share a temp file, and a failure before
+    the replace leaves ``path`` untouched and removes the temp file. ``errors`` is the
+    UTF-8 encoding error handler: ``"surrogateescape"`` writes lines that were decoded
+    with it back byte for byte (row-store GC keeps undecodable lines that way)."""
 
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp_name = tempfile.mkstemp(dir=str(path.parent), prefix=path.name + ".", suffix=".tmp")
     tmp = Path(tmp_name)
     try:
-        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
+        with os.fdopen(fd, "w", encoding="utf-8", errors=errors, newline="\n") as handle:
             for line in lines:
                 handle.write(line)
                 handle.write("\n")
@@ -152,7 +164,7 @@ def append_examples_locked(project_dir: Path | str, rows: list[Any]) -> int:
 
     new_lines = _rows_to_lines(rows)
     existing = read_existing_lines(project_dir)
-    _atomic_write_lines(examples_path(project_dir), existing + new_lines)
+    atomic_write_lines(examples_path(project_dir), existing + new_lines)
     return len(new_lines)
 
 
@@ -171,7 +183,7 @@ def write_examples(project_dir: Path | str, rows: list[Any]) -> int:
 
     lines = _rows_to_lines(rows)
     with single_writer_lock(project_dir):
-        _atomic_write_lines(examples_path(project_dir), lines)
+        atomic_write_lines(examples_path(project_dir), lines)
     return len(lines)
 
 
@@ -182,7 +194,7 @@ def write_examples_lines(project_dir: Path | str, lines: Iterable[str]) -> int:
 
     materialized = list(lines)
     with single_writer_lock(project_dir):
-        _atomic_write_lines(examples_path(project_dir), materialized)
+        atomic_write_lines(examples_path(project_dir), materialized)
     return len(materialized)
 
 
@@ -193,5 +205,5 @@ def replace_examples_lines_locked(project_dir: Path | str, lines: Iterable[str])
     cannot interleave between the snapshot and the replace. Returns the row count."""
 
     materialized = list(lines)
-    _atomic_write_lines(examples_path(project_dir), materialized)
+    atomic_write_lines(examples_path(project_dir), materialized)
     return len(materialized)
