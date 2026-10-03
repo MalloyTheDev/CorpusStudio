@@ -1,3 +1,5 @@
+import codecs
+import io
 import json
 from collections.abc import Iterator
 from dataclasses import dataclass
@@ -99,14 +101,51 @@ def read_jsonl(path: Path) -> Iterator[dict[str, Any]]:
         yield parsed.value
 
 
-def read_jsonl_bytes(content: bytes) -> Iterator[dict[str, Any]]:
-    """Strictly parse already-stabilized JSONL bytes without reopening a mutable path."""
+def _universal_lines(content: bytes) -> Iterator[str]:
+    """Split JSONL bytes into lines exactly as :func:`iter_jsonl` splits a file opened in text mode.
+
+    The bytes go through the same ``utf-8-sig`` decoder and universal-newline layer, so only ``\\n``,
+    ``\\r`` and ``\\r\\n`` end a line. ``str.splitlines`` would also break on U+2028, U+2029, U+0085
+    and the other Unicode line boundaries, which are legal raw characters inside a JSON string: a row
+    the path reader and the planning conformance check accept would then fail here, and every later
+    line number would shift. Decoding is incremental, so no second full-size text copy is held.
+    """
 
     try:
-        text = content.decode("utf-8-sig")
+        yield from io.TextIOWrapper(io.BytesIO(content), encoding="utf-8-sig", newline=None)
     except UnicodeDecodeError as exc:
-        raise ValueError(f"dataset is not valid UTF-8: {exc}") from exc
-    for line_number, line in enumerate(text.splitlines(keepends=True), start=1):
+        raise ValueError(
+            f"dataset is not valid UTF-8 at byte offset {_invalid_utf8_offset(content, exc)}: "
+            f"{exc.reason}"
+        ) from exc
+
+
+def _invalid_utf8_offset(content: bytes, chunk_error: UnicodeDecodeError) -> int:
+    """The absolute byte offset of the first invalid UTF-8 sequence in ``content``.
+
+    The incremental decoder reports a position relative to its internal chunk, which would point an
+    operator at the wrong byte. Only this failure path re-decodes the whole buffer; ``utf-8-sig`` reports
+    positions after a stripped BOM, so the BOM length is added back.
+    """
+
+    try:
+        content.decode("utf-8-sig")
+    except UnicodeDecodeError as whole_error:
+        bom = len(codecs.BOM_UTF8) if content.startswith(codecs.BOM_UTF8) else 0
+        return bom + whole_error.start
+    # The whole buffer decoding cleanly after the incremental decoder failed would be a codec defect;
+    # the chunk-relative position is then the only one available.
+    return chunk_error.start  # pragma: no cover - unreachable with a conforming utf-8-sig codec
+
+
+def read_jsonl_bytes(content: bytes) -> Iterator[dict[str, Any]]:
+    """Strictly parse already-stabilized JSONL bytes without reopening a mutable path.
+
+    Rows, blank-line skipping, line numbers and JSON error wording match :func:`read_jsonl` over a file
+    holding the same bytes, so a dataset that planning accepted parses identically at execution.
+    """
+
+    for line_number, line in enumerate(_universal_lines(content), start=1):
         if not line.strip():
             continue
         try:

@@ -66,6 +66,9 @@ _WEIGHT_SUFFIXES = frozenset(
 # other file. Every OTHER ``.bin`` (and every real weight payload) stays fail-closed.
 _ROOT_AUXILIARY_METADATA_FILES = frozenset({"training_args.bin"})
 _MAX_AUXILIARY_METADATA_BYTES = 1 << 20  # 1 MiB; a real training_args.bin is a few KiB.
+# A full-model export also refuses the TF (.h5) and Flax (.msgpack) weight formats that
+# save_pretrained can emit, so no second format can ride along with model.safetensors.
+_MODEL_WEIGHT_SUFFIXES = _WEIGHT_SUFFIXES | frozenset({".h5", ".msgpack"})
 
 
 def _semantic_json_value(value: object, *, field_name: str | None = None) -> object:
@@ -128,7 +131,7 @@ def _stable_bounded_file_bytes(path: Path, *, limit: int) -> bytes:
     return payload
 
 
-def _validate_root_auxiliary_metadata(path: Path) -> None:
+def _validate_root_auxiliary_metadata(path: Path, *, noun: str) -> None:
     """Fail-closed structural checks for an explicitly permitted root auxiliary metadata file.
 
     It must be a bounded, single-hard-link regular file (never a symlink, hard link, or special file).
@@ -137,28 +140,35 @@ def _validate_root_auxiliary_metadata(path: Path) -> None:
 
     info = path.lstat()
     if path.is_symlink() or not stat.S_ISREG(info.st_mode):
-        raise ValueError("adapter artifact auxiliary metadata is not a regular file")
+        raise ValueError(f"{noun} auxiliary metadata is not a regular file")
     if info.st_nlink != 1:
-        raise ValueError("adapter artifact auxiliary metadata is hard-linked")
+        raise ValueError(f"{noun} auxiliary metadata is hard-linked")
     if info.st_size > _MAX_AUXILIARY_METADATA_BYTES:
-        raise ValueError("adapter artifact auxiliary metadata exceeds the permitted size")
+        raise ValueError(f"{noun} auxiliary metadata exceeds the permitted size")
 
 
-def _validate_adapter_tree(root: Path) -> None:
+def _validate_export_tree(
+    root: Path,
+    *,
+    noun: str,
+    primary_weights: str,
+    weight_suffixes: frozenset[str],
+    weight_name_prefixes: tuple[str, ...],
+) -> None:
     """Reject links, checkpoint payloads, and any second model-weight format recursively.
 
-    A file is classified by NAME, not by extension alone: an explicitly permitted root auxiliary
-    metadata file (``training_args.bin``) is admitted under the narrow policy in
-    :func:`_validate_root_auxiliary_metadata`; every other weight-suffixed or model-weight-named file
-    (a second ``.safetensors``, ``pytorch_model*``, ``model*.bin``, ``optimizer.pt``, a nested/arbitrary
-    ``.bin``, ...) stays fail-closed."""
+    The one permitted weights file is ``primary_weights`` at the artifact root. A file is classified by
+    NAME, not by extension alone: an explicitly permitted root auxiliary metadata file
+    (``training_args.bin``) is admitted under the narrow policy in
+    :func:`_validate_root_auxiliary_metadata`; every other weight-suffixed or weight-named file stays
+    fail-closed. Every error message starts with ``noun``."""
 
     try:
         root_stat = root.lstat()
     except OSError as exc:
-        raise ValueError("adapter artifact directory is unavailable") from exc
+        raise ValueError(f"{noun} directory is unavailable") from exc
     if not stat.S_ISDIR(root_stat.st_mode) or root.is_symlink():
-        raise ValueError("adapter artifact must be a regular, non-link directory")
+        raise ValueError(f"{noun} must be a regular, non-link directory")
     resolved_root = root.resolve(strict=True)
     try:
         for current_raw, dirnames, filenames in os.walk(root, topdown=True, followlinks=False):
@@ -166,36 +176,62 @@ def _validate_adapter_tree(root: Path) -> None:
             for name in sorted(dirnames):
                 candidate = current / name
                 if candidate.is_symlink() or not stat.S_ISDIR(candidate.lstat().st_mode):
-                    raise ValueError("adapter artifact contains a linked or irregular directory")
+                    raise ValueError(f"{noun} contains a linked or irregular directory")
                 if name.startswith("checkpoint-"):
-                    raise ValueError("adapter artifact contains an intermediate checkpoint")
+                    raise ValueError(f"{noun} contains an intermediate checkpoint")
                 candidate.resolve(strict=True).relative_to(resolved_root)
             for name in sorted(filenames):
                 candidate = current / name
                 if candidate.is_symlink() or not stat.S_ISREG(candidate.lstat().st_mode):
-                    raise ValueError("adapter artifact contains a linked or irregular file")
+                    raise ValueError(f"{noun} contains a linked or irregular file")
                 candidate.resolve(strict=True).relative_to(resolved_root)
                 relative = candidate.relative_to(root).as_posix()
-                if relative == "adapter_model.safetensors":
+                if relative == primary_weights:
                     continue
                 if relative in _ROOT_AUXILIARY_METADATA_FILES:
                     # Explicitly classified benign metadata at the artifact ROOT only (``relative`` has
                     # no path separator). A nested ``dir/training_args.bin`` is not in the set and falls
                     # through to the weight-payload rejection below.
-                    _validate_root_auxiliary_metadata(candidate)
+                    _validate_root_auxiliary_metadata(candidate, noun=noun)
                     continue
-                if (
-                    candidate.suffix.lower() in _WEIGHT_SUFFIXES
-                    or name.startswith("adapter_model.")
-                    or name.startswith("pytorch_model")
+                if candidate.suffix.lower() in weight_suffixes or name.startswith(
+                    weight_name_prefixes
                 ):
-                    raise ValueError(
-                        "adapter artifact contains an alternate or nested model-weight payload"
-                    )
+                    raise ValueError(f"{noun} contains an alternate or nested model-weight payload")
     except (OSError, RuntimeError, ValueError) as exc:
-        if isinstance(exc, ValueError) and str(exc).startswith("adapter artifact"):
+        if isinstance(exc, ValueError) and str(exc).startswith(noun):
             raise
-        raise ValueError("adapter artifact tree is unsafe or changed during validation") from exc
+        raise ValueError(f"{noun} tree is unsafe or changed during validation") from exc
+
+
+def _validate_adapter_tree(root: Path) -> None:
+    """The sealed PEFT adapter tree: ``adapter_model.safetensors`` is the only weights payload (a
+    second ``.safetensors``, ``pytorch_model*``, ``model*.bin``, ``optimizer.pt``, a nested/arbitrary
+    ``.bin``, ... is refused)."""
+
+    _validate_export_tree(
+        root,
+        noun="adapter artifact",
+        primary_weights="adapter_model.safetensors",
+        weight_suffixes=_WEIGHT_SUFFIXES,
+        weight_name_prefixes=("adapter_model.", "pytorch_model"),
+    )
+
+
+def _validate_model_tree(root: Path) -> None:
+    """The full-parameter model export tree (pretraining / full-parameter SFT): the trainers save ONE
+    unsharded root ``model.safetensors`` next to its config and tokenizer files, so a shard, a sharding
+    index, a PyTorch/TF/Flax alternate, a checkpoint directory, or any link is refused. A link matters
+    here because the content hash follows linked files: without this policy an admitted hash could bind
+    bytes that live outside the run-scoped artifact."""
+
+    _validate_export_tree(
+        root,
+        noun="model artifact",
+        primary_weights="model.safetensors",
+        weight_suffixes=_MODEL_WEIGHT_SUFFIXES,
+        weight_name_prefixes=("model.", "pytorch_model", "tf_model", "flax_model"),
+    )
 
 
 def validate_sealed_adapter_artifact(

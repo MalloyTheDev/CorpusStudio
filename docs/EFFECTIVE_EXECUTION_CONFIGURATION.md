@@ -37,6 +37,140 @@ The configuration pins:
 `RunPlan.training_config_snapshot` remains only as a legacy read-compatibility field. Newly generated
 plans leave it empty and use `resolved_execution`.
 
+## Deployment status of the consumption guards
+
+The dataset-consumption check, the model/tokenizer and loader-policy lowering, and the full-parameter
+SFT preflight described below are worker code (`platform/runners.py`, the lane workers, and
+`training/trainer.py`), so they change worker bytes. A managed `platform-run --subprocess` run imports
+`corpus_studio` from the worker package installed in its sealed environment, never from this checkout.
+A managed environment therefore enforces these guards only after its worker wheel is rebuilt from source
+that contains them and the environment is re-sealed. The worker wheels recorded in
+[`HOST_STATE.md`](HOST_STATE.md) predate them, and the recorded DPO, reward, and full-parameter
+`workload_verified` bring-ups ran without them.
+
+## Dataset consumption
+
+The sealed dataset digest is enforced where the bytes are consumed, on every lane that trains from one
+pinned dataset file: adapter SFT, offline DPO (preference), the pairwise reward model, full-parameter
+SFT, and on-policy RL (GRPO, once that lane is admitted at execution). Each lane reads the dataset
+exactly once through `training/sealed_inputs.py`:
+
+1. `stable_file_bytes` checks the file identity before, at, and after open, reads exactly the size
+   observed at open (a file that keeps growing, or shrinks, is refused instead of being read without
+   bound), hashes incrementally, and captures the bytes;
+2. the digest must equal `inputs.dataset.content_sha256`;
+3. the rows are parsed from those captured bytes. The path is never reopened, so there is no window
+   between the check and the use, and no second full-corpus pass.
+
+Adapter SFT performs this read inside the trainer (`verify_sealed_runtime`). The DPO, reward,
+full-parameter SFT, and on-policy RL runners perform it before they import or call the worker, so a
+refusal happens before any heavy import, tokenizer or model load (for full-parameter SFT, before any
+weights load), and before any output directory exists. The worker accepts only those verified rows,
+and only when their digest and location match its own sealed binding.
+
+A post-plan or mid-read change, a missing file, a link, and a sealed but malformed or empty file are
+refused as `UNSUPPORTED_CONFIGURATION` at stage `dataset_verification`. On the DPO, reward,
+full-parameter SFT, and on-policy RL lanes the consumed digest is recorded as structured evidence: the
+final `dataset_verification` stage event carries
+`payload = {content_sha256, byte_count, row_count, execution_configuration_hash}`, which the subprocess
+worker streams to the parent and `platform-run --out` persists in `RunEvents.jsonl` (the adapter SFT
+lane emits the same stage without a payload). Byte progress is capped at 20 events per read, so a long
+read keeps the silence timer honest without flooding the stream. Because any mismatch refuses the run,
+a succeeded run consumed exactly the sealed bytes; the typed success evidence does not yet carry that
+digest itself.
+
+Byte-level parsing (`read_jsonl_bytes`) splits lines exactly like the path reader and the planning
+conformance check: only `\n`, `\r`, and `\r\n` end a row. A raw U+2028, U+2029, or U+0085 inside a
+JSON string therefore no longer splits a row that planning accepted.
+
+Not yet covered: pretraining corpus shards (`PretrainingShard.content_sha256`) and the pinned
+architecture config are not verified at consumption; that gap is tracked as a follow-up.
+
+## Model, tokenizer, and loader-policy consumption
+
+The DPO, reward, full-parameter SFT, and on-policy RL seals pin the same loader fields as the adapter
+SFT seal. Those lanes now lower them through the adapter SFT lane's own helpers, via
+`training/sealed_loader.py`, instead of hand-written `from_pretrained` calls:
+
+- **Identity.** The tokenizer is loaded from the sealed tokenizer binding: its own location, and its
+  own immutable revision when it is a Hub commit. It is never loaded from the model location. The model
+  is loaded with its sealed revision. Both loads pass `trust_remote_code=False` explicitly. The model
+  load also passes `use_safetensors=True`, so a checkpoint that ships only `.bin` weights is refused. A
+  sealed chat-template digest is checked against the loaded tokenizer.
+- **Attention.** Before any weights are allocated, the three SDPA toggles are applied and observed,
+  and an SDPA kernel is probed in isolation with a tiny forward/backward pass. The model is loaded with
+  the sealed `attn_implementation`. Training, and the reward and on-policy held-out measurements, run
+  inside the exclusive sealed-kernel context.
+- **Placement.** The model is loaded onto the sealed root device (`{"": "cuda:0"}`, or `{"": "cpu"}` on
+  the full-parameter `cpu_toy` path). Every parameter, buffer, and Accelerate hook is observed after
+  the load. On the full-parameter lane placement is observed again after the HF Trainer takes the
+  model, and a Trainer that sees more than one GPU (and would replicate the model) is refused.
+- **Precision.** The QLoRA lanes load the base as nf4 with the sealed dequantization dtype, then set
+  the identity-bound trainable parameters to the sealed master dtype. After PEFT attachment they
+  observe nf4 storage, the compute dtype, trainable dtypes, and post-adapter placement. The
+  full-parameter lane loads in the sealed weight-storage dtype and observes every floating parameter.
+  The full-parameter `cpu_toy` flag comes from the sealed `runtime_mode`, never from the caller.
+
+A sealed value these helpers cannot lower exactly is refused rather than replaced by a nearby value.
+`execution_config.verify_loader_policy_supported` runs at planning (a `PlannerError`), in each runner
+before dispatch, and in each worker for a direct caller. It refuses:
+
+- a model or tokenizer binding that is neither a Hub commit nor a local directory;
+- any device map other than exactly one root entry (judged on the sealed list, so a repeated root
+  entry is refused, never collapsed to its last device);
+- any device other than `cuda:0` (or `cpu` for full-parameter `cpu_toy` with eager attention);
+- `cpu_toy` on a QLoRA lane;
+- any quantization other than nf4 on the QLoRA lanes (for example `int4`);
+- a dequantization dtype that differs from the forward dtype;
+- a dequantization, master, or full-parameter storage dtype outside bf16, fp16, and fp32;
+- on the QLoRA lanes, a gradient dtype other than the master dtype, an optimizer-state dtype other
+  than `int8` for an 8-bit optimizer or the master dtype otherwise, or an optimizer auxiliary dtype
+  other than fp32. These workers neither choose nor observe those three fields, so only what their
+  update path materializes is admitted: autograd accumulates a gradient in its parameter's dtype,
+  `adamw_torch` keeps its moments in the parameter dtype, paged 8-bit AdamW keeps 8-bit moments, and
+  both keep step counters and quantization statistics in fp32;
+- the `xformers` attention API.
+
+The reward and on-policy RL contracts accept split, rootless, and repeated-root maps, mismatched
+dequantization and forward dtypes, and a missing master dtype. These are refused here even though the
+contract admits them.
+
+The runner also re-hashes local model and tokenizer directories before the dataset is read or the worker
+module is imported (`verify_execution_non_dataset_inputs`, the same pre-load check as adapter SFT). The
+worker re-hashes them again after the third-party load. A post-plan change is refused as
+`UNSUPPORTED_CONFIGURATION` at stage `env_loaded`, before any load. The admitted identity is recorded
+as structured evidence: the `execution_config_verified` stage event carries `payload = {model,
+tokenizer, execution_configuration_hash}`, where each binding lists its source, location, resolved
+revision, and content digest. The worker streams its loader stages (`tokenizer_load`,
+`attention_policy_applied`, `model_load`, `placement_verified`, and `precision_verified` as a note) to
+the run's event stream. Loader refusals keep the adapter SFT taxonomy:
+
+- a placement deviation is `UNSUPPORTED_CONFIGURATION` at `placement_deviation`;
+- an unavailable or drifted runtime is `ENVIRONMENT_FAILURE`;
+- a classified evidence failure keeps its own taxonomy and stage;
+- any other trainer refusal is `UNSUPPORTED_CONFIGURATION`.
+
+On-policy RL: `RewardSourceRef` names the served reward base only by location. The planner therefore
+seals an on-policy plan only when the reward run's model and tokenizer bindings equal the policy's.
+The worker loads the served reward base only as that pinned policy base, with the same loader policy.
+Any other reward base is refused until `RewardSourceRef` carries its own pinned binding.
+
+Not yet covered:
+
+- The full-parameter planner still seals `master_weight_dtype`, `gradient_dtype`, and (non-8-bit)
+  `optimizer_state_dtype` as fp32, while that worker trains in the storage dtype. These three fields
+  are not enforced on the full-parameter lane until the seal is corrected.
+- The QLoRA lanes admit only the gradient and optimizer-state dtypes their update path materializes;
+  unlike adapter SFT they do not yet observe gradient dtypes and devices in their hooks or the
+  optimizer state after the first step.
+- The loader observations are recorded as stage events, not yet as a structured field of the typed
+  success evidence.
+- The newer lanes do not yet verify formatter identity or sealed package versions at execution.
+- The pretraining lane does not lower its sealed storage dtype, attention, or placement.
+- No GPU run has exercised this enforcement. The recorded DPO, reward, and full-parameter bring-ups
+  predate it: their attention kernel was neither applied nor observed, and placement was hardcoded
+  to device 0. Enforcing the sealed kernel (math SDPA by default) can change their memory and speed.
+
 ## Plan-time admission
 
 An explicit request is not permission to bypass evidence. The selected backend must declare the
@@ -88,8 +222,12 @@ Before model loading, the execution path:
    In particular, `logging_strategy="steps"`, `logging_steps=1`, and
    `logging_nan_inf_filter=false` are part of the execution meaning.
 
-For subprocess runs, protocol 2.0 includes the execution-configuration hash in `run_accepted`. The
-parent compares it with the dispatched plan before accepting any run events.
+For subprocess runs, protocol 2.0 includes the selected variant's execution-configuration hash in
+`run_accepted`: adapter SFT, preference/DPO, pretraining, full-parameter SFT, reward, or on-policy RL,
+and null only for an echo plan. The parent compares it with the sealed hash of the variant it
+dispatched (`execution_config.resolved_execution_binding`) before accepting any run events. A worker
+built before #860 echoes only the adapter-SFT hash, so it fails closed for every other variant until
+its pinned wheel is rebuilt.
 
 Resolved training setup is supervised separately from optimizer execution. Its first recognized
 setup stage starts one absolute `--preflight-timeout` budget; bounded same-thread dataset and
@@ -155,6 +293,42 @@ does not silently replace it with `role: content` text.
 Truncation analysis renders and tokenizes the complete pinned JSONL, not the first 256 rows. Any
 over-length record blocks a default plan. `--allow-truncation` makes that policy explicit in the seal;
 it does not silently truncate an otherwise refusing plan.
+
+Full-parameter SFT runs the same preflight as adapter SFT (`trainer.preflight_sft_dataset`, one shared
+implementation). The worker runs it after the pinned tokenizer loads and its chat-template digest is
+checked, and before the SDPA kernel probe or any model weights load. Every verified row is formatted
+with that tokenizer (chat template included), and each rendered row is tokenized once, at full length
+(`add_special_tokens=True`, `truncation=False`). The token-coverage ledger measures those ids, and the
+training rows are built from exactly those ids. So any BOS, EOS, or other special token the tokenizer
+adds is counted, and a row exactly at `max_sequence_len` keeps every token. Labels are positional, so a
+trailing EOS whose id equals the pad id stays supervised and only the pad tail is masked.
+
+Truncation is permitted only when both `data.truncation_policy` and `sequence.truncation_allowed` allow
+it. Otherwise the run is refused before any weights load if any row, in any position, is over-length,
+renders to nothing, or tokenizes to no ids. The refusal is `UNSUPPORTED_CONFIGURATION` at the preflight
+stage the run reached (`dataset_formatting` or `truncation_analysis`). Its remediation names
+`--allow-truncation` only when the no-truncation policy itself refused (an over-length or unrenderable
+row); a formatter or tokenizer failure, or a row with no ids, gets a remediation that names no
+truncation policy, because none would admit it. The tokenizer never truncates and the row builder never
+slices. Under a sealed lossy policy the worker cuts over-length rows explicitly (right truncation) and
+drops unrenderable rows, and the ledger counts both; the lossy notice on stderr is ASCII.
+
+On the runner path the coverage is recorded as structured evidence before the model loads: a
+`truncation_analysis` stage event carries `payload = {execution_configuration_hash, truncation_policy,
+sealed_rows, unrenderable_rows, ledger, ledger_sha256}`. Like the other stage payloads, it is streamed
+to the parent and persisted in `RunEvents.jsonl`. For a fixed seal and worker the counts are
+deterministic.
+
+Not yet covered:
+
+- The typed success evidence does not carry the coverage record.
+- The full-parameter lane does not yet verify the sealed formatter identity at execution. It formats
+  with the worker's `format_example_text`.
+- DPO and reward measure truncation only after their models load, and they key it off
+  `sequence.truncation_allowed`. On-policy RL refuses an over-length prompt only when it samples that
+  prompt.
+- Instruction rows get no appended EOS in either SFT lane's preflight. Whether the pinned TRL version
+  appends one to adapter SFT rows is unverified.
 
 Corpus-scale streaming preparation is still future work. This guard is correct for the current
 file-backed trainer, but the trainer still materializes the corpus in memory.

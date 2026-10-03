@@ -6,6 +6,17 @@ measure the held-out pairwise ranking accuracy (the PROMOTION GATE), and seal a 
 the sealed config DIRECTLY (no lossy mirror), and the ``RewardRunner`` + supervisor independently re-verify
 before the evidence is admitted.
 
+The preference pairs are the rows the ``RewardRunner`` parsed from its single verified read of the sealed
+dataset (``training.sealed_inputs``: one stable read, sha256 compared with the seal, the same bytes
+parsed); the worker accepts only rows bound to its own sealed binding and never reopens the dataset path.
+
+The model and tokenizer are loaded through ``training.sealed_loader`` exactly as the DPO worker loads
+them (the tokenizer from its own sealed binding and revision; the nf4 SEQ_CLS base with the sealed
+revision, safetensors-only policy, dequantization dtype, root device and attention API; kernel probe,
+post-load and post-adapter observation), and both reward training and the held-out evaluation run inside
+the exclusive sealed-kernel context. A sealed loader value this worker cannot lower is refused before
+anything is imported or loaded.
+
 A reward model is CHEAPER than DPO: no reference model, no [seq x vocab] log-prob. The randomly-initialized
 score head trains alongside the LoRA adapter - PEFT keeps it trainable because the adapter is sealed
 ``task_type=SEQ_CLS`` - and both are saved into the ``reward_model`` artifact family.
@@ -17,12 +28,16 @@ from __future__ import annotations
 
 import types
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from corpus_studio.platform.contracts import (
     ResolvedRewardExecutionConfiguration,
     RewardSuccessEvidence,
 )
+
+if TYPE_CHECKING:
+    from corpus_studio.training.sealed_inputs import VerifiedDataset
+    from corpus_studio.training.sealed_loader import StageFn
 
 
 class RewardWorkerError(RuntimeError):
@@ -55,13 +70,41 @@ def concrete_reward_max_steps(
 def run_reward(  # pragma: no cover - optional training-stack integration; proven by a GPU run
     execution: ResolvedRewardExecutionConfiguration,
     *,
+    dataset: VerifiedDataset,
     output_dir: str | None = None,
+    stage_callback: StageFn | None = None,
 ) -> RewardRunResult:
     """Load the sealed nf4 SEQ_CLS base + LoRA score head, tokenize the sealed preference pairs, hold out a
     deterministic seeded ranking-eval split, train via ``run_reward_training``, assemble the formal
     execution evidence, save the adapter + score head, measure held-out pairwise accuracy, and seal the
     proposed success evidence. Refuses ``cpu_toy`` (nf4 requires CUDA; a CPU reward smoke path is a
-    follow-up)."""
+    follow-up) and any other sealed loader value it cannot lower. ``stage_callback(name, message)``
+    receives the loader and verification stages."""
+    # Rows come only from the runner's single verified read of the sealed dataset (the bytes whose sha256
+    # matched the seal). The mutable dataset path is never reopened here, and the binding is checked
+    # before anything heavy is imported or loaded.
+    from corpus_studio.training.sealed_inputs import (  # noqa: PLC0415
+        SealedInputError,
+        require_verified_dataset,
+    )
+
+    try:
+        rows = list(require_verified_dataset(dataset, execution.inputs.dataset).rows)
+    except SealedInputError as exc:
+        raise RewardWorkerError(str(exc)) from exc
+    if not rows:
+        raise RewardWorkerError("the sealed preference dataset is empty")
+    # The same loader-policy refusal the planner and runner apply, repeated for a direct caller.
+    from corpus_studio.platform.execution_config import (  # noqa: PLC0415
+        ExecutionConfigurationError,
+        verify_loader_policy_supported,
+    )
+
+    try:
+        verify_loader_policy_supported(execution, lane="reward")
+    except ExecutionConfigurationError as exc:
+        raise RewardWorkerError(str(exc)) from exc
+
     from pathlib import Path
 
     import torch
@@ -77,7 +120,6 @@ def run_reward(  # pragma: no cover - optional training-stack integration; prove
         BitsAndBytesConfig,
     )
 
-    from corpus_studio.importers.jsonl_importer import read_jsonl  # noqa: PLC0415
     from corpus_studio.platform.enums import StageMarker  # noqa: PLC0415
     from corpus_studio.platform.objectives import get_objective  # noqa: PLC0415
     from corpus_studio.training.optimizer_config import build_torch_optimizer  # noqa: PLC0415
@@ -88,10 +130,19 @@ def run_reward(  # pragma: no cover - optional training-stack integration; prove
         RewardExecutionTracker,
         build_reward_success_evidence,
     )
+    from corpus_studio.training.sealed_loader import (  # noqa: PLC0415
+        load_sealed_model,
+        load_sealed_tokenizer,
+        no_stage,
+        prepare_sealed_attention,
+        sealed_loader_view,
+        verify_sealed_adapter_precision,
+    )
     from corpus_studio.training.trainer import (  # noqa: PLC0415
         TrainerError,
         capture_adapter_export_state,
         capture_trainable_state,
+        enforced_attention_training_kernel,
         evaluate_reward_accuracy,
         expected_saved_adapter_config_sha256,
         format_preference_pair,
@@ -99,26 +150,18 @@ def run_reward(  # pragma: no cover - optional training-stack integration; prove
         run_reward_training,
     )
 
-    if execution.runtime_mode != "training":
-        raise RewardWorkerError(
-            f"the reward worker runs on GPU (runtime_mode='training'); got {execution.runtime_mode!r} - "
-            "nf4 4-bit requires CUDA, so a cpu_toy reward smoke path is a separate follow-up."
-        )
+    _stage = stage_callback or no_stage
+    view = sealed_loader_view(execution)
     objective = get_objective(execution.objective_ref.id)
     if objective is None:
         raise RewardWorkerError(f"unknown sealed reward objective {execution.objective_ref.id!r}")
     out = Path(output_dir or execution.output_dir)
 
-    # --- data: preference pairs from the sealed PreferenceDataPolicy dataset binding ---
-    rows = list(read_jsonl(Path(execution.inputs.dataset.location)))
-    if not rows:
-        raise RewardWorkerError("the sealed preference dataset is empty")
+    # --- data: preference pairs from the sealed PreferenceDataPolicy dataset binding (verified rows) ---
     base_model = execution.inputs.model.location
-    # SECURITY: honor the sealed trust_remote_code (Literal[False]) explicitly - never execute a downloaded
-    # repo's custom code - exactly as the SFT trainer + merge do; do not rely on the library default.
-    tokenizer = AutoTokenizer.from_pretrained(
-        base_model, trust_remote_code=execution.trust_remote_code
-    )
+    # The sealed TOKENIZER binding (its own location + immutable revision or directory digest), with the
+    # sealed trust_remote_code (Literal[False]) passed explicitly - never the model location or HEAD.
+    tokenizer = load_sealed_tokenizer(AutoTokenizer, view, stage=_stage)
     if tokenizer.pad_token_id is None:
         tokenizer.pad_token = tokenizer.eos_token
     pairs = [format_preference_pair(row, tokenizer) for row in rows]
@@ -134,18 +177,16 @@ def run_reward(  # pragma: no cover - optional training-stack integration; prove
     heldout_pairs = [pairs[index] for index in heldout_idx]
 
     # --- model: nf4 SEQ_CLS base (num_labels=1 scalar head) + LoRA from the sealed adapter spec ---
-    bnb = BitsAndBytesConfig(
-        load_in_4bit=True,
-        bnb_4bit_quant_type="nf4",
-        bnb_4bit_compute_dtype=torch.bfloat16,
-        bnb_4bit_use_double_quant=execution.bnb_4bit_use_double_quant,
-    )
-    model = AutoModelForSequenceClassification.from_pretrained(
-        base_model,
+    # Every sealed loader field is lowered by the shared SFT helpers (see the DPO worker); num_labels is
+    # the head shape, not loader policy, and may not override a sealed field.
+    prepare_sealed_attention(torch, view, stage=_stage)
+    model = load_sealed_model(
+        AutoModelForSequenceClassification,
+        torch,
+        view,
+        stage=_stage,
+        bitsandbytes_config_cls=BitsAndBytesConfig,
         num_labels=1,
-        quantization_config=bnb,
-        device_map={"": 0},
-        trust_remote_code=execution.trust_remote_code,
     )
     # SEQ_CLS models need a pad id on the config; we pool the score at the explicit last content token, so
     # this only guards any internal length bookkeeping.
@@ -176,6 +217,9 @@ def run_reward(  # pragma: no cover - optional training-stack integration; prove
 
     # --- evidence capture: register post-accumulation gradient hooks + snapshot BEFORE training ---
     gradient_tracker = register_full_model_gradient_hooks(model, torch)
+    # Lower the sealed master dtype on the identity-bound trainable parameters (LoRA + score head), then
+    # observe post-adapter placement, nf4 storage, dequantization dtype and trainable dtypes.
+    verify_sealed_adapter_precision(model, torch, view, gradient_tracker, stage=_stage)
     before_trainable = capture_trainable_state(model, torch, stage=StageMarker.adapter_attached)
     before_export = capture_adapter_export_state(
         get_peft_model_state_dict(model), torch, stage=StageMarker.adapter_attached
@@ -193,24 +237,28 @@ def run_reward(  # pragma: no cover - optional training-stack integration; prove
     tracker.on_train_begin(optimizer)
 
     # --- train via the reward primitive (a TrainerError is a fail-closed data/finiteness refusal) ---
-    try:
-        result = run_reward_training(
-            model,
-            tokenizer,
-            train_pairs,
-            seq_len=execution.sequence.max_sequence_len,
-            margin=execution.reward.margin,
-            learning_rate=opt.learning_rate,
-            max_steps=max_steps,
-            gradient_accumulation_steps=execution.batching.fallback_grad_accumulation_steps or 1,
-            max_prompt_length=execution.data.max_prompt_length,
-            gradient_checkpointing=execution.gradient_checkpointing,
-            max_grad_norm=opt.max_grad_norm,
-            optimizer=optimizer,
-            truncation_allowed=execution.sequence.truncation_allowed,
-        )
-    except TrainerError as exc:
-        raise RewardWorkerError(f"the reward training primitive refused the run: {exc}") from exc
+    # The sealed SDPA kernel stays exclusive for the whole call; a context failure propagates unwrapped.
+    with enforced_attention_training_kernel(torch, view):
+        try:
+            result = run_reward_training(
+                model,
+                tokenizer,
+                train_pairs,
+                seq_len=execution.sequence.max_sequence_len,
+                margin=execution.reward.margin,
+                learning_rate=opt.learning_rate,
+                max_steps=max_steps,
+                gradient_accumulation_steps=execution.batching.fallback_grad_accumulation_steps or 1,
+                max_prompt_length=execution.data.max_prompt_length,
+                gradient_checkpointing=execution.gradient_checkpointing,
+                max_grad_norm=opt.max_grad_norm,
+                optimizer=optimizer,
+                truncation_allowed=view.truncation_allowed,
+            )
+        except TrainerError as exc:
+            raise RewardWorkerError(
+                f"the reward training primitive refused the run: {exc}"
+            ) from exc
 
     # --- replay the per-step evidence into the tracker, snapshot AFTER, and seal the execution evidence ---
     losses = result["losses"]
@@ -247,17 +295,21 @@ def run_reward(  # pragma: no cover - optional training-stack integration; prove
     tokenizer.save_pretrained(str(out))
 
     # --- measure the PROMOTION GATE: held-out pairwise ranking accuracy (never a falling training loss) ---
-    try:
-        heldout = evaluate_reward_accuracy(
-            model,
-            tokenizer,
-            heldout_pairs,
-            seq_len=execution.sequence.max_sequence_len,
-            max_prompt_length=execution.data.max_prompt_length,
-            truncation_allowed=execution.sequence.truncation_allowed,
-        )
-    except TrainerError as exc:
-        raise RewardWorkerError(f"the held-out reward evaluation refused the pairs: {exc}") from exc
+    # The promotion gate is measured with the same sealed kernel the model was trained with.
+    with enforced_attention_training_kernel(torch, view):
+        try:
+            heldout = evaluate_reward_accuracy(
+                model,
+                tokenizer,
+                heldout_pairs,
+                seq_len=execution.sequence.max_sequence_len,
+                max_prompt_length=execution.data.max_prompt_length,
+                truncation_allowed=view.truncation_allowed,
+            )
+        except TrainerError as exc:
+            raise RewardWorkerError(
+                f"the held-out reward evaluation refused the pairs: {exc}"
+            ) from exc
 
     return RewardRunResult(
         output_dir=str(out),

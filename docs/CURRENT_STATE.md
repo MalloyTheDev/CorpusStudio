@@ -217,6 +217,9 @@ per-item error isolation, and off-thread document opens.
   many examples a given `sequence_len` would **truncate** (cutting the end - including the model's
   answer). New platform plans render and tokenize the complete hash-pinned JSONL with the exact pinned
   tokenizer/template; over-length rows fail closed unless `allow_truncation` is explicit in the seal.
+  At execution the adapter SFT and full-parameter SFT workers enforce this before any weights load
+  (#861); the DPO and reward workers refuse over-length pairs only inside the training primitive, after
+  the model loads, and the on-policy RL worker checks prompt length lazily per sample.
   The standalone report retains a documented heuristic when the tokenizer extra is absent.
 - **Resolved checkpoint/output policy**: by default a first-party plan seals checkpointing off
   (`save_strategy="no"`, null cadence/retention) and each run writes beneath
@@ -242,6 +245,38 @@ per-item error isolation, and off-thread document opens.
   Artifact and terminal manifests are persisted before terminal success is released, and a claimed
   proven fit is reconstructed from the raw measured peak. Failed non-spilling runs remain
   `NATIVE_UNPROVEN`, and structured failure taxonomy retains the last verified stage and child detail.
+- **Per-variant subprocess-parent admission (#860)**: the `platform-run --subprocess` parent re-derives a
+  succeeded terminal for every resolved variant (adapter SFT, preference/DPO, reward, on-policy RL,
+  full-parameter SFT, pretraining) through one binding table (`execution_config.resolved_execution_binding`),
+  torch-free. Before spawn it re-verifies the dispatched variant's seal and refuses a `max_steps` override;
+  `run_accepted` must echo that variant's configuration hash (null only for an echo plan). A succeeded
+  terminal must carry exactly that variant's evidence family (a foreign family is a protocol violation) and
+  exactly one run-scoped artifact of its kind whose integrity hash still matches. Adapter exports pass the
+  adapter-tree policy and full-model exports the model-tree policy (one root `model.safetensors`; no links,
+  shards, sharding index, alternate formats or `checkpoint-*` directories), both before any byte is hashed.
+  For non-SFT variants the parent also re-checks the sealed step schedule, the proposed Safetensors/config
+  digests and the canonical tensor state against the trained export state; a claimed fit is reconstructed
+  from the raw peak. An echo terminal may claim no evidence, artifact or fit. The in-process supervisor
+  (`supervisor.execute_run`, the default `platform-run` path) re-verifies the dispatched variant's seal
+  through the same binding table, so a tampered DPO, reward, on-policy RL, full-parameter SFT or
+  pretraining body is refused with `UNSUPPORTED_CONFIGURATION` on both paths, not only under `--subprocess`.
+  Compatibility: worker wheels built before #860 echo only the adapter-SFT hash, so their DPO, reward,
+  full-parameter SFT and pretraining runs fail closed at `run_accepted` until the pinned worker wheel is
+  rebuilt. Known limit: the full-model tensor-state check has not yet been exercised against a real
+  `save_pretrained` export on the GPU host.
+- **Lane conformance matrix (test-only assurance)**: `engine/tests/lane_conformance.py` declares, for
+  each of the six resolved execution variants and each of fourteen execution guarantees, one cell -
+  `ENFORCED` with the test that proves it, `GAP` with its tracking issue, `UNPROVEN` where the code
+  applies the guarantee but no test covers that lane, or `NOT_APPLICABLE` with the reason. A new
+  resolved variant cannot reach execution without declaring all fourteen, which is the defect class
+  behind #860 to #863 (a lane added by copying an older one, silently dropping a guarantee). An
+  `ENFORCED` cell's proof is resolved by importing the test module and reading its real
+  `parametrize` marks, so a lane dropped from a proof's lane list fails the matrix instead of quietly
+  voiding the cell. Current non-`ENFORCED` cells, all tracked: adapter SFT export-tree ordering
+  (#918), formatter identity unchecked on the DPO/reward/on-policy RL/full-parameter SFT lanes
+  (#919), `--max-steps` silently discarded in-process on five lanes (#920), pretraining sealed corpus
+  and architecture hashes unverified (#921), pretraining precision/attention/placement sealed but not
+  lowered (#922), and four guarantees enforced in code with no test on one lane each (#923).
 - **Versioned reasoning/tool trace foundation** — the language-neutral, hash-sealed `TraceRecord`
   preserves exact source-row lineage, ordered role context, reasoning/action/tool/result/final-answer
   boundaries, producer/model/prompt/request/response evidence, typed validation findings, and a
@@ -412,6 +447,22 @@ per-item error isolation, and off-thread document opens.
   504/504 LoRA tensors changed with observed gradients, peak 5.79 GiB; see [`HOST_STATE.md`](HOST_STATE.md)).
   A PRODUCT claim, not a sealed IEEE cell. The managed `platform-run --subprocess` route (a DPO worker
   wheel + sealed env) is the deployment follow-up, exactly as for pretraining (in-process routes now).
+  Consumption guard (#862): the `PreferenceRunner` reads the sealed dataset ONCE before it dispatches the
+  worker (`training/sealed_inputs.py`: one stable read, sha256 compared with
+  `inputs.dataset.content_sha256`, the same bytes parsed), and the worker consumes only those verified rows.
+  A post-plan or mid-read change, a missing or linked file, or a malformed or empty file is refused as
+  `UNSUPPORTED_CONFIGURATION` at `dataset_verification` before any tokenizer or model load or output
+  directory; the verified digest, byte/row counts and configuration hash are recorded in that stage event's
+  payload. The GPU bring-up above predates this guard.
+  Sealed loader (#863, `training/sealed_loader.py`): the worker loads the model and the tokenizer each from
+  its own sealed binding (an immutable Hub commit or a digest-pinned local directory; local bindings are
+  re-hashed by the runner before dispatch and again after the load), safetensors-only with
+  trust_remote_code=False. Before any weights are allocated it applies and probes the sealed attention API
+  and SDPA kernel, loads onto the sealed root device (cuda:0), observes placement, and lowers the sealed nf4
+  compute dtype and trainable master dtype; training runs inside the exclusive sealed-kernel context. A
+  value the worker cannot lower is refused at planning, at runner admission and in the worker, and the
+  admitted identity is recorded in the `execution_config_verified` stage payload. The bring-up above
+  predates this enforcement; GPU re-validation with a rebuilt worker wheel is pending.
 - **Pairwise reward model (`reward_model`, `workload_verified`, EXECUTABLE)**: `platform-plan --task-type
   reward --objective reward_model` admits a plan AT PLANNING and lowers it into a sealed
   `ResolvedRewardExecutionConfiguration` (its own byte-locked seal, sibling to the DPO config) - a
@@ -428,6 +479,22 @@ per-item error isolation, and off-thread document opens.
   loss 0.7563->0.0, score margin -0.07->46.65, held-out accuracy 1.0/2, 337/337 tensors changed, NATIVE_SAFE,
   peak 0.95 GiB; see [`HOST_STATE.md`](HOST_STATE.md)). A PRODUCT claim, not a sealed IEEE cell. The managed
   `platform-run --subprocess` route (a reward worker wheel + sealed env) is the deployment follow-up.
+  Consumption guard (#862): the `RewardRunner` reads the sealed dataset ONCE before it dispatches the worker
+  (`training/sealed_inputs.py`: one stable read, sha256 compared with `inputs.dataset.content_sha256`, the
+  same bytes parsed), and the worker consumes only those verified rows. A post-plan or mid-read change, a
+  missing or linked file, or a malformed or empty file is refused as `UNSUPPORTED_CONFIGURATION` at
+  `dataset_verification` before any tokenizer or model load or output directory; the verified digest,
+  byte/row counts and configuration hash are recorded in that stage event's payload. The GPU bring-up above
+  predates this guard.
+  Sealed loader (#863, `training/sealed_loader.py`): the worker loads the model and the tokenizer each from
+  its own sealed binding (an immutable Hub commit or a digest-pinned local directory; local bindings are
+  re-hashed by the runner before dispatch and again after the load), safetensors-only with
+  trust_remote_code=False. Before any weights are allocated it applies and probes the sealed attention API
+  and SDPA kernel, loads onto the sealed root device (cuda:0), observes placement, and lowers the sealed nf4
+  compute dtype and trainable master dtype; training runs inside the exclusive sealed-kernel context. A
+  value the worker cannot lower is refused at planning, at runner admission and in the worker, and the
+  admitted identity is recorded in the `execution_config_verified` stage payload. The bring-up above
+  predates this enforcement; GPU re-validation with a rebuilt worker wheel is pending.
 - **Full-parameter SFT (`dense_full_finetune`, `workload_verified`, EXECUTABLE)**: `platform-plan
   --task-type sft --adapter-method full_finetune --export-format merged_safetensors` seals a full-MODEL
   `ResolvedFullFinetuneExecutionConfiguration` (its own byte-locked seal, sibling to the adapter SFT config)
@@ -440,6 +507,33 @@ per-item error isolation, and off-thread document opens.
   2.28->0.17, 290/290 tensors with observed gradients, peak 5.01 GiB; see [`HOST_STATE.md`](HOST_STATE.md)).
   This also FIXED a latent mis-seal (`full_parameter_sft` previously lowered silently to QLoRA). A PRODUCT
   claim, not a sealed IEEE cell; the managed subprocess wheel route is the deployment follow-up.
+  Consumption guard (#862): the `FullFinetuneRunner` reads the sealed dataset ONCE before it dispatches the
+  worker (`training/sealed_inputs.py`: one stable read, sha256 compared with
+  `inputs.dataset.content_sha256`, the same bytes parsed), and the worker consumes only those verified rows.
+  A post-plan or mid-read change, a missing or linked file, or a malformed or empty file is refused as
+  `UNSUPPORTED_CONFIGURATION` at `dataset_verification` before any weights or tokenizer load or output
+  directory; the verified digest, byte/row counts and configuration hash are recorded in that stage event's
+  payload. The GPU bring-up above predates this guard.
+  Sealed loader (#863, `training/sealed_loader.py`): the worker loads the model and the tokenizer each from
+  its own sealed binding (an immutable Hub commit or a digest-pinned local directory; local bindings are
+  re-hashed by the runner before dispatch and again after the load), safetensors-only with
+  trust_remote_code=False. Before any weights are allocated it applies and probes the sealed attention API
+  and SDPA kernel, loads onto the sealed root device (cuda:0; cpu_toy on cpu), observes placement, and
+  lowers the sealed full-parameter storage dtype; training runs inside the exclusive sealed-kernel context.
+  A value the worker cannot lower is refused at planning, at runner admission and in the worker, and the
+  admitted identity is recorded in the `execution_config_verified` stage payload. The bring-up above
+  predates this enforcement; GPU re-validation with a rebuilt worker wheel is pending. Known gap:
+  full-parameter plans seal master, gradient and optimizer-state dtypes as fp32 while the worker trains in
+  the storage dtype; those three are not enforced on this lane.
+  No silent truncation (#861): after the pinned tokenizer loads and before the kernel probe or any weights
+  load, the worker runs the adapter SFT lane's own full-content preflight (`trainer.preflight_sft_dataset`)
+  over every verified row with the bound tokenizer (chat template included) and trains exactly the ids it
+  measured. Under the default refuse policy an over-length, unrenderable or empty row anywhere is refused as
+  `UNSUPPORTED_CONFIGURATION`; truncation needs both `data.truncation_policy` and
+  `sequence.truncation_allowed`, and is then explicit and recorded as a deterministic token-coverage payload
+  on the `truncation_analysis` stage, bound to the execution hash. The bring-up above ran on the earlier
+  worker, which cut over-length rows silently; whether any of its rows exceeded 512 tokens has not been
+  re-checked.
 - **Identity-bound backend worker protocol 2.0**: every newly generated RunPlan hash-pins the exact
   static BackendManifest. A subprocess worker must send `hello` first with that manifest and its exact
   environment/lock ref; only then can the core dispatch. The parent enforces protocol/direction/body,
@@ -449,7 +543,9 @@ per-item error isolation, and off-thread document opens.
   plans remain readable but must be regenerated for protocol-2 subprocess dispatch. Both public run
   entry points verify the plan seal before a runner is invoked or spawned. Workers/installers own a
   POSIX session or Windows process group and use bounded process-tree termination; the fake-worker
-  suite verifies a timed-out descendant does not survive. See
+  suite verifies a timed-out descendant does not survive. `run_accepted` echoes the sealed
+  configuration hash of the one execution variant the plan carries (null only for echo), and the parent
+  binds it to the dispatched variant (#860). See
   [`BACKEND_WORKER_PROTOCOL.md`](BACKEND_WORKER_PROTOCOL.md).
 - **Effective execution contract (Phase 9B)**: every new first-party training plan embeds a separately
   hash-sealed `ResolvedExecutionConfiguration`. It pins exact dataset bytes, immutable model/tokenizer
@@ -472,7 +568,14 @@ per-item error isolation, and off-thread document opens.
   off by default and opt-in via `--checkpoint-cadence` on the adapter SFT lane, with exact-lineage
   `--resume-from` now shipped (#486, `workload_verified` at 7B/seq-4096). Adapter IDs include the
   run, role, and weight-content hash; persisted manifests live under `<record-root>/runs/<run-id>/`.
-  Legacy plans remain readable but are not executable by the training runner; regenerate them. See
+  Legacy plans remain readable but are not executable by the training runner; regenerate them.
+  Consumption verification (#862) covers every single-file dataset lane (adapter SFT in the trainer;
+  DPO, reward, full-parameter SFT and, once admitted, on-policy RL in their runners) through the shared
+  torch-free `training/sealed_inputs.py`. `read_jsonl_bytes` splits lines exactly like `read_jsonl`
+  (universal newlines only, so raw U+2028/U+2029/U+0085 inside a JSON string no longer split a row that
+  planning accepted), and the stable read is bounded to the size seen at open. Known gap: pretraining
+  corpus shards (`PretrainingShard.content_sha256`) and the pinned architecture config are not yet
+  verified at consumption. See
   [`EFFECTIVE_EXECUTION_CONFIGURATION.md`](EFFECTIVE_EXECUTION_CONFIGURATION.md).
 - **Reliability**: an in-process watchdog detects a stall/spill + captures a measured fit; the
   subprocess worker can **KILL a hung run** (→ `KERNEL_STALL`) and isolates a crash. The pre-Phase-9B
@@ -523,6 +626,18 @@ per-item error isolation, and off-thread document opens.
   `--output` file, verified against the recorded fingerprint (all-or-nothing,
   atomic, overwrite-safe), or **in place** with `--in-place` (undo-captured). The
   sanctioned single writer of `examples.jsonl` is the engine's `examples-append`.
+  Capture/publication (store append -> manifest -> record) and row-store GC (manifest
+  scan -> replace) are serialized by a cross-process version-store lock
+  (`dataset_versions/.version_store.lock`: portable, bounded wait, same-thread
+  reentrant, released on crash), so a version published while GC runs never loses
+  rows (#859). The examples.jsonl writer lock is always taken before it. GC is
+  fail-closed: it refuses (exit 1, nothing pruned) on a busy store, a manifest that is
+  not UTF-8, a torn manifest line, a manifest whose row count disagrees with its
+  record, or a failed replace. A capture killed mid-append leaves only states the next
+  capture and GC recover without manual repair (a torn tail is newline-terminated at
+  the byte level; readers skip torn or undecodable lines); see
+  [`VERSIONING.md`](VERSIONING.md). Records, manifests, the GC-rewritten store and the
+  lock file are created 0600 (single-owner projects).
 - A desktop **Versions** tab: read-only history with a live integrity badge, an
   opt-in **Capture version** button, **View card**, a **diff view** ("Set diff
   base" → "Diff base → selected"), and **Restore this version** (in-place). The
@@ -630,7 +745,8 @@ per-item error isolation, and off-thread document opens.
 - Dataset-version **reorder detection** and a normalized row identity are still future.
 
   _Previously listed here but now **shipped** (see `CLI_REFERENCE.md`): row-store garbage collection
-  (`dataset-version-gc`, fail-closed, `--dry-run`), opt-in export PII/secret redaction
+  (`dataset-version-gc`, fail-closed, `--dry-run`, serialized with version capture by the
+  version-store lock, #859), opt-in export PII/secret redaction
   (`export --redact-pii`, with a redaction manifest — known patterns only, not de-identification), the
   desktop per-project gate-threshold editor (`gate-thresholds` read + `gate-thresholds-set` validated
   write), and the validator's recursive **lists-of-objects** checking (`SchemaField.item_fields`)._

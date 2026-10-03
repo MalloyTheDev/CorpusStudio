@@ -499,6 +499,10 @@ def test_reward_objective_requires_the_reward_task():
 _REWARD_BRINGUP = (
     Path(__file__).resolve().parent.parent / "examples/wbg/runs/reward-bringup-qwen05b"
 )
+# The bring-up reward run trained on this base (Hub commit "1" * 40, the _plan default revision). A
+# RewardSourceRef carries no pinned binding of its own, so an on-policy plan is sealed only when its policy
+# base and tokenizer ARE the reward run's pinned bindings (#863).
+_REWARD_BASE = "Qwen/Qwen2.5-0.5B-Instruct"
 
 
 def test_on_policy_rl_resolves_to_a_sealed_config_and_is_refused_at_execution():
@@ -513,6 +517,7 @@ def test_on_policy_rl_resolves_to_a_sealed_config_and_is_refused_at_execution():
     # and binds the reward source BY PROVENANCE from the real reward bring-up RunManifest + RunPlan.
     plan = _plan(
         _profile(cc_major=8), _report(), task_type="grpo", objective_id="grpo",
+        base_model=_REWARD_BASE,
         reward_source_manifest=str(_REWARD_BRINGUP / "runs/run-reward-sealed-0001/RunManifest.json"),
         reward_source_plan=str(_REWARD_BRINGUP / "reward-bringup.RunPlan.json"),
     )
@@ -562,6 +567,7 @@ def test_on_policy_rl_refuses_a_tampered_provenance_plan(tmp_path):
     with pytest.raises(PlannerError, match="self-consistent|does not bind this exact RunPlan"):
         _plan(
             _profile(cc_major=8), _report(), task_type="grpo", objective_id="grpo",
+            base_model=_REWARD_BASE,
             reward_source_manifest=str(manifest), reward_source_plan=str(tampered_path),
         )
 
@@ -573,7 +579,7 @@ def test_on_policy_rl_refuses_a_checkpoint_cadence():
     with pytest.raises(PlannerError, match="on-policy RL lane cannot write intermediate checkpoints"):
         _plan(
             _profile(cc_major=8), _report(), task_type="grpo", objective_id="grpo",
-            checkpoint_steps=10,
+            base_model=_REWARD_BASE, checkpoint_steps=10,
             reward_source_manifest=str(_REWARD_BRINGUP / "runs/run-reward-sealed-0001/RunManifest.json"),
             reward_source_plan=str(_REWARD_BRINGUP / "reward-bringup.RunPlan.json"),
         )
@@ -586,7 +592,7 @@ def test_on_policy_rl_refuses_a_metric_driven_lr_scheduler():
     with pytest.raises(PlannerError, match="reduce_lr_on_plateau"):
         _plan(
             _profile(cc_major=8), _report(), task_type="grpo", objective_id="grpo",
-            lr_scheduler="reduce_lr_on_plateau",
+            base_model=_REWARD_BASE, lr_scheduler="reduce_lr_on_plateau",
             reward_source_manifest=str(_REWARD_BRINGUP / "runs/run-reward-sealed-0001/RunManifest.json"),
             reward_source_plan=str(_REWARD_BRINGUP / "reward-bringup.RunPlan.json"),
         )
@@ -598,7 +604,7 @@ def test_on_policy_rl_refuses_an_unknown_lr_scheduler():
     with pytest.raises(PlannerError, match="not a supported schedule-only scheduler"):
         _plan(
             _profile(cc_major=8), _report(), task_type="grpo", objective_id="grpo",
-            lr_scheduler="linar",  # a typo for 'linear'
+            base_model=_REWARD_BASE, lr_scheduler="linar",  # a typo for 'linear'
             reward_source_manifest=str(_REWARD_BRINGUP / "runs/run-reward-sealed-0001/RunManifest.json"),
             reward_source_plan=str(_REWARD_BRINGUP / "reward-bringup.RunPlan.json"),
         )
@@ -616,6 +622,7 @@ def test_on_policy_rl_seals_the_generation_prompt_formatter():
 
     plan = _plan(
         _profile(cc_major=8), _report(), task_type="grpo", objective_id="grpo",
+        base_model=_REWARD_BASE,
         reward_source_manifest=str(_REWARD_BRINGUP / "runs/run-reward-sealed-0001/RunManifest.json"),
         reward_source_plan=str(_REWARD_BRINGUP / "reward-bringup.RunPlan.json"),
     )

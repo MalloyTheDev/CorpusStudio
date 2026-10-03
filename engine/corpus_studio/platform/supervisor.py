@@ -243,8 +243,16 @@ class RunContext:
         self._sink(event)
         return event
 
-    def emit_stage(self, marker: StageMarker, message: str | None = None) -> RunEvent:
-        return self._event("stage", stage=marker, message=message)
+    def emit_stage(
+        self,
+        marker: StageMarker,
+        message: str | None = None,
+        *,
+        payload: dict[str, Any] | None = None,
+    ) -> RunEvent:
+        """Emit a stage event. ``payload`` carries structured evidence for that stage (for example the
+        digest of the dataset bytes a worker verified and consumed) on the durable event stream."""
+        return self._event("stage", stage=marker, message=message, payload=payload)
 
     def emit_metric(
         self,
@@ -1010,22 +1018,34 @@ def execute_run(
                 stage=StageMarker.env_loaded,
                 remediation="regenerate the RunPlan from immutable inputs; do not mutate it after sealing",
             )
-        if plan.resolved_execution is not None:
-            from corpus_studio.platform.execution_config import (  # noqa: PLC0415
-                verify_execution_configuration_hash,
-            )
-
-            if not verify_execution_configuration_hash(plan.resolved_execution):
-                raise RunnerFailure(
-                    "resolved execution configuration hash verification failed",
-                    taxonomy=FailureTaxonomy.UNSUPPORTED_CONFIGURATION,
-                    stage=StageMarker.env_loaded,
-                    remediation="regenerate the RunPlan; do not mutate resolved execution fields",
-                )
         from corpus_studio.platform.execution_config import (  # noqa: PLC0415
             ExecutionConfigurationError,
+            resolved_execution_binding,
             verify_runner_lane,
         )
+
+        # Re-verify the seal of whichever variant this plan carries, not only adapter SFT. RunPlan
+        # validation already refuses a mismatched hash, so this covers the case that validation cannot
+        # see: an in-memory plan handed straight to the library (a model_copy), which is the same
+        # threat model the subprocess parent checks before it spawns. This is the DEFAULT CLI path.
+        try:
+            binding = resolved_execution_binding(plan)
+        except ExecutionConfigurationError as exc:
+            raise RunnerFailure(
+                str(exc),
+                taxonomy=FailureTaxonomy.UNSUPPORTED_CONFIGURATION,
+                stage=StageMarker.env_loaded,
+                remediation="regenerate the RunPlan; do not mutate resolved execution fields",
+            ) from exc
+        if binding is not None and not binding.verify_configuration_hash():
+            raise RunnerFailure(
+                "resolved execution configuration hash verification failed"
+                if binding.label == "training"
+                else f"resolved {binding.label} execution configuration hash verification failed",
+                taxonomy=FailureTaxonomy.UNSUPPORTED_CONFIGURATION,
+                stage=StageMarker.env_loaded,
+                remediation="regenerate the RunPlan; do not mutate resolved execution fields",
+            )
 
         try:
             verify_runner_lane(plan, runner.name)
