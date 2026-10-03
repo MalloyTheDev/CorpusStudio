@@ -30,18 +30,36 @@ from corpus_studio.gates.models import (
     GateThresholds,
 )
 from corpus_studio.quality.basic_quality import build_basic_quality_report
+from corpus_studio.schemas.base import DatasetSchema
 from corpus_studio.splitters.leakage import detect_split_leakage
-from corpus_studio.validators.basic_validator import validate_jsonl_row
+from corpus_studio.validators.basic_validator import (
+    validate_jsonl_row,
+    validate_jsonl_row_against,
+)
 from corpus_studio.validators.results import ValidationReport
 
 GATE_REPORTS_DIRNAME = "gate_reports"
 
 
-def _validate_rows(rows: list[dict[str, Any]], schema_id: str) -> ValidationReport:
+def _validate_rows(
+    rows: list[dict[str, Any]],
+    schema_id: str,
+    schema: DatasetSchema | None = None,
+) -> ValidationReport:
+    """Validate ``rows``, against an already-RESOLVED ``schema`` when one is given.
+
+    The resolved-schema seam is what lets the gates run against a PROJECT-LOCAL schema: resolution
+    (project-local first, builtin second) belongs to the caller, which owns the project directory,
+    so there is one resolution path shared with schema-validate rather than a second one here.
+    With no resolved schema the builtin of ``schema_id`` is loaded, as before.
+    """
     report = ValidationReport(valid=True, schema_id=schema_id)
     for row_number, row in enumerate(rows, start=1):
         report.checked_rows += 1
-        report.errors.extend(validate_jsonl_row(row, schema_id, row_number))
+        if schema is None:
+            report.errors.extend(validate_jsonl_row(row, schema_id, row_number))
+        else:
+            report.errors.extend(validate_jsonl_row_against(row, schema, row_number))
     report.valid = len(report.errors) == 0
     return report
 
@@ -52,10 +70,13 @@ def run_dataset_gates(
     thresholds: GateThresholds | None = None,
     target: str = "dataset",
     generated_at: str | None = None,
+    schema: DatasetSchema | None = None,
 ) -> GateReport:
     thresholds = thresholds or GateThresholds()
-    validation = _validate_rows(rows, schema_id)
-    quality = build_basic_quality_report(rows)
+    validation = _validate_rows(rows, schema_id, schema)
+    # The resolved schema also tells the quality signals which of them this SHAPE supports, so a
+    # non-text dataset's gate reports what it could not assess instead of a clean quality pass.
+    quality = build_basic_quality_report(rows, schema)
     results = [
         input_present_gate(len(rows), GateScope.DATASET, block_when_empty=False),
         schema_gate(validation, GateScope.DATASET),
@@ -71,13 +92,14 @@ def run_chat_gates(
     thresholds: GateThresholds | None = None,
     target: str = "chat",
     generated_at: str | None = None,
+    schema: DatasetSchema | None = None,
 ) -> GateReport:
     """Chat-suite gate: is a chat dataset structurally sound to train on? Combines input
     presence, per-message schema validation, and conversation-SEQUENCE structure. Verdicts
     structure, never semantic quality."""
 
     thresholds = thresholds or GateThresholds()
-    validation = _validate_rows(rows, schema_id)
+    validation = _validate_rows(rows, schema_id, schema)
     results = [
         input_present_gate(len(rows), GateScope.CHAT_SUITE, block_when_empty=True),
         schema_gate(validation, GateScope.CHAT_SUITE),
@@ -92,6 +114,7 @@ def run_export_gates(
     thresholds: GateThresholds | None = None,
     target: str = "export",
     generated_at: str | None = None,
+    schema: DatasetSchema | None = None,
 ) -> GateReport:
     """Export gate: block on empty input, schema, or PII failure; warn on quality.
 
@@ -109,8 +132,8 @@ def run_export_gates(
             "block_low_information": False,
         }
     )
-    validation = _validate_rows(rows, schema_id)
-    quality = build_basic_quality_report(rows)
+    validation = _validate_rows(rows, schema_id, schema)
+    quality = build_basic_quality_report(rows, schema)
     results = [
         input_present_gate(len(rows), GateScope.EXPORT, block_when_empty=True),
         schema_gate(validation, GateScope.EXPORT),

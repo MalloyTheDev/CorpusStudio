@@ -100,7 +100,10 @@ def build_dataset_card(
 ) -> DatasetCard:
     """Assemble a dataset card from already-loaded project artifacts."""
 
-    quality = build_basic_quality_report(rows)
+    # The card already holds the RESOLVED schema, so the quality signals know which of them this
+    # shape supports. Without it a non-text dataset would collect no quality warnings at all,
+    # and an empty warning list reads as a clean bill of health.
+    quality = build_basic_quality_report(rows, schema)
     card = DatasetCard(
         project_id=project_id,
         project_name=project_name,
@@ -153,6 +156,14 @@ def _build_card_warnings(card: DatasetCard) -> list[str]:
         warnings.append(
             f"{quality.synthetic_pattern_count} synthetic-pattern issue(s) flagged; "
             "review before training."
+        )
+    # Name the signals that ran no check, so their silence above is not read as a pass.
+    applicability = quality.applicability
+    if applicability is not None and applicability.not_applicable_signals:
+        skipped = ", ".join(applicability.not_applicable_signals)
+        warnings.append(
+            f"Quality signals that do not apply to this schema's shape, so they report no "
+            f"result rather than a pass: {skipped}."
         )
 
     if card.splits is None:

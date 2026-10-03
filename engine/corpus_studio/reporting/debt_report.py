@@ -25,8 +25,22 @@ Severity rules (documented, per category):
   > 0.75 → moderate, > 0.50 → low.
 
 Grade rule: F if any critical; else D if any high; else C if any moderate; else B
-if any low; else A (no items). An empty dataset is ``N/A`` ("no rows to assess"),
-never grade A.
+if any low; else A (no items).
+
+A grade is WITHHELD (``grade is None``, with ``grade_reason`` saying why) rather than guessed
+whenever the ledger cannot stand behind one. Three cases:
+- an empty dataset has no rows to assess, and is never grade A;
+- a dataset whose shape does not support the text signals (an object-detection corpus of
+  normalized boxes, a numeric table) has no meaningful letter: the signals that produce a grade
+  for a text corpus could not run, so A would read as "clean" and D as "broken" on the strength
+  of heuristics that read nothing. Those signals are listed in ``not_assessed`` and contribute
+  no debt items;
+- no debt found AND the applicability was never measured (no schema). A clean bill of health is a
+  POSITIVE claim: finding nothing is not the same as finding nothing wrong, and without a schema
+  it is not known whether the signals could read the data at all. Items that DID fire are their
+  own evidence, so an unmeasured B/C/D/F still stands.
+Applicability comes from ``QualityReport.applicability``; see
+:mod:`corpus_studio.quality.applicability`.
 """
 
 from __future__ import annotations
@@ -36,6 +50,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from corpus_studio.quality.applicability import QualityApplicability
 from corpus_studio.quality.basic_quality import QualityReport
 
 NONE = "none"
@@ -45,6 +60,13 @@ HIGH = "high"
 CRITICAL = "critical"
 
 _SEVERITY_ORDER = {NONE: 0, LOW: 1, MODERATE: 2, HIGH: 3, CRITICAL: 4}
+
+# The signals a letter grade for a text corpus actually rests on. Where a dataset's shape
+# supports none of them, the remaining any-shape signals (empty rows, exact duplicates, secrets)
+# are too thin a basis for one health verdict, so the grade is withheld instead of guessed.
+_GRADE_BEARING_SIGNALS = frozenset(
+    {"normalized_duplicates", "low_information", "synthetic_patterns", "token_length_outliers"}
+)
 
 
 class DebtItem(BaseModel):
@@ -60,12 +82,23 @@ class DebtItem(BaseModel):
 class DebtReport(BaseModel):
     example_count: int
     has_data: bool  # False for 0 rows -> "no rows to assess", NOT grade A
-    grade: str      # A | B | C | D | F, or 'N/A' when not has_data
+    # A | B | C | D | F, or None when no grade can honestly be given (see the module docstring).
+    grade: str | None
+    # Why the grade is withheld; "" exactly when a grade WAS given.
+    grade_reason: str = ""
     items: list[DebtItem] = Field(default_factory=list)
+    # Signals this dataset's shape does not support, so they ran no check at all. Their absence
+    # from ``items`` is "not measured", never "measured clean".
+    not_assessed: list[str] = Field(default_factory=list)
 
     @property
     def clean(self) -> bool:
-        return self.has_data and not self.items
+        """Assessed and free of debt. A withheld grade is never clean: nothing was assessed."""
+        return self.has_data and self.grade is not None and not self.items
+
+    @property
+    def graded(self) -> bool:
+        return self.grade is not None
 
 
 def _rate_severity(rate: float, moderate_above: float, high_above: float) -> str:
@@ -93,7 +126,19 @@ def build_debt_report(quality: QualityReport) -> DebtReport:
 
     total = quality.example_count
     if total <= 0:
-        return DebtReport(example_count=max(total, 0), has_data=False, grade="N/A", items=[])
+        return DebtReport(
+            example_count=max(total, 0),
+            has_data=False,
+            grade=None,
+            grade_reason="no rows to assess",
+            items=[],
+        )
+
+    applicability = quality.applicability
+    not_assessed = list(applicability.not_applicable_signals) if applicability else []
+
+    def _assessed(signal: str) -> bool:
+        return signal not in not_assessed
 
     items: list[DebtItem] = []
 
@@ -120,7 +165,7 @@ def build_debt_report(quality: QualityReport) -> DebtReport:
         ))
 
     norm_sev = _rate_severity(_rate(quality.duplicate_normalized_count), 0.01, 0.05)
-    if norm_sev != NONE:
+    if norm_sev != NONE and _assessed("normalized_duplicates"):
         items.append(DebtItem(
             category="normalized_duplicates", severity=norm_sev,
             count=quality.duplicate_normalized_count,
@@ -130,7 +175,7 @@ def build_debt_report(quality: QualityReport) -> DebtReport:
         ))
 
     low_info_sev = _rate_severity(_rate(quality.low_information_count), 0.02, 0.10)
-    if low_info_sev != NONE:
+    if low_info_sev != NONE and _assessed("low_information"):
         items.append(DebtItem(
             category="low_information", severity=low_info_sev, count=quality.low_information_count,
             rate=_rate(quality.low_information_count),
@@ -156,7 +201,7 @@ def build_debt_report(quality: QualityReport) -> DebtReport:
         ))
 
     # --- synthetic patterns (presence + max issue severity) -----------------
-    if quality.synthetic_pattern_count > 0:
+    if quality.synthetic_pattern_count > 0 and _assessed("synthetic_patterns"):
         synth_sev = _max_synthetic_severity(
             [issue.severity for issue in quality.synthetic_pattern_issues]
         )
@@ -170,7 +215,7 @@ def build_debt_report(quality: QualityReport) -> DebtReport:
 
     # --- token-length outliers (advisory, capped at moderate) ---------------
     outlier_rate = _rate(quality.token_length_outlier_count)
-    if outlier_rate > 0:
+    if outlier_rate > 0 and _assessed("token_length_outliers"):
         items.append(DebtItem(
             category="token_length_outliers",
             severity=MODERATE if outlier_rate > 0.10 else LOW,
@@ -180,7 +225,7 @@ def build_debt_report(quality: QualityReport) -> DebtReport:
         ))
 
     # --- category imbalance (worst field by dominant share) -----------------
-    if quality.category_imbalances:
+    if quality.category_imbalances and _assessed("category_imbalance"):
         worst = max(quality.category_imbalances, key=lambda c: c.share)
         if worst.share > 0.90:
             imbalance_sev = HIGH
@@ -202,7 +247,52 @@ def build_debt_report(quality: QualityReport) -> DebtReport:
 
     # Highest severity first; then higher rate (None -> 0); then category for stability.
     items.sort(key=lambda item: (-_SEVERITY_ORDER[item.severity], -(item.rate or 0.0), item.category))
-    return DebtReport(example_count=total, has_data=True, grade=_grade(items), items=items)
+    withheld = _withheld_reason(applicability, items)
+    return DebtReport(
+        example_count=total,
+        has_data=True,
+        grade=None if withheld else _grade(items),
+        grade_reason=withheld,
+        items=items,
+        not_assessed=sorted(not_assessed),
+    )
+
+
+def _withheld_reason(
+    applicability: QualityApplicability | None,
+    items: list[DebtItem],
+) -> str:
+    """Why no letter grade can be given, or "" when one can.
+
+    Two withholding rules, both about not making a claim the ledger cannot support:
+
+    * a MEASURED applicability saying the grade-bearing text signals could not run. Those are the
+      signals a text corpus's letter rests on, so without them a letter reports the heuristics'
+      silence as health - in either direction, an A reading as clean or a D as broken.
+    * an UNMEASURED applicability (no schema) with NO debt items. A clean bill of health is a
+      POSITIVE claim, and it needs to be known that the checks could read this data at all;
+      finding nothing is not the same as finding nothing wrong. Debt items that DID fire are
+      their own evidence, so an unmeasured B/C/D/F still stands and is not withheld.
+    """
+    if applicability is None or not applicability.measured:
+        if items:
+            return ""
+        return (
+            "no debt was found, but whether these text signals can read this data shape was not assessed "
+            "(no schema supplied), and a signal that cannot read a field reports nothing rather than "
+            "nothing wrong: pass --schema (with --project-dir for a project-local schema) to grade it"
+        )
+    ungraded = sorted(set(applicability.not_applicable_signals) & _GRADE_BEARING_SIGNALS)
+    if not ungraded:
+        return ""
+    share = applicability.assessed_content_share
+    measured = "unmeasured" if share is None else f"{share * 100:.1f}%"
+    return (
+        f"no applicable text signals for this schema: {', '.join(ungraded)} could not assess "
+        f"this data shape (free text covers {measured} of the measured content, floor "
+        f"{applicability.min_assessed_content_share * 100:.0f}%), so a letter grade would "
+        f"report their silence as health"
+    )
 
 
 def _grade(items: list[DebtItem]) -> str:
@@ -230,12 +320,22 @@ def _measure(item: DebtItem) -> str:
 
 
 def render_debt_report_markdown(report: DebtReport) -> str:
-    lines = [f"# Dataset Debt — Grade {report.grade}", ""]
+    heading = f"Grade {report.grade}" if report.graded else "Grade withheld"
+    lines = [f"# Dataset Debt - {heading}", ""]
     if not report.has_data:
         lines.append("No rows to assess.")
         return "\n".join(lines)
+    if not report.graded:
+        lines.append(f"No grade: {_safe(report.grade_reason)}.")
+        lines.extend(_not_assessed_lines(report))
+        if report.items:
+            lines.append("")
+            lines.append("The signals that DO apply to this shape found:")
+            lines.extend(_item_lines(report))
+        return "\n".join(lines)
     if not report.items:
-        lines.append("No debt detected — grade A. The dataset is clean by the current checks.")
+        lines.append("No debt detected - grade A. The dataset is clean by the current checks.")
+        lines.extend(_not_assessed_lines(report))
         return "\n".join(lines)
 
     counts: dict[str, int] = {}
@@ -248,9 +348,23 @@ def render_debt_report_markdown(report: DebtReport) -> str:
         f"{len(report.items)} debt item(s): {breakdown}. Pay down the highest severity first."
     )
     lines.append("")
-    for item in report.items:
-        lines.append(
-            f"- **[{item.severity.upper()}]** {_safe(item.category)} — {_safe(item.message)} "
-            f"({_measure(item)}). Fix: {_safe(item.remediation)}"
-        )
+    lines.extend(_item_lines(report))
+    lines.extend(_not_assessed_lines(report))
     return "\n".join(lines)
+
+
+def _item_lines(report: DebtReport) -> list[str]:
+    return [
+        f"- **[{item.severity.upper()}]** {_safe(item.category)} - {_safe(item.message)} "
+        f"({_measure(item)}). Fix: {_safe(item.remediation)}"
+        for item in report.items
+    ]
+
+
+def _not_assessed_lines(report: DebtReport) -> list[str]:
+    """A named list of the signals that ran no check, so a short ledger is never read as a clean
+    bill of health for checks that never happened."""
+    if not report.not_assessed:
+        return []
+    names = ", ".join(_safe(signal) for signal in report.not_assessed)
+    return ["", f"Not assessed on this shape: {names}."]

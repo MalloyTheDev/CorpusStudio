@@ -1,11 +1,18 @@
 import json
 import re
-import unicodedata
 from collections import Counter
-from typing import Any
+from collections.abc import Iterator
+from typing import Any, Final
 
 from pydantic import BaseModel, Field
 
+from corpus_studio.quality.applicability import (
+    QualityApplicability,
+    free_text_leaf_paths,
+    measure_applicability,
+)
+from corpus_studio.quality.text import collect_text_values, tokenize_text_values
+from corpus_studio.schemas.base import DatasetSchema
 from corpus_studio.tokenization.estimate import estimate_tokens
 
 
@@ -88,23 +95,51 @@ class QualityReport(BaseModel):
     token_length_outlier_count: int = 0
     token_length_outliers: list[TokenLengthOutlier] = Field(default_factory=list)
     category_imbalances: list[CategoryImbalance] = Field(default_factory=list)
+    # Which signals above could actually run on this dataset's shape, and how much of its content
+    # they read. ``None`` means the applicability was never assessed (a report assembled by hand
+    # from counts, with no rows to measure) - not that every signal applied.
+    applicability: QualityApplicability | None = None
 
 
-def build_basic_quality_report(rows: list[dict]) -> QualityReport:
+def build_basic_quality_report(
+    rows: list[dict],
+    schema: DatasetSchema | None = None,
+) -> QualityReport:
+    """Build the quality report, skipping the signals ``schema``'s shape does not support.
+
+    A signal the shape cannot support is NOT computed: its count stays 0 and its name is listed in
+    ``applicability.not_applicable_signals``, so a reader can never mistake "nothing to read" for
+    "nothing to fix". Without a schema every signal runs and the applicability is reported
+    ``unmeasured`` - see :mod:`corpus_studio.quality.applicability` for why the roles cannot be
+    inferred from the values.
+    """
+
+    applicability = measure_applicability(rows, schema)
     exact_seen = set()
     normalized_seen = set()
     exact_duplicate_count = 0
     normalized_duplicate_count = 0
     empty_count = 0
     low_information_count = 0
-    all_synthetic_pattern_issues = _synthetic_pattern_issues(rows)
+    check_normalized = applicability.applies("normalized_duplicates")
+    check_low_information = applicability.applies("low_information")
+
+    if applicability.applies("synthetic_patterns"):
+        all_synthetic_pattern_issues = _synthetic_pattern_issues(rows, schema)
+    else:
+        all_synthetic_pattern_issues = []
     synthetic_pattern_count = len(all_synthetic_pattern_issues)  # true total, before display cap
     synthetic_pattern_issues = all_synthetic_pattern_issues[:SYNTHETIC_WARNING_LIMIT]
     synthetic_pattern_warnings = [issue.message for issue in synthetic_pattern_issues]
     synthetic_pattern_clusters = cluster_synthetic_pattern_issues(synthetic_pattern_issues)
     pii_findings = _detect_pii(rows)
-    token_length_threshold, token_length_outliers = _token_length_outliers(rows)
-    category_imbalances = _category_imbalances(rows)
+    if applicability.applies("token_length_outliers"):
+        token_length_threshold, token_length_outliers = _token_length_outliers(rows)
+    else:
+        token_length_threshold, token_length_outliers = 0, []
+    category_imbalances = (
+        _category_imbalances(rows) if applicability.applies("category_imbalance") else []
+    )
 
     for row in rows:
         exact_signature = json.dumps(row, sort_keys=True, separators=(",", ":"), default=str)
@@ -112,17 +147,19 @@ def build_basic_quality_report(rows: list[dict]) -> QualityReport:
             exact_duplicate_count += 1
         exact_seen.add(exact_signature)
 
-        normalized_signature = _normalized_text_signature(row)
-        if normalized_signature and normalized_signature in normalized_seen:
-            normalized_duplicate_count += 1
-        normalized_seen.add(normalized_signature)
+        if check_normalized:
+            normalized_signature = _normalized_text_signature(row)
+            if normalized_signature and normalized_signature in normalized_seen:
+                normalized_duplicate_count += 1
+            normalized_seen.add(normalized_signature)
 
         if not any(str(value).strip() for value in row.values()):
             empty_count += 1
 
-        token_count = len(_tokenize_text_values(row))
-        if 0 < token_count < LOW_INFORMATION_TOKEN_THRESHOLD:
-            low_information_count += 1
+        if check_low_information:
+            token_count = len(_tokenize_text_values(row))
+            if 0 < token_count < LOW_INFORMATION_TOKEN_THRESHOLD:
+                low_information_count += 1
 
     return QualityReport(
         example_count=len(rows),
@@ -140,6 +177,7 @@ def build_basic_quality_report(rows: list[dict]) -> QualityReport:
         token_length_outlier_count=len(token_length_outliers),
         token_length_outliers=token_length_outliers,
         category_imbalances=category_imbalances,
+        applicability=applicability,
     )
 
 
@@ -163,54 +201,97 @@ def _normalized_text_signature(value: Any) -> str:
 normalized_text_signature = _normalized_text_signature
 
 
-# CJK / kana / Hangul scripts have no spaces between words, so each such
-# character is treated as its own token; other word characters group into runs.
-# This keeps near-duplicate signatures and low-information counts meaningful for
-# non-Latin text while preserving ASCII tokenization exactly.
-_CJK_RANGES = (
-    "぀-ヿ"  # Hiragana + Katakana
-    "㐀-䶿"  # CJK Extension A
-    "一-鿿"  # CJK Unified Ideographs
-    "豈-﫿"  # CJK Compatibility Ideographs
-    "가-힯"  # Hangul syllables
-    "ｦ-ﾟ"  # Half-width Katakana
-)
-_TOKEN_RE = re.compile(rf"[{_CJK_RANGES}]|[^\W{_CJK_RANGES}]+", re.UNICODE)
+# Tokenization lives in quality.text so the applicability assessment can share it without a
+# circular import. These module-private aliases keep the call sites below unchanged.
+_tokenize_text_values = tokenize_text_values
+_collect_text_values = collect_text_values
 
 
-def _tokenize_text_values(value: Any) -> list[str]:
-    text = unicodedata.normalize("NFKC", " ".join(_collect_text_values(value))).lower()
-    return _TOKEN_RE.findall(text)
+# A field whose every value is one whitespace-free string containing a path separator is a path,
+# a URL, or a similar located identifier: its leading segments are shared BY CONSTRUCTION, so a
+# shared "opening" across rows says nothing about templated prose.
+_PATH_SHAPED_VALUE = re.compile(r"\A\S*[/\\]\S*\Z")
 
 
-def _collect_text_values(value: Any) -> list[str]:
-    if isinstance(value, str):
-        return [value]
-
+def _leaf_values(value: Any, prefix: str = "") -> Iterator[tuple[str, Any]]:
+    """Every scalar inside ``value`` as ``(leaf_path, scalar)``. List elements collapse onto one
+    index-free path (``tags[]``): every element of a list is the same field."""
     if isinstance(value, dict):
-        collected: list[str] = []
-        for item in value.values():
-            collected.extend(_collect_text_values(item))
-        return collected
-
-    if isinstance(value, list):
-        collected = []
+        for key, item in value.items():
+            yield from _leaf_values(item, f"{prefix}.{key}" if prefix else key)
+    elif isinstance(value, list):
         for item in value:
-            collected.extend(_collect_text_values(item))
-        return collected
-
-    if value is None:
-        return []
-
-    return [str(value)]
+            yield from _leaf_values(item, f"{prefix}[]")
+    else:
+        yield prefix, value
 
 
-def _synthetic_pattern_text(row: Any) -> str:
-    """Flat text for synthetic-pattern detection. For a CHAT row, DROP system-role message(s): an
-    identical shared system prompt across chat rows is intentional (the dataset's system instruction),
-    not a synthetic 'repeated opening/closing' — flagging it is a false positive. The user/assistant
-    turns are still checked. Non-chat rows (and chat rows with no system message) are unchanged."""
+def structurally_repeating_leaves(rows: list[dict]) -> frozenset[str]:
+    """Leaf paths whose repetition is structural, so templating detection must not read them.
+
+    Two measured cases, both independent of any schema:
+
+    * **constant** - one distinct value wherever the field appears. A corpus-wide provenance tag
+      (``source_dataset``, ``source_version``, ``source_url``), a fixed license, a lane, a policy
+      note: these are REQUIRED to be identical across a lane, so reading their repetition as
+      "templated repetition" inverts the verdict - it flags the metadata for being correct.
+    * **path-shaped** - see ``_PATH_SHAPED_VALUE``.
+
+    Constancy only carries information across at least two rows, so a shorter dataset excludes
+    nothing (it also cannot reach the repetition thresholds).
+    """
+    if len(rows) < 2:
+        return frozenset()
+
+    distinct: dict[str, set[str]] = {}
+    path_shaped: dict[str, bool] = {}
+    for row in rows:
+        for path, value in _leaf_values(row):
+            distinct.setdefault(path, set()).add(repr(value))
+            shaped = isinstance(value, str) and bool(_PATH_SHAPED_VALUE.match(value))
+            path_shaped[path] = path_shaped.get(path, True) and shaped
+
+    constant = {path for path, values in distinct.items() if len(values) == 1}
+    return frozenset(constant | {path for path, shaped in path_shaped.items() if shaped})
+
+
+# Returned in place of a dropped SCALAR so its container can omit it; never a data value.
+_DROPPED: Final[object] = object()
+
+
+def _without_leaves(value: Any, excluded: frozenset[str], prefix: str = "") -> Any:
+    """``value`` with every leaf in ``excluded`` removed, containers otherwise intact.
+
+    The walk mirrors :func:`_leaf_values` exactly: only a SCALAR is dropped, and only when its own
+    leaf path is excluded. A container is always recursed into, never removed wholesale, because a
+    field that is ``null`` in some rows and a populated list in others occupies BOTH paths
+    (``meta.mustInclude`` and ``meta.mustInclude[]``) - dropping the key on the scalar path would
+    silently discard the list's contents too.
+    """
+    if isinstance(value, dict):
+        pruned_pairs = (
+            (key, _without_leaves(item, excluded, f"{prefix}.{key}" if prefix else key))
+            for key, item in value.items()
+        )
+        return {key: item for key, item in pruned_pairs if item is not _DROPPED}
+    if isinstance(value, list):
+        pruned = [_without_leaves(item, excluded, f"{prefix}[]") for item in value]
+        return [item for item in pruned if item is not _DROPPED]
+    return _DROPPED if prefix in excluded else value
+
+
+def _synthetic_pattern_text(row: Any, excluded: frozenset[str] = frozenset()) -> str:
+    """Flat text for synthetic-pattern detection, minus the fields whose repetition is structural.
+
+    ``excluded`` drops the leaves :func:`structurally_repeating_leaves` measured as required to
+    repeat. For a CHAT row this additionally DROPS system-role message(s): an identical shared
+    system prompt across chat rows is intentional (the dataset's system instruction), not a
+    synthetic 'repeated opening/closing' - flagging it is a false positive. It is the same rule one
+    level deeper than a leaf path reaches, since a role decides which message is boilerplate. The
+    user/assistant turns are still checked. Non-chat rows (and chat rows with no system message) are
+    otherwise unchanged."""
     if isinstance(row, dict):
+        row = _without_leaves(row, excluded)
         messages = row.get("messages")
         if isinstance(messages, list) and any(
             isinstance(message, dict) and message.get("role") == "system" for message in messages
@@ -225,14 +306,58 @@ def _synthetic_pattern_text(row: Any) -> str:
     return " ".join(_tokenize_text_values(row))
 
 
-def _synthetic_pattern_issues(rows: list[dict]) -> list[SyntheticPatternIssue]:
+def _is_within(path: str, prefixes: frozenset[str]) -> bool:
+    """Whether ``path`` IS one of ``prefixes`` or sits underneath one (``messages[].content``
+    under ``messages``)."""
+    return any(
+        path == prefix or path.startswith(f"{prefix}.") or path.startswith(f"{prefix}[")
+        for prefix in prefixes
+    )
+
+
+def _only_free_text(value: Any, prose: frozenset[str], prefix: str = "") -> Any:
+    """``value`` keeping only the scalars that sit within a declared prose leaf."""
+    if isinstance(value, dict):
+        pruned_pairs = (
+            (key, _only_free_text(item, prose, f"{prefix}.{key}" if prefix else key))
+            for key, item in value.items()
+        )
+        return {key: item for key, item in pruned_pairs if item is not _DROPPED}
+    if isinstance(value, list):
+        pruned = [_only_free_text(item, prose, f"{prefix}[]") for item in value]
+        return [item for item in pruned if item is not _DROPPED]
+    return value if _is_within(prefix, prose) else _DROPPED
+
+
+def _synthetic_pattern_issues(
+    rows: list[dict],
+    schema: DatasetSchema | None = None,
+) -> list[SyntheticPatternIssue]:
     issues: list[SyntheticPatternIssue] = []
     # Synthetic-pattern detection reads the flat surface text (openings/closings/phrases),
-    # NOT the field-aware dedup signature — field prefixes/separators would corrupt n-grams.
-    # The shared chat system prompt is excluded so it isn't flagged as a repeated opening.
+    # NOT the field-aware dedup signature - field prefixes/separators would corrupt n-grams.
+    #
+    # Which fields it reads depends on what is known about the shape, and the two rules differ
+    # because only one of them can tell metadata from content:
+    #   * WITH a schema, only the leaves it declares as PROSE. That is the sharper rule: a
+    #     provenance tag or a path is excluded for being non-prose, while a prose field that is
+    #     identical in every row stays in - an identical assistant answer across rows is the
+    #     archetype of templated data, not structural repetition.
+    #   * WITHOUT one, every leaf except those measured as structurally repeating. Constancy
+    #     cannot distinguish a corpus-wide license from a copy-pasted answer, so this fallback
+    #     can miss the latter; that is why a report with no measured applicability and no
+    #     findings withholds its grade rather than publishing a pass.
+    # The shared chat system prompt is dropped either way (see _synthetic_pattern_text).
+    if schema is not None:
+        prose = free_text_leaf_paths(schema)
+        prepared: list[Any] = [_only_free_text(row, prose) for row in rows]
+        excluded: frozenset[str] = frozenset()
+    else:
+        prepared = list(rows)
+        excluded = structurally_repeating_leaves(rows)
     row_texts = [
-        (row_number, _synthetic_pattern_text(row))
-        for row_number, row in enumerate(rows, start=1)
+        (row_number, _synthetic_pattern_text(row, excluded))
+        for row_number, row in enumerate(prepared, start=1)
     ]
     row_texts = [(row_number, text) for row_number, text in row_texts if text]
 

@@ -197,8 +197,11 @@ def test_project_list_rollup_adds_debt_grade(tmp_path: Path):
     payload = json.loads(result.output)
     assert payload["rollup"] is True
     by_id = {p["id"]: p for p in payload["projects"]}
-    assert by_id["full"]["has_data"] is True and by_id["full"]["debt_grade"] != "N/A"
-    assert by_id["empty"]["has_data"] is False and by_id["empty"]["debt_grade"] == "N/A"
+    # The rollup grades each project against its OWN declared schema, so a seeded instruction
+    # project gets a real letter; an empty one has no rows to assess and so carries no grade.
+    assert by_id["full"]["has_data"] is True
+    assert by_id["full"]["debt_grade"] in {"A", "B", "C", "D", "F"}
+    assert by_id["empty"]["has_data"] is False and by_id["empty"]["debt_grade"] is None
     # without --rollup, no debt fields are added
     plain = json.loads(runner.invoke(app, ["project-list", "--root", str(root)]).output)
     assert "debt_grade" not in plain["projects"][0]

@@ -250,8 +250,14 @@ export function DataStudio({ live }: { live: boolean }) {
         <Card title={`${selected.name} · ${selected.schema_id}`}>
           {debt ? (
             <div className="cs-debt">
-              <Chip tone={GRADE_TONE[debt.grade] ?? "neutral"}>Grade {debt.grade}</Chip>
+              {/* A withheld grade is rendered AS withheld, with the engine's reason: showing
+                  "Grade " with nothing after it, or inventing a letter, would turn "we could not
+                  assess this" back into an apparent verdict. */}
+              <Chip tone={debt.grade ? (GRADE_TONE[debt.grade] ?? "neutral") : "neutral"}>
+                {debt.grade ? `Grade ${debt.grade}` : "Grade withheld"}
+              </Chip>
               <span className="cs-note">{debt.example_count} row(s)</span>
+              {debt.grade ? null : <span className="cs-note">{debt.grade_reason}</span>}
             </div>
           ) : null}
 

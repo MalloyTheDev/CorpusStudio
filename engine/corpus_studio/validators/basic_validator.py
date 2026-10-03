@@ -1,4 +1,4 @@
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
 
 from corpus_studio.importers.jsonl_importer import iter_jsonl
@@ -8,6 +8,7 @@ from corpus_studio.validators.results import ValidationIssue, ValidationReport
 
 
 TEXT_FIELD_TYPES = {"string", "text", "markdown", "code", "file_path", "image_path"}
+PATH_FIELD_TYPES = {"file_path", "image_path"}
 VALID_MESSAGE_ROLES = {"system", "user", "assistant", "tool"}
 
 
@@ -103,11 +104,61 @@ def _type_error_message(field_type: str) -> str:
     return "Invalid value."
 
 
+def _path_existence_issues(
+    value: str,
+    full_name: str,
+    row_number: int | None,
+    path_root: Path,
+) -> list[ValidationIssue]:
+    """Resolve a declared path under ``path_root`` and report it if it is not a file there.
+
+    The value is UNTRUSTED dataset content, so the root is a trust boundary and not just a
+    convenience: an absolute path, or a relative one that climbs out of the root (``../..`` or a
+    symlink pointing outside), is REJECTED rather than probed. Without that, validating a
+    third-party JSONL file would let its rows test for the existence of arbitrary paths on the
+    machine running the validator. Only existence is checked - no file is opened.
+    """
+    # Read the value as posix, treating a Windows separator as one too: a row written on either
+    # platform must be contained by the same rule.
+    candidate = PurePosixPath(value.replace("\\", "/"))
+    if candidate.is_absolute() or PureWindowsPath(value).is_absolute():
+        return [
+            _issue(
+                "Declared path must be relative to the path root, not absolute.",
+                row_number,
+                full_name,
+            )
+        ]
+
+    # resolve() on both sides normalizes '..' AND follows symlinks, so a link inside the root
+    # that points outside it fails containment rather than being probed.
+    root = path_root.resolve()
+    resolved = (root / Path(*candidate.parts)).resolve()
+    if not resolved.is_relative_to(root):
+        return [
+            _issue(
+                "Declared path escapes the path root.",
+                row_number,
+                full_name,
+            )
+        ]
+    if not resolved.is_file():
+        return [
+            _issue(
+                f"Declared path does not exist under the path root: {value}",
+                row_number,
+                full_name,
+            )
+        ]
+    return []
+
+
 def _validate_field_type(
     field: SchemaField,
     value: Any,
     row_number: int | None,
     field_prefix: str = "",
+    path_root: Path | None = None,
 ) -> list[ValidationIssue]:
     field_type = field.type
     full_name = f"{field_prefix}{field.name}"
@@ -119,6 +170,11 @@ def _validate_field_type(
         return [_issue(_type_error_message(field_type), row_number, full_name)]
 
     issues: list[ValidationIssue] = []
+
+    # Opt-in on BOTH sides: the schema declares the field checkable and the caller supplies the
+    # root. Either one missing leaves the path a string-only check, as it has always been.
+    if field_type in PATH_FIELD_TYPES and field.path_must_exist and path_root is not None:
+        issues.extend(_path_existence_issues(value, full_name, row_number, path_root))
 
     if field_type == "list" and field.item_type is not None:
         for index, element in enumerate(value, start=1):
@@ -139,6 +195,7 @@ def _validate_field_type(
                         field.item_fields,
                         row_number,
                         field_prefix=f"{full_name}[{index}].",
+                        path_root=path_root,
                     )
                 )
 
@@ -154,7 +211,13 @@ def _validate_field_type(
 
     if field_type == "object" and field.fields is not None:
         issues.extend(
-            _validate_fields(value, field.fields, row_number, field_prefix=f"{full_name}.")
+            _validate_fields(
+                value,
+                field.fields,
+                row_number,
+                field_prefix=f"{full_name}.",
+                path_root=path_root,
+            )
         )
 
     if field.enum is not None and value not in field.enum:
@@ -182,8 +245,14 @@ def validate_example_fields_against(
     row: dict[str, Any],
     schema: DatasetSchema,
     row_number: int | None = None,
+    path_root: Path | None = None,
 ) -> list[ValidationIssue]:
-    return _validate_fields(row, schema.fields, row_number)
+    """Validate ``row`` against ``schema``.
+
+    ``path_root`` enables the opt-in existence check for ``path_must_exist`` path fields,
+    resolved under that root. Omit it and those fields stay string-only checks.
+    """
+    return _validate_fields(row, schema.fields, row_number, path_root=path_root)
 
 
 def _validate_fields(
@@ -191,6 +260,7 @@ def _validate_fields(
     fields: list[SchemaField],
     row_number: int | None = None,
     field_prefix: str = "",
+    path_root: Path | None = None,
 ) -> list[ValidationIssue]:
     issues: list[ValidationIssue] = []
 
@@ -221,7 +291,9 @@ def _validate_fields(
         if value is None:
             continue
 
-        issues.extend(_validate_field_type(field, value, row_number, field_prefix))
+        issues.extend(
+            _validate_field_type(field, value, row_number, field_prefix, path_root)
+        )
 
     return issues
 
@@ -241,6 +313,7 @@ def validate_jsonl_row_against(
     row: Any,
     schema: DatasetSchema,
     row_number: int | None = None,
+    path_root: Path | None = None,
 ) -> list[ValidationIssue]:
     """Like :func:`validate_jsonl_row`, but against an already-resolved ``DatasetSchema`` (e.g. a
     project-local schema) instead of a builtin id - the seam that lets the single writer validate
@@ -248,7 +321,7 @@ def validate_jsonl_row_against(
     if not isinstance(row, dict):
         return [_issue("Row must be a JSON object.", row_number)]
 
-    return validate_example_fields_against(row, schema, row_number)
+    return validate_example_fields_against(row, schema, row_number, path_root)
 
 
 def validate_jsonl_file(path: Path, schema_id: str) -> ValidationReport:

@@ -27,11 +27,14 @@ The value debt adds over the quality report is exactly three things:
 
 `build_debt_report(quality_report)` (pure) emits a `DebtReport`:
 
-- `grade` — **A–F**, or **`N/A`** for an empty dataset (0 rows is "no rows to
-  assess", *not* grade A).
+- `grade` - **A–F**, or **`null`** when no grade can honestly be given.
+- `grade_reason` - why the grade is withheld; `""` exactly when a grade was given.
 - `items` — a list of `DebtItem{category, severity, count, rate, message,
   remediation}`, **highest severity first**.
-- `.clean` — true only when there are rows and no debt.
+- `not_assessed` - the signals this dataset's shape does not support, so they ran no
+  check at all. Their absence from `items` is "not measured", never "measured clean".
+- `.clean` - true only when there are rows, a grade was given, and there is no debt.
+- `.graded` - whether a letter was given at all.
 
 ### Severity rules (documented, per category)
 
@@ -57,6 +60,25 @@ Severity is **coarse and rule-based**, never a fake-precise score.
 **F** if any item is critical; else **D** if any high; else **C** if any moderate;
 else **B** if any low; else **A** (rows present, no debt).
 
+### When the grade is WITHHELD
+
+A letter is a claim the ledger has to stand behind, so it is withheld (`grade: null`, with
+`grade_reason` saying which case) rather than guessed in three situations:
+
+| Case | Why |
+|---|---|
+| **0 rows** | nothing to assess. An empty dataset is not grade A. |
+| **the shape does not support the text signals** | the quality signals are TEXT signals. On an object-detection corpus of normalized boxes, or a numeric table, they read nothing, so an A would mean "clean" and a D "broken" on the strength of heuristics that never ran. The signals are named in `not_assessed`, and contribute no items. Needs `--schema`. |
+| **no debt found, and the applicability was never measured** | finding nothing is not the same as finding nothing wrong. A clean bill of health is a positive claim, and without a schema it is not known whether the signals could read the data at all. Items that DID fire are their own evidence, so an unmeasured B/C/D/F still stands. |
+
+Applicability comes from the schema's declared `FieldType`: `text` / `markdown` / `code` /
+`messages` are prose, `string` is a short scalar (an id, a label, a hash, a URL, an enum
+member). It is never guessed from the values, because a license statement and a URL tokenize
+like a short sentence while a caption can be shorter than both. The applicable coverage is the
+**measured** share of the dataset's tokens living in prose fields, not a field count: `raw_text`
+declares one prose field among five and `image_caption` one among four, yet the text carries
+nearly all of the content. See `corpus_studio/quality/applicability.py`.
+
 ### The grades in the desktop Debt tab
 
 Each grade below is a **genuine** verdict the engine produced on a real dataset — the badge,
@@ -77,6 +99,14 @@ The grade invalidates the moment the dataset changes, so it never shows a stale 
 ```
 # Prioritized, graded debt ledger (Markdown, or --json for the DebtReport)
 python -m corpus_studio.cli dataset-debt <examples.jsonl> [--json]
+
+# Assess which signals this dataset's SHAPE supports before grading it. Without --schema the
+# applicability is unmeasured, and a run that finds no debt withholds the grade.
+python -m corpus_studio.cli dataset-debt <examples.jsonl> --schema <schema_id> \
+    [--project-dir <project>] [--json]
+
+# The same applicability block on the raw quality report
+python -m corpus_studio.cli quality <examples.jsonl> --schema <schema_id> [--project-dir <project>]
 ```
 
 ## Implemented vs deferred

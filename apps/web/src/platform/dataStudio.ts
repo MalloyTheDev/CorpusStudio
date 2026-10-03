@@ -72,8 +72,13 @@ export interface DebtItem {
 export interface DebtReport {
   example_count: number;
   has_data: boolean;
-  grade: string;
+  /** A | B | C | D | F, or null when the engine withholds a grade (see grade_reason). */
+  grade: string | null;
+  /** Why the grade is withheld; "" when a grade was given. */
+  grade_reason: string;
   items: DebtItem[];
+  /** Signals the dataset's shape does not support, so they ran no check at all. */
+  not_assessed: string[];
 }
 
 export interface PiiFinding {
@@ -85,6 +90,19 @@ export interface PiiFinding {
   suggestion: string;
 }
 
+/** Which quality signals the dataset's shape supports, and how much of its content they read.
+ *  A signal listed in not_applicable_signals was NOT computed: its count is a skipped zero, never
+ *  a pass. assessed_content_share is null exactly when role_source is "unmeasured" (no schema). */
+export interface QualityApplicability {
+  role_source: "schema" | "unmeasured";
+  assessed_content_share: number | null;
+  min_assessed_content_share: number;
+  field_roles: Record<string, string>;
+  applicable_signals: string[];
+  not_applicable_signals: string[];
+  reason: string;
+}
+
 export interface QualityReport {
   example_count: number;
   empty_row_count: number;
@@ -94,6 +112,7 @@ export interface QualityReport {
   synthetic_pattern_count: number;
   pii_finding_count: number;
   pii_findings: PiiFinding[];
+  applicability: QualityApplicability | null;
 }
 
 export interface GateResult {

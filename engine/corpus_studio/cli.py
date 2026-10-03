@@ -86,6 +86,7 @@ from corpus_studio.reporting.dataset_card import (
 from corpus_studio.evaluation.reports import EvaluationReport
 from corpus_studio.suites.models import SuiteCase
 from corpus_studio.platform.app_paths import corpusstudio_data_home
+from corpus_studio.schemas.base import DatasetSchema, SchemaField
 from corpus_studio.schemas.registry import list_builtin_schemas, load_builtin_schema, repository_root
 from corpus_studio.splitters.leakage import detect_split_leakage
 from corpus_studio.splitters.random_splitter import random_split
@@ -113,7 +114,7 @@ from corpus_studio.training.config_templates import (
     normalize_training_config_target,
     render_training_config,
 )
-from corpus_studio.validators.basic_validator import validate_jsonl_file
+from corpus_studio.validators.basic_validator import PATH_FIELD_TYPES, validate_jsonl_file
 from corpus_studio.validators.results import ValidationReport
 
 app = typer.Typer(help="Corpus Studio dataset engine CLI.")
@@ -3137,17 +3138,27 @@ def project_list(
         item = entry.model_dump()
         if rollup:
             from corpus_studio.reporting.debt_report import build_debt_report
+            from corpus_studio.schemas.project_schemas import SchemaError, resolve_schema
 
-            examples_file = projects_root / entry.id / "examples.jsonl"
+            project_path = projects_root / entry.id
+            examples_file = project_path / "examples.jsonl"
+            # Roll up against the project's OWN declared schema (project-local first), so the
+            # grade knows which quality signals this shape supports. A project whose schema id no
+            # longer resolves rolls up unmeasured rather than failing the listing.
+            try:
+                rollup_schema, _ = resolve_schema(project_path, entry.schema_id)
+            except (SchemaError, ValueError):
+                rollup_schema = None
             try:
                 rows = list(read_jsonl(examples_file))
-                debt = build_debt_report(build_basic_quality_report(rows))
+                debt = build_debt_report(build_basic_quality_report(rows, rollup_schema))
                 item["debt_grade"] = debt.grade
                 item["has_data"] = debt.has_data
             except (OSError, ValueError):
                 # A project whose examples.jsonl is missing/unreadable rolls up as ungraded, never
-                # crashing the whole listing; the reason is visible (has_data False, grade N/A).
-                item["debt_grade"] = "N/A"
+                # crashing the whole listing; the reason stays visible (has_data False, and a null
+                # grade, which is the one no-grade representation a DebtReport uses).
+                item["debt_grade"] = None
                 item["has_data"] = False
         projects_payload.append(item)
     typer.echo(
@@ -3338,21 +3349,69 @@ def project_rename(
     )
 
 
+def _resolve_report_schema(
+    schema_id: Optional[str],
+    project_dir: Optional[Path],
+) -> Optional[DatasetSchema]:
+    """Resolve the schema the quality/debt reports assess applicability against, or None.
+
+    None means the applicability is UNMEASURED, not that every signal applies: whether a string
+    field holds prose or an identifier is something a schema declares and the values cannot tell
+    us, so the reports say so rather than guessing. Exits 1 on an unresolved id.
+    """
+    if schema_id is None:
+        return None
+    from corpus_studio.schemas.project_schemas import SchemaError, resolve_schema
+
+    try:
+        resolved, _ = resolve_schema(project_dir, schema_id)
+    except (SchemaError, ValueError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from exc
+    return resolved
+
+
 @app.command()
-def quality(path: Path):
-    """Build a basic quality report for a JSONL file."""
+def quality(
+    path: Path,
+    schema: Optional[str] = typer.Option(
+        None,
+        "--schema",
+        help="Schema id to assess signal applicability against (project-local first, then "
+        "builtin). Without it the applicability is reported unmeasured.",
+    ),
+    project_dir: Optional[Path] = typer.Option(
+        None, "--project-dir", help="Resolve --schema project-local first."
+    ),
+):
+    """Build a basic quality report for a JSONL file.
+
+    The signals are TEXT signals (duplicates, low-information, templating, token length). With
+    --schema the report says which of them this data SHAPE supports: a signal that could not run
+    is listed under applicability.not_applicable_signals and is NOT computed, so its zero can
+    never be read as a pass. Without --schema the applicability is reported unmeasured.
+    """
     try:
         rows = list(read_jsonl(path))
     except (OSError, ValueError) as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=1) from exc
-    report = build_basic_quality_report(rows)
+    report = build_basic_quality_report(rows, _resolve_report_schema(schema, project_dir))
     typer.echo(report.model_dump_json(indent=2))
 
 
 @app.command("dataset-debt")
 def dataset_debt(
     path: Path,
+    schema: Optional[str] = typer.Option(
+        None,
+        "--schema",
+        help="Schema id to assess signal applicability against (project-local first, then "
+        "builtin). The grade is withheld when this shape does not support the text signals.",
+    ),
+    project_dir: Optional[Path] = typer.Option(
+        None, "--project-dir", help="Resolve --schema project-local first."
+    ),
     as_json: bool = typer.Option(False, "--json", help="Emit the DebtReport as JSON."),
 ):
     """Summarize a dataset's outstanding quality debt as a prioritized, graded ledger.
@@ -3360,6 +3419,11 @@ def dataset_debt(
     Reuses the quality report (no new detection): it normalizes each signal by
     dataset size, ranks the debts, and grades the dataset so you know what to fix
     first. Secrets/PII are graded by presence, never by rate.
+
+    With --schema the grade is WITHHELD (grade null, grade_reason saying why) when the dataset's
+    shape does not support the text signals the grade rests on - an object-detection corpus of
+    normalized boxes gets no letter rather than an A that would read as clean. The signals that
+    ran no check are named in not_assessed.
     """
 
     from corpus_studio.reporting.debt_report import build_debt_report, render_debt_report_markdown
@@ -3370,7 +3434,9 @@ def dataset_debt(
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=1) from exc
 
-    report = build_debt_report(build_basic_quality_report(rows))
+    report = build_debt_report(
+        build_basic_quality_report(rows, _resolve_report_schema(schema, project_dir))
+    )
     if as_json:
         typer.echo(report.model_dump_json(indent=2))
     else:
@@ -7351,6 +7417,27 @@ def schema_set_field(
         )
 
 
+def _path_fields_requiring_existence(
+    fields: list[SchemaField],
+    prefix: str = "",
+) -> list[str]:
+    """Leaf paths of every ``file_path`` / ``image_path`` field that declares ``path_must_exist``.
+
+    Reported by schema-validate whether or not the check ran, so a schema that ASKS for path
+    existence never passes silently when no --path-root was supplied to check it against.
+    """
+    found: list[str] = []
+    for field in fields:
+        name = f"{prefix}{field.name}"
+        if field.type == "object" and field.fields:
+            found.extend(_path_fields_requiring_existence(field.fields, f"{name}."))
+        elif field.type == "list" and field.item_type == "object" and field.item_fields:
+            found.extend(_path_fields_requiring_existence(field.item_fields, f"{name}[]."))
+        elif field.type in PATH_FIELD_TYPES and field.path_must_exist:
+            found.append(name)
+    return found
+
+
 @app.command("schema-validate")
 def schema_validate(
     project_dir: Path,
@@ -7358,14 +7445,25 @@ def schema_validate(
     data: Optional[Path] = typer.Option(
         None, "--data", help="Also validate this JSONL dataset against the schema."
     ),
+    path_root: Optional[Path] = typer.Option(
+        None,
+        "--path-root",
+        help="Root for the opt-in existence check on path fields that declare path_must_exist. Omit it and those fields stay string-only checks (the skipped ones are reported).",
+    ),
     as_json: bool = typer.Option(False, "--json", help="Emit the result as JSON."),
 ):
     """Validate a schema (project-local first, else builtin) is well-formed, and optionally validate a
     JSONL dataset against it.
 
     Resolving the schema proves it is well-formed (it parses as a DatasetSchema). With --data every
-    row is checked and the failures are reported. Exit 1 if the schema is unresolved/malformed or any
-    data row fails.
+    row is checked and the failures are reported, each naming the field path that failed. The path
+    carries the list index the validator builds, which is 1-BASED like the row number beside it,
+    so the second box of a row reads annotations[2].x_center. Exit 1 if the schema is
+    unresolved/malformed or any data row fails.
+
+    A path field that declares path_must_exist is only existence-checked when --path-root is given;
+    the result always names which of those checks ran and which were skipped, so a validated file is
+    never mistaken for one whose paths were confirmed to resolve.
     """
     from corpus_studio.schemas.project_schemas import SchemaError, resolve_schema
     from corpus_studio.validators.basic_validator import validate_example_fields_against
@@ -7379,6 +7477,10 @@ def schema_validate(
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=1) from exc
 
+    if path_root is not None and not path_root.is_dir():
+        typer.echo(f"Path root '{path_root}' does not exist.", err=True)
+        raise typer.Exit(code=1)
+
     row_errors: list[dict[str, Any]] = []
     rows_checked = 0
     if data is not None:
@@ -7390,11 +7492,18 @@ def schema_validate(
         for number, row in enumerate(rows, start=1):
             rows_checked += 1
             if not isinstance(row, dict):
-                row_errors.append({"row_number": number, "message": "Row must be a JSON object."})
+                row_errors.append(
+                    {"row_number": number, "field": None, "message": "Row must be a JSON object."}
+                )
                 continue
-            for issue in validate_example_fields_against(row, schema, number):
-                row_errors.append({"row_number": number, "message": issue.message})
+            for issue in validate_example_fields_against(row, schema, number, path_root):
+                # Carry the validator's field path (it already includes the list index) into both
+                # outputs: on a large corpus "Value must be <= 1.0." without it cannot be triaged.
+                row_errors.append(
+                    {"row_number": number, "field": issue.field, "message": issue.message}
+                )
 
+    declared_path_fields = _path_fields_requiring_existence(schema.fields)
     result = {
         "schema_id": schema_id,
         "source": source,
@@ -7403,6 +7512,11 @@ def schema_validate(
         "rows_checked": rows_checked,
         "row_error_count": len(row_errors),
         "row_errors": row_errors[:50],
+        "path_existence": {
+            "root": str(path_root) if path_root is not None else None,
+            "checked_fields": declared_path_fields if path_root is not None else [],
+            "skipped_fields": [] if path_root is not None else declared_path_fields,
+        },
     }
     if as_json:
         typer.echo(json.dumps(result, indent=2))
@@ -7413,8 +7527,18 @@ def schema_validate(
         if data is not None:
             verdict = "all rows valid" if not row_errors else f"{len(row_errors)} row error(s)"
             typer.echo(f"Checked {rows_checked} row(s) against it: {verdict}.")
+        if declared_path_fields:
+            names = ", ".join(declared_path_fields)
+            if path_root is None:
+                typer.echo(
+                    f"Path existence NOT checked for: {names} (pass --path-root to check them)."
+                )
+            else:
+                typer.echo(f"Path existence checked under {path_root} for: {names}.")
     for entry in row_errors[:20]:
-        typer.echo(f"  row {entry['row_number']}: {entry['message']}", err=True)
+        field = entry.get("field")
+        location = f"{field}: " if field else ""
+        typer.echo(f"  row {entry['row_number']}: {location}{entry['message']}", err=True)
     if row_errors:
         raise typer.Exit(code=1)
 
@@ -7487,9 +7611,20 @@ def gate_run(
     input_path: Path,
     schema: str,
     scope: str = typer.Option("dataset", "--scope", help="dataset or export."),
-    project_dir: Optional[Path] = typer.Option(None, "--project-dir", help="Write report under gate_reports/."),
+    project_dir: Optional[Path] = typer.Option(
+        None,
+        "--project-dir",
+        help="Resolve the schema project-local first, apply project thresholds, and write the report under gate_reports/.",
+    ),
 ):
-    """Run gates over a dataset and emit a serializable pass/warn/block report."""
+    """Run gates over a dataset and emit a serializable pass/warn/block report.
+
+    With --project-dir the schema resolves project-local first and builtin second, through the same
+    helper schema-validate uses, so a project's own schema gates its data instead of failing as an
+    unknown id. The resolved schema also tells the quality signals which of them this data SHAPE
+    supports: on a non-text dataset the report names what it could not assess rather than passing
+    quality silently.
+    """
 
     normalized = scope.strip().lower()
     if normalized not in {"dataset", "export"}:
@@ -7497,6 +7632,13 @@ def gate_run(
         raise typer.Exit(code=1)
 
     from corpus_studio.gates.models import gate_thresholds_path, load_gate_thresholds
+    from corpus_studio.schemas.project_schemas import SchemaError, resolve_schema
+
+    try:
+        resolved_schema, _ = resolve_schema(project_dir, schema)
+    except (SchemaError, ValueError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from exc
 
     thresholds = load_gate_thresholds(project_dir) if project_dir is not None else None
     if project_dir is None and gate_thresholds_path(input_path.parent).exists():
@@ -7511,11 +7653,21 @@ def gate_run(
         generated_at = _utc_now_iso()
         if normalized == "dataset":
             report = run_dataset_gates(
-                rows, schema, thresholds=thresholds, target=str(input_path), generated_at=generated_at
+                rows,
+                schema,
+                thresholds=thresholds,
+                target=str(input_path),
+                generated_at=generated_at,
+                schema=resolved_schema,
             )
         else:
             report = run_export_gates(
-                rows, schema, thresholds=thresholds, target=str(input_path), generated_at=generated_at
+                rows,
+                schema,
+                thresholds=thresholds,
+                target=str(input_path),
+                generated_at=generated_at,
+                schema=resolved_schema,
             )
     except (ValueError, json.JSONDecodeError) as exc:
         typer.echo(str(exc), err=True)
@@ -7531,7 +7683,11 @@ def gate_run(
 def chat_gate(
     input_path: Path,
     schema: str = typer.Option("chat", "--schema", help="Schema id for per-message validation."),
-    project_dir: Optional[Path] = typer.Option(None, "--project-dir", help="Write report under gate_reports/ and apply project thresholds."),
+    project_dir: Optional[Path] = typer.Option(
+        None,
+        "--project-dir",
+        help="Resolve the schema project-local first, apply project thresholds, and write the report under gate_reports/.",
+    ),
 ):
     """Gate a chat dataset's conversation structure (chat_suite scope). Advisory: prints a
     pass/warn/block report over input presence, per-message schema, and conversation-sequence
@@ -7539,6 +7695,7 @@ def chat_gate(
     the report)."""
 
     from corpus_studio.gates.models import gate_thresholds_path, load_gate_thresholds
+    from corpus_studio.schemas.project_schemas import SchemaError, resolve_schema
 
     thresholds = load_gate_thresholds(project_dir) if project_dir is not None else None
     if project_dir is None and gate_thresholds_path(input_path.parent).exists():
@@ -7549,9 +7706,20 @@ def chat_gate(
         )
 
     try:
+        resolved_schema, _ = resolve_schema(project_dir, schema)
+    except (SchemaError, ValueError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from exc
+
+    try:
         rows = list(read_jsonl(input_path))
         report = run_chat_gates(
-            rows, schema, thresholds=thresholds, target=str(input_path), generated_at=_utc_now_iso()
+            rows,
+            schema,
+            thresholds=thresholds,
+            target=str(input_path),
+            generated_at=_utc_now_iso(),
+            schema=resolved_schema,
         )
     except (ValueError, json.JSONDecodeError) as exc:
         typer.echo(str(exc), err=True)

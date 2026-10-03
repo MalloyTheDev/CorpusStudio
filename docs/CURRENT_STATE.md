@@ -110,8 +110,46 @@ per-item error isolation, and off-thread document opens.
   desktop **Debt** tab (color-coded grade + ranked remediation list) whose grade
   invalidates the moment the dataset changes, so it never shows a stale verdict.
   See [`DEBT.md`](DEBT.md).
+- **Signal applicability (the quality signals say what they could not assess).** The quality
+  signals are TEXT signals, so on a non-text record (an object-detection corpus of normalized
+  boxes, a numeric table) they have nothing to read, and their silence is not evidence of
+  cleanliness. `quality --schema <id>` and `dataset-debt --schema <id>` (project-local first,
+  then builtin; `--project-dir` to resolve a project's own) assess which signals the declared
+  shape supports: a signal with no applicable field is reported in
+  `applicability.not_applicable_signals` and is NOT computed, so its zero can never be read as
+  a pass, and `dataset-debt` WITHHOLDS the letter grade (`grade: null` plus a `grade_reason`)
+  rather than returning an A that would read as clean or a D earned by heuristics that read
+  nothing. Roles come from the declared `FieldType` (`text`/`markdown`/`code`/`messages` are
+  prose; `string` is a short scalar), never guessed from values, and the applicable coverage is
+  the MEASURED share of the dataset's tokens that live in prose fields. With no schema the
+  applicability is reported `unmeasured`, and a run that finds no debt withholds the grade
+  instead of publishing a clean bill of health it cannot support. Templating detection no
+  longer reads fields that are structurally required to repeat: with a schema it reads only the
+  declared prose leaves, and without one it drops the leaves measured as constant across the
+  dataset or path-shaped. A stable `source_dataset` / `source_version` / `source_url` across a
+  licensing lane is mandatory, not debt.
 - Leakage-checked splits: `detect_split_leakage` reports exact and
   near-duplicate rows shared across train/validation/test.
+- Validation failures name the **field path** that failed, including the list index
+  (`annotations[2].x_center`, 1-based like the row number beside it), in both the plain and the
+  `--json` output of `schema-validate` - triage on a large corpus needs more than
+  `row 3: Value must be <= 1.0.`.
+- `gate-run` and `chat-gate` resolve a **project-local schema** (project-local first, builtin
+  second) through the same helper `schema-validate` uses, so the gate pipeline works with a
+  project's own schema instead of failing as an unknown id. The resolved schema also drives the
+  quality signals' applicability for that run.
+- **Opt-in path existence** on `file_path` / `image_path` fields: a schema field declaring
+  `path_must_exist` is existence-checked only when the caller also supplies a root
+  (`schema-validate --path-root <dir>`), because a staging lane legitimately references files
+  that have not been fetched yet. `schema-validate` always reports which declared checks ran and
+  which were skipped. The path value is untrusted input, so the root is a containment boundary:
+  an absolute path, a `..` climb, or a symlink leading out of the root is rejected rather than
+  probed.
+- Two cross-field validation rules a non-text shape also needs are **not** built: a declared
+  id/name mapping so a `class_id` / `class_name` pair cannot drift (#953), and a declared normalized
+  box that must lie inside the unit frame, which per-field `minimum`/`maximum` cannot express
+  (#954). Rows carrying either defect validate clean today. `split` also assigns rows independently
+  and its leakage check is a text measure, so it must not be used for video-derived corpora (#955).
 - Export with an optional cleaning pass (dedupe / drop low-information) that
   writes a removal manifest; verbatim exports warn when duplicates remain.
 - Export format is JSONL by default (model-ready, all schemas); **CSV/TSV export**

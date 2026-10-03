@@ -4,6 +4,10 @@ from pathlib import Path
 from typer.testing import CliRunner
 
 from corpus_studio.cli import app
+from corpus_studio.quality.applicability import (
+    SIGNAL_REQUIRED_ROLES,
+    QualityApplicability,
+)
 from corpus_studio.quality.basic_quality import (
     CategoryImbalance,
     PiiFinding,
@@ -30,19 +34,46 @@ def _quality(example_count: int = 10, **kw) -> QualityReport:
     return QualityReport(**base)
 
 
+def _assessed() -> QualityApplicability:
+    """A MEASURED applicability in which every signal applies - what a text corpus yields.
+
+    A letter grade is a claim that the checks could read the data, so the tests that assert a
+    grade say which applicability they are asserting it under.
+    """
+    return QualityApplicability(
+        role_source="schema",
+        assessed_content_share=1.0,
+        applicable_signals=sorted(SIGNAL_REQUIRED_ROLES),
+        not_applicable_signals=[],
+    )
+
+
 # --- grade + emptiness -------------------------------------------------------
 
 def test_clean_dataset_is_grade_a():
-    report = build_debt_report(_quality())
+    report = build_debt_report(_quality(applicability=_assessed()))
     assert report.grade == "A"
     assert report.items == []
     assert report.clean is True
 
 
-def test_empty_dataset_is_na_not_a():
+def test_clean_dataset_without_measured_applicability_withholds_the_grade():
+    # Finding no debt is not the same as having been able to look: a clean bill of health is a
+    # POSITIVE claim, so with no schema to say whether the text signals can read this shape the
+    # grade is withheld instead of reported as A.
+    report = build_debt_report(_quality())
+    assert report.grade is None
+    assert report.items == []
+    assert report.clean is False
+    assert "not assessed" in report.grade_reason
+    assert "--schema" in report.grade_reason
+
+
+def test_empty_dataset_has_no_grade_not_a():
     report = build_debt_report(_quality(example_count=0))
     assert report.has_data is False
-    assert report.grade == "N/A"
+    assert report.grade is None  # one no-grade representation; the reason says which
+    assert report.grade_reason == "no rows to assess"
     assert report.items == []
     assert report.clean is False  # no data is not "clean"
 
@@ -142,15 +173,23 @@ def test_render_leads_with_grade_and_is_injection_safe():
     )
     report = build_debt_report(_quality(example_count=100, category_imbalances=[imbalance]))
     markdown = render_debt_report_markdown(report)
-    assert markdown.startswith("# Dataset Debt — Grade ")
+    assert markdown.startswith("# Dataset Debt - Grade ")
     assert "\n> injected" not in markdown  # sanitized field cannot inject a line
 
 
 def test_render_clean_and_empty():
-    assert "No debt detected" in render_debt_report_markdown(build_debt_report(_quality()))
+    assert "No debt detected" in render_debt_report_markdown(
+        build_debt_report(_quality(applicability=_assessed()))
+    )
     assert "No rows to assess" in render_debt_report_markdown(
         build_debt_report(_quality(example_count=0))
     )
+
+
+def test_render_withheld_grade_says_so_instead_of_a_letter():
+    markdown = render_debt_report_markdown(build_debt_report(_quality()))
+    assert markdown.startswith("# Dataset Debt - Grade withheld")
+    assert "No grade:" in markdown
 
 
 # --- CLI end-to-end ----------------------------------------------------------
