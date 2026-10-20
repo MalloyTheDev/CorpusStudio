@@ -84,4 +84,25 @@ jobs:
           cd engine
           pip install -e ".[dev]" -c constraints.txt
       - name: Audit installed dependencies for known vulnerabilities
-        run: pip-audit --desc
+        # --skip-editable: the engine is installed editable here and is not published on PyPI, so
+        # auditing it only produces a lookup that can never resolve (it is what 503'd on 2026-10-20).
+        # PyPI also answers 5xx intermittently, which pip-audit raises as a fatal ServiceError
+        # sharing exit code 1 with a real finding. Retry ONLY the transient case, so an actual
+        # vulnerability still fails the job on the first attempt rather than being retried into a pass.
+        run: |
+          set -o pipefail
+          for attempt in 1 2 3; do
+            if pip-audit --desc --skip-editable 2>&1 | tee audit.log; then
+              exit 0
+            fi
+            if ! grep -q "ServiceError" audit.log; then
+              echo "::error::pip-audit reported findings; not a transient service error."
+              exit 1
+            fi
+            if [ "${attempt}" -lt 3 ]; then
+              echo "::warning::PyPI service error on attempt ${attempt}/3; retrying."
+              sleep $((attempt * 15))
+            fi
+          done
+          echo "::error::pip-audit could not reach PyPI after 3 attempts."
+          exit 1
