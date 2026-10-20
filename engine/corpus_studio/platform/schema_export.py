@@ -126,7 +126,15 @@ def export_json_schemas(out_dir: str | Path) -> list[Path]:
     index: list[dict[str, str]] = []
     for name, schema in contract_schemas().items():
         path = out / f"{name}.schema.json"
-        path.write_text(json.dumps(schema, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        # newline is required, not cosmetic: text mode translates the newline to CRLF on
+        # Windows, so without it regeneration emits CRLF while .gitattributes keeps the
+        # committed files LF. That fails the committed-vs-generated drift check on Windows and
+        # makes the documented schema-regeneration step produce different bytes per platform.
+        path.write_text(
+            json.dumps(schema, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+            newline="\n",
+        )
         written.append(path)
         index.append({"contract": name, "file": path.name})
     index_path = out / "index.json"
@@ -136,6 +144,7 @@ def export_json_schemas(out_dir: str | Path) -> list[Path]:
         )
         + "\n",
         encoding="utf-8",
+        newline="\n",
     )
     written.append(index_path)
     return written
