@@ -46,9 +46,20 @@ exports/*
 logs/
 *.log
 
+# .NET build output. The WPF/Avalonia desktop prototype's source was removed (#545), but a stale
+# bin/obj tree survives in working copies and is NOT a build input: committing it put ~589 MiB of
+# .pdb/.exe/.dll into history. Scoped to apps/desktop so a legitimate bin/ or obj/ elsewhere in the
+# tree is never hidden.
+/apps/desktop/**/bin/
+/apps/desktop/**/obj/
+
+# Unsloth writes generated TRL trainer modules here on import; regenerated on demand, never edited.
+/unsloth_compiled_cache/
+
 # pytest temp artifacts (basetemp)
 .pytmp/
 .pytest_tmp/
+.pytest-platform/
 
 # coverage artifacts
 .coverage
