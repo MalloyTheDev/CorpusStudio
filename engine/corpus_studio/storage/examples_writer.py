@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import tempfile
 from contextlib import contextmanager
 from pathlib import Path
@@ -59,9 +60,15 @@ def single_writer_lock(project_dir: Path | str) -> Iterator[None]:
 
     lock_file = _lock_path(project_dir)
     lock_file.parent.mkdir(parents=True, exist_ok=True)
+    if sys.platform == "win32":  # pragma: no cover - no fcntl; the atomic replace still applies
+        # Explicit platform guard ahead of the ImportError fallback: equivalent at runtime, but mypy
+        # narrows sys.platform and cannot narrow try/except ImportError, so without this every
+        # fcntl.* use below is reported as a missing attribute under `mypy --platform win32`.
+        yield
+        return
     try:
         import fcntl
-    except ImportError:  # pragma: no cover - non-POSIX fallback
+    except ImportError:  # pragma: no cover - a POSIX-like build without fcntl
         yield
         return
     handle = lock_file.open("w", encoding="utf-8")

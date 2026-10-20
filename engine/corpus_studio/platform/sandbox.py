@@ -123,7 +123,10 @@ def rlimit_preexec(policy: SandboxPolicy) -> Callable[[], None] | None:
     """A ``preexec_fn`` that applies the policy's resource limits in the child before ``exec`` (POSIX
     only). Returns None when nothing to apply or off-POSIX. Built here, invoked by the worker launch in
     slice 3b - not called in 3a."""
-    if os.name != "posix":
+    # Gate on sys.platform rather than os.name: both are equivalent here, but mypy narrows only
+    # sys.platform, so this is what lets `mypy --platform win32` see the POSIX-only block below as
+    # unreachable instead of reporting every resource.* lookup as a missing attribute.
+    if sys.platform == "win32":
         return None
     import resource  # noqa: PLC0415 - POSIX-only, imported lazily so import stays cross-platform
 

@@ -97,7 +97,7 @@ def _open_lock_stream(path: Path) -> BinaryIO:
             raise FileLockError("lock file must be one singly linked regular file")
         if hasattr(os, "getuid") and opened.st_uid != os.getuid():
             raise FileLockError("lock file is owned by another user")
-        if os.name != "nt":
+        if sys.platform != "win32":  # sys.platform, not os.name, so mypy can narrow the POSIX call
             os.fchmod(descriptor, 0o600)
         if opened.st_size == 0:
             # msvcrt locks a byte range, so the file needs at least one byte to lock.

@@ -997,7 +997,7 @@ def _open_lock_stream(path: Path) -> BinaryIO:
             )
         if hasattr(os, "getuid") and opened.st_uid != os.getuid():
             raise EnvironmentManagerError("managed lock file is owned by another user")
-        if os.name != "nt":
+        if sys.platform != "win32":  # sys.platform, not os.name, so mypy can narrow the POSIX call
             os.fchmod(descriptor, 0o600)
         if opened.st_size == 0:
             os.write(descriptor, b"\0")

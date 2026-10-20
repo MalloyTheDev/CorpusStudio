@@ -1017,6 +1017,8 @@ def _probe_cuda_qlora_sdpa_execution_tuple(
             return int(psutil.Process(os.getpid()).memory_info().rss)
         except Exception:  # noqa: BLE001
             try:
+                if sys.platform == "win32":  # no /proc and no os.sysconf; this fell to 0 before too
+                    return 0
                 pages = int(Path("/proc/self/statm").read_text(encoding="utf-8").split()[1])
                 return pages * int(os.sysconf("SC_PAGE_SIZE"))
             except Exception:  # noqa: BLE001
