@@ -3,8 +3,6 @@
 for each backend, refuses fail-closed when no backend exists, and applies resource limits. Nothing here
 runs custom code - it builds + probes only."""
 
-import resource
-
 import pytest
 from pydantic import ValidationError
 
@@ -101,6 +99,10 @@ def test_probe_reports_none_off_linux(monkeypatch):
 
 
 def test_rlimit_preexec_applies_the_limits(monkeypatch):
+    # POSIX-only. `resource` is absent on Windows, and importing it at module scope aborts collection
+    # for the entire suite there. sandbox.py imports it lazily for the same reason, so the test must
+    # not reintroduce the module-scope dependency the implementation deliberately avoids.
+    resource = pytest.importorskip("resource")
     calls: list[tuple[int, tuple[int, int]]] = []
     monkeypatch.setattr(resource, "setrlimit", lambda res, lim: calls.append((res, lim)))
     policy = SandboxPolicy(rlimit_address_space_bytes=2**30, rlimit_processes=0, rlimit_open_files=1024)

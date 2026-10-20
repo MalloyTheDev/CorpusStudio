@@ -93,6 +93,12 @@ select = ["E4", "E7", "E9", "F"]
 
 [tool.mypy]
 python_version = "3.11"
+# Analyze as Linux, which is the platform CI enforces. The POSIX-only call sites (fcntl in
+# storage/examples_writer.py and storage/file_lock.py, resource in platform/sandbox.py, os.sysconf in
+# platform/probes.py) are all runtime-guarded for Windows, but mypy models one platform per run.
+# Without this pin a Windows checkout reports 13 attr-defined errors that CI does not have, so the
+# local gate stops matching the gate that actually blocks.
+platform = "linux"
 # Third-party stubs (pydantic/typer/orjson) aren't installed in CI; type-check our
 # own package against a pragmatic baseline rather than chasing library internals.
 ignore_missing_imports = true
