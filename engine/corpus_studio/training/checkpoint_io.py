@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import os
 import random
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
@@ -67,7 +68,12 @@ TRAINER_STATE_FILE = "trainer_state.json"
 # Low-level durable writes (fsync files + directories where the platform supports it)
 # --------------------------------------------------------------------------------------------------
 def _fsync_file(path: Path) -> None:
-    fd = os.open(str(path), os.O_RDONLY)
+    # Windows flushes through FlushFileBuffers, which requires write access, so os.fsync on a
+    # read-only descriptor fails there with EBADF and every checkpoint write raises. POSIX keeps the
+    # read-only open, which is the least privilege needed for a flush. _fsync_dir below already
+    # carries the equivalent Windows allowance; this one was missing it.
+    flags = os.O_WRONLY if sys.platform == "win32" else os.O_RDONLY
+    fd = os.open(str(path), flags)
     try:
         os.fsync(fd)
     finally:
