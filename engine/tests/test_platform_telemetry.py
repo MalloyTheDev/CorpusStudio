@@ -10,8 +10,11 @@ end-to-end raw-record -> summary -> paper-table path.
 from __future__ import annotations
 
 import itertools
+import os
 import sys
 from pathlib import Path
+
+import pytest
 
 from corpus_studio.platform import telemetry as T
 from corpus_studio.platform.common import HashRef, MemoryMetrics, Ref
@@ -577,24 +580,56 @@ def test_probe_gpu_marks_unavailable_when_absent(monkeypatch) -> None:
     assert "nvidia_smi_gpu" in reading.unavailable and "gpu_memory" in reading.unavailable
 
 
+# The host probe reads /proc, which only some supported platforms have. Probe for the directory
+# rather than testing os.name so WSL (os.name == "posix", /proc present) still runs the real
+# readers; the mirror-image test below covers the platforms that have no /proc at all.
+_HAS_PROC = Path("/proc").is_dir()
+_NEEDS_PROC = pytest.mark.skipif(not _HAS_PROC, reason="needs /proc (Linux)")
+
+
+@_NEEDS_PROC
 def test_probe_host_reads_proc_on_linux() -> None:
-    # This host is native Linux, so /proc is present; the probe returns real (partial) data.
+    # /proc is present, so the probe returns real (partial) data and claims nothing unavailable.
     reading = T.probe_host()
     assert reading.host is not None
     assert reading.host.system_ram_used_bytes is not None
+    assert "proc_host" not in reading.unavailable
 
 
+@_NEEDS_PROC
 def test_proc_readers_execute_on_linux() -> None:
-    import os as _os
-
     meminfo = T._read_meminfo()
     assert "MemTotal" in meminfo and meminfo["MemTotal"] > 0
-    tree_rss = T._read_process_tree_rss(_os.getpid())
+    tree_rss = T._read_process_tree_rss(os.getpid())
     assert tree_rss is not None and tree_rss > 0  # this process is its own tree root
     # A pid that is not present resolves to None rather than raising or fabricating a value.
     assert T._read_process_tree_rss(2_000_000_123) is None
     read_bytes, write_bytes = T._read_self_io()
     assert read_bytes is None or read_bytes >= 0
+
+
+def test_probe_host_fail_softs_and_says_so_without_proc(monkeypatch) -> None:
+    # The other half of the platform contract, asserted on every platform: with no readable /proc
+    # the probe must report NO host sample and SAY which source was unavailable, never fabricate
+    # system memory. "proc_host" in unavailable is what keeps a missing sample honest.
+    monkeypatch.setattr(T, "_read_meminfo", lambda: {})
+    monkeypatch.setattr(T, "_read_process_tree_rss", lambda pid: None)
+    monkeypatch.setattr(T, "_read_self_io", lambda: (None, None))
+    reading = T.probe_host()
+    assert reading.host is None
+    assert reading.unavailable == ["proc_host"]
+
+
+@pytest.mark.skipif(_HAS_PROC, reason="covers the platforms with no /proc (native Windows)")
+def test_proc_readers_are_empty_and_probe_host_is_unavailable_without_proc() -> None:
+    # Proves the premise of the monkeypatched test above against the real platform: on a host with
+    # no /proc the readers return nothing rather than raising, and probe_host names "proc_host".
+    assert T._read_meminfo() == {}
+    assert T._read_process_tree_rss(os.getpid()) is None
+    assert T._read_self_io() == (None, None)
+    reading = T.probe_host()
+    assert reading.host is None
+    assert reading.unavailable == ["proc_host"]
 
 
 def test_summary_without_any_samples_has_null_env_blocks(tmp_path: Path) -> None:

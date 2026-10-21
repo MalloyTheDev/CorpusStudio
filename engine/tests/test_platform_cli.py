@@ -4,6 +4,8 @@ we inject a synthetic READY host to exercise the resolve→fit→bundle path, an
 selection flows through the CLI (incl. the honest Unsloth-on-Blackwell refusal)."""
 
 import json
+import os
+from pathlib import Path
 
 import pytest
 from typer.testing import CliRunner
@@ -433,20 +435,30 @@ def test_platform_plan_lora_rank_flows_through_the_cli(monkeypatch, tmp_path):
 
 def test_platform_plan_output_dir_flows_into_resolved_execution(monkeypatch, tmp_path):
     # --output-dir controls where the trainer saves the adapter (so a run can target a project dir,
-    # not the CWD). It must reach the sealed worker configuration verbatim.
+    # not the CWD). It must reach the sealed worker configuration as the user's own root, modulo the
+    # one canonicalisation the product documents (expanduser + realpath). Asserting a hardcoded
+    # POSIX string would be wrong on Windows, where realpath anchors a drive-relative absolute path
+    # to the current drive; assert the documented canonicalisation instead.
     _ready_host(monkeypatch)
+    requested = "/some/project/adapters/wbg"
+    expected = str(Path(os.path.realpath(os.path.expanduser(requested))))
     result = runner.invoke(
         app,
         [
             *_platform_plan_args(tmp_path),
             "--output-dir",
-            "/some/project/adapters/wbg",
+            requested,
             "--json",
         ],
     )
     assert result.exit_code == 0
     resolved = json.loads(result.stdout)["run_plan"]["resolved_execution"]
-    assert resolved["output_dir"] == "/some/project/adapters/wbg"
+    assert resolved["output_dir"] == expected
+    # Not a default root and not CWD-relative: the requested tail survives canonicalisation
+    # unchanged, and the root is absolute.
+    canonical = Path(resolved["output_dir"])
+    assert canonical.is_absolute()
+    assert canonical.parts[-3:] == ("project", "adapters", "wbg")
 
 
 def test_platform_plan_memory_efficient_requires_an_exact_combination_probe(monkeypatch, tmp_path):

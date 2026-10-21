@@ -161,7 +161,9 @@ def test_report_verdict_must_be_consistent_with_findings():
 
 def test_cli_admits_a_clean_bundle_and_writes_the_report(tmp_path):
     bundle = tmp_path / "block.py"
-    bundle.write_text(CLEAN, encoding="utf-8")
+    # write_bytes, not write_text: the digest asserted below is over the LF-terminated UTF-8 bytes,
+    # and text mode would translate the newline to the platform line ending (CRLF on Windows).
+    bundle.write_bytes(CLEAN.encode("utf-8"))
     out = tmp_path / "report.json"
     result = _runner.invoke(
         app,

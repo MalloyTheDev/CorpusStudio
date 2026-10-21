@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import hashlib
 import json
+import os
 from pathlib import Path
 import struct
 
@@ -858,9 +859,68 @@ def test_adapter_safetensors_rejects_interior_gap_and_unaligned_header(tmp_path:
         validate_safetensors_tensor_file(path)
 
 
+class _ReplacedPathIdentity:
+    """A stat of the file now AT the path after an atomic replacement: same size, new identity.
+
+    Everything else is forwarded from the real stat, so only the two fields a rename-over changes
+    (the inode and the modification time) diverge from the open handle's fstat.
+    """
+
+    def __init__(self, real: os.stat_result) -> None:
+        self._real = real
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(self._real, name)
+
+    @property
+    def st_ino(self) -> int:
+        return self._real.st_ino + 1
+
+    @property
+    def st_mtime_ns(self) -> int:
+        return self._real.st_mtime_ns + 1
+
+
 def test_adapter_safetensors_detects_atomic_path_replacement_during_read(
     tmp_path: Path, monkeypatch
 ):
+    # Atomic path replacement: the bytes the reader holds open are no longer the bytes at the path.
+    # The product proves that by comparing the OPEN handle's identity (fstat) against the identity
+    # of whatever the path resolves to now (Path.stat), so inject exactly that divergence. Doing it
+    # with a real rename-over-an-open-file would be POSIX-only: Windows refuses the rename with
+    # WinError 5, the product's own `except OSError` reports "cannot read safetensors header", and
+    # the identity comparison under test is never reached. The companion test below still exercises
+    # the real kernel rename where the platform allows it.
+    path = tmp_path / "adapter_model.safetensors"
+    _write_safetensors(path, {"adapter.lora_A.weight": ("F32", [1])})
+    real_stat = Path.stat
+    original_decode = accounting._decode_safetensors_header
+    replaced = False
+
+    def _stat(self, *args, **kwargs):
+        result = real_stat(self, *args, **kwargs)
+        if replaced and self.name == path.name:
+            return _ReplacedPathIdentity(result)
+        return result
+
+    def _replace_after_decode(*args, **kwargs):
+        nonlocal replaced
+        result = original_decode(*args, **kwargs)
+        replaced = True  # the path is swapped the instant the header has been decoded
+        return result
+
+    monkeypatch.setattr(Path, "stat", _stat)
+    monkeypatch.setattr(accounting, "_decode_safetensors_header", _replace_after_decode)
+    with pytest.raises(ParameterAccountingError, match="changed while"):
+        validate_safetensors_tensor_file(path)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX rename-over-open-file semantics")
+def test_adapter_safetensors_detects_a_real_rename_over_the_open_file(
+    tmp_path: Path, monkeypatch
+):
+    # Same contract as above, driven by the kernel instead of an injected stat, so the platforms
+    # that permit renaming over an open file still prove the end-to-end behaviour.
     path = tmp_path / "adapter_model.safetensors"
     replacement = tmp_path / "replacement.safetensors"
     _write_safetensors(path, {"adapter.lora_A.weight": ("F32", [1])})

@@ -161,9 +161,8 @@ def test_examples_delete_captures_a_verified_undo_after_a_tear(tmp_path: Path) -
     assert result.exit_code == 0, result.output
     undo = json.loads(result.stdout)["undo_version_id"]
     assert len(reconstruct_version_lines(project, undo)) == 2
-    assert [json.loads(line) for line in (project / "examples.jsonl").read_text().splitlines()] == [
-        ROW_C
-    ]
+    rows = (project / "examples.jsonl").read_text(encoding="utf-8").splitlines()
+    assert [json.loads(line) for line in rows] == [ROW_C]
 
 
 def test_inplace_restore_captures_its_undo_after_a_tear(tmp_path: Path) -> None:

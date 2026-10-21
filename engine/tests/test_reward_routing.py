@@ -166,7 +166,10 @@ _PAIR = {"prompt": "p", "chosen": "c", "rejected": "r"}
 def _reward_execution(tmp_path) -> SimpleNamespace:
     # A real sealed dataset binding: the runner verifies these bytes before it dispatches the worker.
     dataset = tmp_path / "pairs.jsonl"
-    dataset.write_text(json.dumps(_PAIR) + "\n", encoding="utf-8")
+    # write_bytes, not write_text: the sealed byte_count asserted downstream is the
+    # LF-terminated JSON length, and text mode would translate the newline to the
+    # platform line ending (CRLF on Windows).
+    dataset.write_bytes((json.dumps(_PAIR) + "\n").encode("utf-8"))
     binding = local_input_binding(
         kind="dataset", location=str(dataset), ref_id="dataset", directory=False
     )
