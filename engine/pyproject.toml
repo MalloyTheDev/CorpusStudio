@@ -26,6 +26,12 @@ dev = [
     # The preregistered research matrix is YAML; CI verifies its append-only effective-spec
     # amendments and exact content hashes without converting the source document in place.
     "pyyaml>=6.0",
+    # build-worker-wheel runs `pip wheel --no-build-isolation`, which reuses THIS interpreter as the
+    # PEP 517 backend instead of provisioning a throwaway build env, so the backend has to be present
+    # here. Python 3.12 venvs no longer seed setuptools, and CI only had it ambiently because it runs
+    # 3.11; declaring it makes the prerequisite real rather than inherited.
+    "setuptools>=64",
+    "wheel>=0.43",
     # Installed in dev/CI so the optional Parquet round-trip is actually exercised
     # (it is a runtime *optional* extra for users — see `parquet` below).
     "pyarrow>=15"

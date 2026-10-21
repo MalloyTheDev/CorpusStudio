@@ -1729,6 +1729,22 @@ def build_worker_wheel(
     # Build into a private temporary wheel-dir and take EXACTLY the wheel this build produced, then move
     # it into dest_dir. This makes wheel selection unambiguous: the stamped/admitted wheel is the one pip
     # just built, never a lexicographically-later file that happened to share the output directory.
+    # --no-build-isolation deliberately reuses THIS interpreter rather than letting pip provision a
+    # throwaway build env, so the build is reproducible against the pinned control plane. The cost is
+    # that the PEP 517 backend must already be importable here, and a Python 3.12 venv no longer
+    # seeds setuptools. Check it up front: otherwise pip fails with a BackendUnavailable buried at
+    # the bottom of a hundred-line traceback that says nothing about the actual prerequisite.
+    import importlib.util  # noqa: PLC0415 - only the wheel-build path needs it
+
+    if importlib.util.find_spec("setuptools") is None:
+        typer.echo(
+            "wheel build needs setuptools in this interpreter, because --no-build-isolation reuses "
+            "it as the PEP 517 build backend. Python 3.12 venvs no longer seed it. "
+            "Install it with: pip install 'setuptools>=64' wheel",
+            err=True,
+        )
+        raise typer.Exit(2)
+
     with tempfile.TemporaryDirectory(prefix="cs-worker-wheel-build-") as tmp_build:
         build = subprocess.run(  # noqa: S603 - control-plane python + fixed build argv, no shell.
             [
