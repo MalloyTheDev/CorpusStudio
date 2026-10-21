@@ -123,13 +123,16 @@ def seal_checkpoint_manifest(manifest: CheckpointManifest) -> CheckpointManifest
 def write_checkpoint_manifest(manifest: CheckpointManifest, checkpoint_dir: str | Path) -> Path:
     """Crash-safe write: serialize to a temp file, fsync, then ``os.replace`` onto the final path.
     Combined with the ``complete`` marker, a torn write leaves either the prior manifest or nothing -
-    never a half-written one a resume could read."""
+    never a half-written one a resume could read.
+
+    Written with ``newline=""`` so the pretty-printed manifest is byte-identical on every platform;
+    without it Windows would rewrite every line break to CRLF."""
 
     directory = Path(checkpoint_dir)
     directory.mkdir(parents=True, exist_ok=True)
     final = directory / MANIFEST_FILENAME
     tmp = directory / f".{MANIFEST_FILENAME}.{os.getpid()}.tmp"
-    with tmp.open("w", encoding="utf-8") as handle:
+    with tmp.open("w", encoding="utf-8", newline="") as handle:
         handle.write(manifest.model_dump_json(indent=2))
         handle.flush()
         os.fsync(handle.fileno())

@@ -51,9 +51,16 @@ def row_id(row: Any) -> str:
 
 
 def store_line(row_id_value: str, row: Any) -> str:
-    """The exact on-disk line for one stored row (newline-terminated). Canonical
+    """The exact on-disk line for one stored row (LF-terminated). Canonical
     (sorted keys) so the store matches the identity signature; ``ensure_ascii``
-    off keeps non-ASCII rows human-inspectable."""
+    off keeps non-ASCII rows human-inspectable.
+
+    "Exact" is a byte-level claim, so every writer of this line MUST open the store
+    with ``newline=""``. Without it, Python's text layer rewrites the terminator to
+    the platform's native sequence (CRLF on Windows), which would make the same
+    logical row differ byte-for-byte between platforms and silently falsify this
+    contract. Readers stay CRLF-tolerant regardless, so stores already written with
+    CRLF still parse."""
 
     return json.dumps(
         {"row_id": row_id_value, "row": row}, ensure_ascii=False, sort_keys=True
@@ -166,7 +173,8 @@ def append_rows(
                 if handle is None:
                     path.parent.mkdir(parents=True, exist_ok=True)
                     terminate_torn_tail(path)
-                    handle = path.open("a", encoding="utf-8")
+                    # newline='' => the LF from store_line reaches disk verbatim (no CRLF on Windows).
+                    handle = path.open("a", encoding="utf-8", newline="")
                 handle.write(store_line(rid, row))
                 written += 1
         finally:

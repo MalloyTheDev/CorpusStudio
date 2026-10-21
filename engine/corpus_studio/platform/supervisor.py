@@ -164,7 +164,10 @@ RUN_EVENTS_FILENAME = "RunEvents.jsonl"
 
 def _append_event_line(handle: Any, event: RunEvent) -> None:
     """Append one RunEvent as a JSON line and flush, so the durable raw event stream is crash-safe to
-    at most a lost trailing line — never a torn record."""
+    at most a lost trailing line, never a torn record.
+
+    ``handle`` MUST have been opened with ``newline=""`` so this LF terminator reaches disk verbatim
+    on every platform; the raw event log is digested as its on-disk bytes."""
 
     handle.write(event.model_dump_json() + "\n")
     handle.flush()
@@ -948,7 +951,10 @@ def execute_run(
     events_handle: Any = None
     if record_dir is not None:
         record_dir.mkdir(parents=True, exist_ok=True)
-        events_handle = (record_dir / RUN_EVENTS_FILENAME).open("w", encoding="utf-8")  # noqa: SIM115
+        # newline="" so _append_event_line's LF terminator is written verbatim, never CRLF.
+        events_handle = (record_dir / RUN_EVENTS_FILENAME).open(  # noqa: SIM115
+            "w", encoding="utf-8", newline=""
+        )
 
     def _drive_telemetry(event: RunEvent) -> None:
         # Bind the sampler's warm-up/measured phase to the authoritative event stream, never to a

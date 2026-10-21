@@ -465,7 +465,10 @@ def execute_run_subprocess(
     stderr_handle: Any = None
     if record_dir is not None:
         record_dir.mkdir(parents=True, exist_ok=True)
-        events_handle = (record_dir / RUN_EVENTS_FILENAME).open("w", encoding="utf-8")  # noqa: SIM115
+        # newline='' => _append_event_line's LF terminator is written verbatim (no CRLF).
+        events_handle = (record_dir / RUN_EVENTS_FILENAME).open(  # noqa: SIM115
+            "w", encoding="utf-8", newline=""
+        )
         if _capture_worker_stderr(capture_stderr):
             stderr_handle = (record_dir / WORKER_STDERR_FILENAME).open(  # noqa: SIM115
                 "w", encoding="utf-8", errors="replace"

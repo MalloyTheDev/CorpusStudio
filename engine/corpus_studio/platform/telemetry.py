@@ -453,7 +453,10 @@ class TelemetrySampler:
 
     def _open(self) -> None:
         self._dir.mkdir(parents=True, exist_ok=True)
-        self._handle = self.samples_path.open("a", encoding="utf-8")  # noqa: SIM115
+        # newline='' keeps the per-sample terminator LF on every platform: the raw samples
+        # file is digested as its on-disk bytes, so a native-newline rewrite would stop a
+        # Windows run's records ever matching a Linux run's for identical content.
+        self._handle = self.samples_path.open("a", encoding="utf-8", newline="")  # noqa: SIM115
 
     def take_sample(self) -> TelemetrySample:
         """Take, write, and return exactly one sample. Public so tests drive the sampler
@@ -546,11 +549,15 @@ def _sha256_and_lines(path: Path) -> tuple[str, int]:
 
 def append_jsonl(path: str | Path, line_obj: str) -> None:
     """Append one already-serialized JSON line durably (append + flush). The atomic-per-line
-    convention makes a torn tail at most one lost trailing sample, never a corrupt record."""
+    convention makes a torn tail at most one lost trailing sample, never a corrupt record.
+
+    Opened with ``newline=""`` so the record terminator is LF on every platform: raw records are
+    digested as the bytes on disk, and a native-newline rewrite would make a Windows run's record
+    bytes unable to match a Linux run's for identical logical content."""
 
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
-    with target.open("a", encoding="utf-8") as handle:
+    with target.open("a", encoding="utf-8", newline="") as handle:
         handle.write(line_obj + "\n")
         handle.flush()
 

@@ -415,7 +415,8 @@ def _capture_pass(path: Path, project_dir: Path | str, *, store_rows: bool) -> D
                     if store_handle is None:
                         assert store_target is not None  # store_rows guarantees a target
                         store_target.parent.mkdir(parents=True, exist_ok=True)
-                        store_handle = store_target.open("a", encoding="utf-8")
+                        # newline='' => the LF from store_line reaches disk verbatim (no CRLF on Windows).
+                        store_handle = store_target.open("a", encoding="utf-8", newline="")
                     store_handle.write(store_line(rid, row))
                     new_stored += 1
                 except OSError:
