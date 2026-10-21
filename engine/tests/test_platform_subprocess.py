@@ -79,6 +79,88 @@ def test_worker_env_strips_import_shadowing_vars(monkeypatch):
     assert _worker_env("a" * 64)[WORKER_WHEEL_SHA256_ENV] == "a" * 64
 
 
+# ---- the protocol channel is UTF-8 on both ends -----------------------------
+
+
+def test_worker_env_pins_the_child_protocol_encoding():
+    """The child must decode the dispatch as the parent encoded it.
+
+    The parent spawns with encoding="utf-8"; a stock Windows child otherwise defaults stdio to the
+    locale code page. This env var is also the ONLY channel that reaches a pinned older worker wheel
+    which cannot pin itself in-process.
+    """
+    from corpus_studio.platform.subprocess_supervisor import _worker_env
+
+    assert _worker_env()["PYTHONIOENCODING"] == "utf-8"
+
+
+def test_protocol_stdin_is_repinned_to_utf8(monkeypatch):
+    """A cp1252 stdin is reconfigured before the dispatch is read, so non-ASCII survives.
+
+    Regression test for the direction a real user hits. The parent writes the run_dispatch line as
+    UTF-8 into the child's stdin; unpinned, a Windows child decoded those bytes as cp1252, which
+    turned any non-ASCII into U+FFFD and made the plan's configuration_hash stop matching its body.
+    The run was then refused as TAMPERED when nothing had tampered with it, so a project or user
+    profile path carrying an accent or CJK character could not train at all.
+    """
+    from corpus_studio.platform.backends import get_worker_backend
+    from corpus_studio.platform.worker import _ensure_utf8_protocol_stdio
+
+    # Real payload, not invented: the shipped first-party manifest carries U+00B7 in display_name,
+    # so this corruption is reachable on an ordinary run with no unusual user input.
+    manifest = get_worker_backend("corpus_studio")
+    assert manifest is not None
+    payload = manifest.display_name
+    assert "·" in payload
+    raw = io.BytesIO(payload.encode("utf-8") + b"\n")
+    stdin = io.TextIOWrapper(raw, encoding="cp1252")
+    monkeypatch.setattr(sys, "stdin", stdin)
+
+    _ensure_utf8_protocol_stdio()
+
+    assert sys.stdin.encoding.lower().replace("-", "") == "utf8"
+    line = sys.stdin.readline()
+    assert "�" not in line, "the pin did not take; non-ASCII was replaced"
+    assert line.rstrip("\n") == payload
+
+
+def test_an_unpinned_cp1252_stdin_would_corrupt_the_dispatch():
+    """The hazard the pin guards, stated explicitly so the pin is not mistaken for decoration.
+
+    This asserts what Python does, not what the product does: it is here so a future reader can see
+    why the reconfigure above is load-bearing rather than defensive noise.
+
+    The two directions fail differently and it is worth not conflating them. Inbound (here), the
+    child decodes UTF-8 bytes as cp1252 and gets MOJIBAKE, because the UTF-8 encoding of U+00B7 is
+    0xC2 0xB7 and cp1252 defines both: no replacement character appears, the text is simply wrong,
+    and the plan hash mismatch that follows reads as tampering. Outbound, the parent decodes the
+    child's cp1252 bytes as UTF-8 with errors="replace", which is where U+FFFD comes from. Only five
+    byte values (0x81, 0x8D, 0x8F, 0x90, 0x9D) are undefined in cp1252, and those raise
+    UnicodeDecodeError inbound rather than corrupting quietly.
+    """
+    from corpus_studio.platform.backends import get_worker_backend
+
+    manifest = get_worker_backend("corpus_studio")
+    assert manifest is not None
+    payload = manifest.display_name
+    as_received = payload.encode("utf-8").decode("cp1252", errors="replace")
+    assert as_received != payload, "cp1252 would have to mangle this for the pin to matter"
+    # The signature of UTF-8 bytes read as cp1252: the 0xC2 lead byte surfaces as a stray capital A
+    # with circumflex, and the character itself is still there, so nothing looks obviously broken.
+    assert "Â" in as_received
+    assert "�" not in as_received
+
+
+def test_protocol_stdio_pin_is_a_safe_noop_without_reconfigure(monkeypatch):
+    """A stream that cannot be reconfigured (test capture buffers) must not raise."""
+    from corpus_studio.platform.worker import _ensure_utf8_protocol_stdio
+
+    monkeypatch.setattr(sys, "stdin", io.StringIO("{}\n"))
+    monkeypatch.setattr(sys, "stdout", io.StringIO())
+    _ensure_utf8_protocol_stdio()  # must not raise
+    assert sys.stdin.readline() == "{}\n"
+
+
 def test_dispatch_carries_resume_only_when_resuming():
     """The run_dispatch line embeds the resume instruction only for an actual resume; an ordinary
     from-scratch dispatch is byte-for-byte unchanged, so a worker that never consumes resume receives
