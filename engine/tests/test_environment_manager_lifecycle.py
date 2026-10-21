@@ -117,6 +117,13 @@ class FakeEnvironmentRunner:
     env_python: str = ""
     compute_capability: str | None = "12.0"
     cuda_runtime: str | None = "12.8"
+    # The OS the install plan was built for, i.e. the one the stub PythonRuntime declares - NOT the
+    # host this test process happens to run on. The plan's expected interpreter path comes from the
+    # planned OS (Scripts\python.exe on Windows, bin/python otherwise), so a fake runner that laid
+    # the venv out for the host would miss the planned path whenever the two differ (every
+    # linux-only recipe exercised from a Windows host). Each helper passes the same value it puts
+    # in its stub runtime.
+    planned_os: OperatingSystem = OperatingSystem.linux
 
     def __call__(
         self,
@@ -151,7 +158,7 @@ class FakeEnvironmentRunner:
             root = Path(argv[-1])
             python_path = (
                 root / "Scripts" / "python.exe"
-                if _host_os() == OperatingSystem.windows
+                if self.planned_os == OperatingSystem.windows
                 else root / "bin" / "python"
             )
             if self.create_interpreter:
@@ -310,7 +317,7 @@ class FakeEnvironmentRunner:
             return {
                 "profile": {
                     "environment_signature": signature,
-                    "host": {"os": _host_os().value},
+                    "host": {"os": self.planned_os.value},
                     "gpus": gpus,
                 },
                 "capability_report": {
@@ -443,7 +450,7 @@ class FakeEnvironmentRunner:
         return {
             "profile": {
                 "environment_signature": signature,
-                "host": {"os": _host_os().value},
+                "host": {"os": self.planned_os.value},
                 "gpus": gpus,
             },
             "capability_report": {
@@ -499,7 +506,7 @@ class FakeEnvironmentRunner:
                 "implementation": "CPython",
                 "architecture": "64-bit",
                 "platform": "test-platform",
-                "os": _host_os().value,
+                "os": self.planned_os.value,
                 "is_virtual_environment": True,
                 "venv_available": True,
             },
@@ -524,6 +531,8 @@ class FakeEnvironmentRunner:
 def _manager_and_resolution(tmp_path: Path, runner: FakeEnvironmentRunner, env_id: str = "ref-env"):
     recipe = get_recipe("backend-corpus-studio")
     assert recipe is not None
+    # This all-OS recipe is planned for the host, so the fake runner lays the venv out that way too.
+    runner.planned_os = _host_os()
     runtime = PythonRuntime(
         runtime_id="python-test",
         executable=str(tmp_path / "base-python"),
@@ -663,6 +672,9 @@ def _manager_and_readiness_resolution(
         complete_probe_ok=complete_probe_ok,
         complete_probe_name=complete_probe_name,
         packages=packages,
+        # The readiness recipes are linux-only, so the plan - and therefore the fake venv layout -
+        # is linux regardless of the host running these tests.
+        planned_os=OperatingSystem.linux,
     )
     runtime = PythonRuntime(
         runtime_id="python-readiness",
@@ -782,7 +794,9 @@ def _assert_create_refuses_inadmissible_wheel(
             manager_module._worker_wheel_payload_manifest(worker_identity).items()
         )
     ]
-    runner = FakeEnvironmentRunner(cuda=True, packages=packages)
+    runner = FakeEnvironmentRunner(
+        cuda=True, packages=packages, planned_os=OperatingSystem.linux
+    )
     runtime = PythonRuntime(
         runtime_id="python-readiness",
         executable=str(tmp_path / "base-python"),
