@@ -54,6 +54,15 @@ class UnsupportedPathEncoding(GitStateError):
     """A path (or symlink target) is not valid UTF-8; assurance records require UTF-8."""
 
 
+class UnmergedIndexPath(GitStateError):
+    """A path is UNMERGED in the index (stages 1-3, no stage 0), so it has no single recorded mode.
+
+    Wherever the working tree is not the authority for git's mode (``core.filemode`` /
+    ``core.symlinks`` false) the index supplies it; a conflicted path has three candidate entries and
+    no resolved one, so the kernel refuses rather than pick one and seal a mode nobody chose.
+    """
+
+
 class MergeCandidateConflicted(GitStateError):
     """A 3-way merge of HEAD into the base tip conflicts; the merge candidate cannot be assessed.
 
@@ -287,6 +296,67 @@ def tree_entry(root: Path, tree_commit: str, path: str) -> TreeEntry | None:
 def blob_bytes(root: Path, oid: str) -> bytes:
     """Return the raw bytes of a blob object (regular content, or a symlink's target string)."""
     return _git(root, "cat-file", "-p", oid).stdout
+
+
+def config_bool(root: Path, name: str, *, default: bool) -> bool:
+    """Resolve a boolean git config value the way GIT resolves it (system/global/local scopes).
+
+    Two knobs decide whether the local FILESYSTEM can carry git's own view of a file:
+    ``core.filemode`` (is ``st_mode``'s owner-exec bit trusted?) and ``core.symlinks`` (can a tracked
+    symlink exist as a real link in the working tree?). Where either is false - the Git-for-Windows
+    default - a mode or kind derived from ``os.lstat`` alone states a FALSE fact about the change, so
+    the kernel has to know which authority applies before it reads a path.
+
+    ``default`` is the value git itself compiles in for an absent key (``trust_executable_bit`` and
+    ``has_symlinks`` both start enabled), so an unset knob never means something different here than
+    it means to git. Every other failure fails CLOSED: a mis-read knob would pick the wrong authority
+    for every mode in the record, and those modes are sealed into the fingerprint.
+    """
+    proc = _git(root, "config", "--type=bool", "--get", name, check=False)
+    value = proc.stdout.decode("utf-8", "replace").strip()
+    if proc.returncode == 0:
+        if value in ("true", "false"):
+            return value == "true"
+        raise GitStateError(f"git config --type=bool --get {name} returned {value!r}, not a boolean")
+    if proc.returncode == 1 and not value:
+        return default  # unset in every scope -> git's own compiled-in default, not an invented one
+    stderr = proc.stderr.decode("utf-8", "replace").strip()
+    raise GitStateError(f"git config --get {name} failed (exit {proc.returncode}): {stderr}")
+
+
+def index_mode(root: Path, path: str) -> str | None:
+    """The 6-digit mode git RECORDS for ``path`` in the index, or ``None`` when it is untracked.
+
+    This is the authoritative mode wherever the working tree cannot carry it: it is exactly the value
+    git's own worktree diff substitutes for the stat bits a checkout cannot represent (``core.filemode``
+    / ``core.symlinks`` false). Reading it is strictly read-only - ``ls-files`` neither refreshes nor
+    rewrites the index.
+
+    ``git ls-files --stage -z`` emits ``<mode> <oid> <stage>\\t<path>`` per entry, NUL-terminated, so a
+    path is never quoted or ambiguous; a non-UTF-8 index path fails closed like every other path here.
+    """
+    proc = _git(root, "ls-files", "--stage", "-z", "--", path)
+    staged: dict[int, str] = {}
+    for token in proc.stdout.split(b"\x00"):
+        if not token:
+            continue
+        meta, _sep, raw_path = token.partition(b"\t")
+        # A pathspec can match more than the literal path (a directory prefix, glob magic inside a
+        # name); only an entry for the EXACT requested path says anything about that path.
+        if _decode_utf8(raw_path, what="index path") != path:
+            continue
+        fields = meta.decode("utf-8", "replace").split()
+        if len(fields) != 3 or not fields[2].isdigit():
+            raise GitStateError(f"unexpected git ls-files --stage entry: {token!r}")
+        staged[int(fields[2])] = fields[0]
+    if not staged:
+        return None
+    if 0 in staged:
+        return staged[0]
+    raise UnmergedIndexPath(
+        f"{path} is unmerged in the index (stages {sorted(staged)}); its recorded git mode is "
+        "undefined until the conflict is resolved"
+    )
 
 
 def current_branch(ctx: GitContext) -> str:

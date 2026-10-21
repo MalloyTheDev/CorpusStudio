@@ -4,7 +4,9 @@ Proves the FAIL-SOFT gh sensor (every failure -> available:false + a stable reas
 seals at exit 0), the area-tag parser, the deterministic composition of the sensors, the honest
 deterministic/measurement split (no top-level applicability_key), bounding-with-counted-drops, the
 cross-consistency of the embedded impact key with `cs_assure impact`, and that git/kernel errors stay
-fail-CLOSED (exit 2). All gh is faked offline - never a real network call.
+fail-CLOSED (exit 2). Every gh call here is faked OFFLINE by argv (never by PATH, which
+cannot shadow gh.exe on Windows - see _fake_gh), so no test can reach github.com with the
+real credentials of whoever runs it.
 """
 
 from __future__ import annotations
@@ -14,6 +16,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from typing import NamedTuple
 
 import pytest
 
@@ -58,23 +61,61 @@ def _repo(tmp_path: Path) -> Path:
     return repo
 
 
-def _stub_gh(bindir: Path, issues_json: str = "[]", exit_code: int = 0, stderr: str = "") -> Path:
-    bindir.mkdir(parents=True, exist_ok=True)
-    gh = bindir / "gh"
-    gh.write_text(
-        "#!/usr/bin/env python3\nimport sys\n"
-        f"sys.stderr.write({stderr!r})\nsys.stdout.write({issues_json!r})\nsys.exit({exit_code})\n"
+class _FakeGh(NamedTuple):
+    """A hermetic stand-in for gh: run ``cli`` instead of cs_assure.py; ``asked`` records the call."""
+
+    cli: Path
+    asked: Path
+
+
+def _fake_gh(
+    tmp_path: Path, *, issues_json: str = "[]", exit_code: int = 0, stderr: str = ""
+) -> _FakeGh:
+    """Fake gh by ARGV - the seam gather_issues already has - and never by shadowing PATH.
+
+    PATH shadowing cannot fake gh on Windows at all: CreateProcess appends .exe to an extensionless
+    program name and never consults PATHEXT, so an extensionless `gh` script (and a `gh.cmd` too) is
+    skipped and the REAL, authenticated gh.exe on the developer PATH answers instead. That is what
+    made the two CLI tests below fail here, and it also broke the promise at the top of this module:
+    a temp repo that ever gained a remote would have sent a live, credentialed request to github.com.
+
+    The child therefore runs the real CLI - runpy with run_name __main__, so the real argument
+    parsing and the real SystemExit(main()) exit mapping are what is under test - after rebinding one
+    module constant: github_issues.GH_ISSUE_ARGV, the default of the argv parameter gather_issues
+    already accepts. (Threading a gh-argv override through status.py and cs_assure.py would remove
+    even this bootstrap; that is a product change, out of scope for this test.) The real gh request
+    is passed through to the fake as its own arguments, so a test can still assert what the sensor
+    asked GitHub for - and that the fake, not a real gh, answered.
+    """
+    stub = tmp_path / "fake_gh.py"
+    asked = tmp_path / "fake_gh_argv.json"
+    stub.write_text(
+        "import json, pathlib, sys\n"
+        f"pathlib.Path({str(asked)!r}).write_text(json.dumps(sys.argv[1:]), encoding='utf-8')\n"
+        f"sys.stderr.write({stderr!r})\n"
+        f"sys.stdout.write({issues_json!r})\n"
+        f"raise SystemExit({exit_code})\n",
+        encoding="utf-8",
     )
-    gh.chmod(0o755)
-    return bindir
+    cli = tmp_path / "cs_assure_with_fake_gh.py"
+    cli.write_text(
+        "import runpy, sys\n"
+        f"sys.path.insert(0, {str(SCRIPTS_DIR)!r})\n"
+        "from assurance import github_issues\n"
+        "github_issues.GH_ISSUE_ARGV = "
+        f"[{sys.executable!r}, {str(stub)!r}, *github_issues.GH_ISSUE_ARGV]\n"
+        "sys.argv = ['cs_assure.py', *sys.argv[1:]]\n"
+        f"runpy.run_path({str(CS_ASSURE)!r}, run_name='__main__')\n",
+        encoding="utf-8",
+    )
+    return _FakeGh(cli=cli, asked=asked)
 
 
-def run_cli(start_dir: Path, *args: str, gh_bin: Path | None = None) -> subprocess.CompletedProcess[str]:
-    env = dict(os.environ)
-    if gh_bin is not None:
-        env["PATH"] = f"{gh_bin}{os.pathsep}{env['PATH']}"
+def run_cli(
+    start_dir: Path, *args: str, cli: Path = CS_ASSURE, env: dict[str, str] | None = None
+) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        [sys.executable, str(CS_ASSURE), *args], cwd=str(start_dir), capture_output=True, text=True, env=env
+        [sys.executable, str(cli), *args], cwd=str(start_dir), capture_output=True, text=True, env=env
     )
 
 
@@ -228,19 +269,24 @@ def test_status_bounds_recent_commits(monkeypatch, tmp_path: Path) -> None:
 
 
 def test_cli_status_exit_0_even_when_gh_fails(tmp_path: Path) -> None:
-    gh_bin = _stub_gh(tmp_path / "bin", issues_json="", exit_code=1, stderr="HTTP 401: Bad credentials")
-    proc = run_cli(_repo(tmp_path), "status", "--base", "HEAD", gh_bin=gh_bin)
+    fake = _fake_gh(tmp_path, issues_json="", exit_code=1, stderr="HTTP 401: Bad credentials")
+    proc = run_cli(_repo(tmp_path), "status", "--base", "HEAD", cli=fake.cli)
     assert proc.returncode == 0, proc.stderr
     payload = json.loads(proc.stdout)["payload"]
     assert payload["issues"]["available"] is False and payload["issues"]["reason"] == "unauthenticated"
+    # The FAKE answered, offline, and it was handed the real read-only gh request.
+    asked = json.loads(fake.asked.read_text("utf-8"))
+    assert asked[:3] == ["gh", "issue", "list"]
+    assert "--state" in asked and "open" in asked
 
 
 def test_cli_status_exit_0_with_issues(tmp_path: Path) -> None:
-    gh_bin = _stub_gh(tmp_path / "bin", issues_json=json.dumps([_issue(9, "[web] x")]))
-    proc = run_cli(_repo(tmp_path), "status", "--base", "HEAD", gh_bin=gh_bin)
-    assert proc.returncode == 0
+    fake = _fake_gh(tmp_path, issues_json=json.dumps([_issue(9, "[web] x")]))
+    proc = run_cli(_repo(tmp_path), "status", "--base", "HEAD", cli=fake.cli)
+    assert proc.returncode == 0, proc.stderr
     payload = json.loads(proc.stdout)["payload"]
     assert payload["issues"]["available"] is True and payload["issues"]["total_open"] == 1
+    assert fake.asked.exists()  # the one open issue came from the fake, never from a real gh
 
 
 def test_cli_status_fail_closed_exit_2(tmp_path: Path) -> None:
@@ -248,19 +294,18 @@ def test_cli_status_fail_closed_exit_2(tmp_path: Path) -> None:
     env = {**os.environ, "GIT_CEILING_DIRECTORIES": str(tmp_path)}
     not_repo = tmp_path / "empty"
     not_repo.mkdir()
-    proc = subprocess.run(
-        [sys.executable, str(CS_ASSURE), "status", "--base", "HEAD"],
-        cwd=str(not_repo), capture_output=True, text=True, env=env,
-    )
+    fake = _fake_gh(tmp_path)
+    proc = run_cli(not_repo, "status", "--base", "HEAD", cli=fake.cli, env=env)
     assert proc.returncode == 2 and not proc.stdout.strip()
+    assert not fake.asked.exists()  # the refusal came first; the external sensor never ran
 
 
 def test_status_impact_key_cross_consistent_with_impact_command(tmp_path: Path) -> None:
-    gh_bin = _stub_gh(tmp_path / "bin", issues_json="[]")
+    fake = _fake_gh(tmp_path, issues_json="[]")
     repo = _repo(tmp_path)
     (repo / "engine" / "corpus_studio" / "platform").mkdir(parents=True)
     (repo / "engine" / "corpus_studio" / "platform" / "worker.py").write_text("x\n")
-    status_rec = json.loads(run_cli(repo, "status", "--base", "HEAD", gh_bin=gh_bin).stdout)
-    impact_rec = json.loads(run_cli(repo, "impact", "--base", "HEAD").stdout)
+    status_rec = json.loads(run_cli(repo, "status", "--base", "HEAD", cli=fake.cli).stdout)
+    impact_rec = json.loads(run_cli(repo, "impact", "--base", "HEAD", cli=fake.cli).stdout)
     assert (status_rec["payload"]["impact"]["impact_applicability_key"]
             == impact_rec["payload"]["applicability_key"])

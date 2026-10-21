@@ -52,6 +52,19 @@ def _git(root: Path, *args: str, check: bool = True) -> subprocess.CompletedProc
     )
 
 
+def _git_stdin(root: Path, *args: str, stdin: str) -> str:
+    """Run git with STDIN written as EXACT bytes, returning stdout.
+
+    Not `_git(..., input=...)`: subprocess's text mode translates a newline to the platform line
+    ending on write, so on Windows `update-index --index-info` would read the CR as part of the
+    path. The fixtures that feed git stdin care about the exact bytes, so they encode them here.
+    """
+    proc = subprocess.run(
+        ["git", "-C", str(root), *args], input=stdin.encode("utf-8"), capture_output=True, check=True
+    )
+    return proc.stdout.decode("utf-8")
+
+
 def init_repo(root: Path) -> Path:
     root.mkdir(parents=True, exist_ok=True)
     _git(root, "init", "-q", "-b", "main")
@@ -67,13 +80,21 @@ def commit_all(root: Path, message: str) -> str:
 
 
 def make_base_repo(tmp_path: Path) -> tuple[Path, str]:
-    """A repo on ``main`` with a handful of tracked files + a symlink, one 'base' commit."""
+    """A repo on ``main`` with a handful of tracked files + a symlink, one 'base' commit.
+
+    Fixture content is written as BYTES deliberately. ``Path.write_text`` translates a newline to
+    the platform line ending, so on Windows the on-disk bytes are CRLF while the committed blob
+    (normalized by ``core.autocrlf``) stays LF - and the workspace view correctly digests the REAL
+    on-disk bytes, so an LF expectation would then mismatch for a reason that has nothing to do
+    with the behaviour under test. Bytes make the intended content explicit and identical on both
+    platforms.
+    """
     root = tmp_path / "repo"
     init_repo(root)
-    (root / "mod.txt").write_text("orig\n")
-    (root / "del.txt").write_text("gone\n")
-    (root / "keep.txt").write_text("hello\n")
-    (root / "a.txt").write_text("aaa\n")
+    (root / "mod.txt").write_bytes(b"orig\n")
+    (root / "del.txt").write_bytes(b"gone\n")
+    (root / "keep.txt").write_bytes(b"hello\n")
+    (root / "a.txt").write_bytes(b"aaa\n")
     os.symlink("keep.txt", root / "link")
     base = commit_all(root, "base")
     return root, base
@@ -105,6 +126,24 @@ def sha(data: bytes) -> str:
     return "sha256:" + hashlib.sha256(data).hexdigest()
 
 
+def _stage_exec_bit(root: Path, relpath: str, *, executable: bool) -> None:
+    """Record the exec bit in the INDEX - where git reads it when ``core.filemode`` is false.
+
+    ``os.chmod`` alone cannot state an exec-bit change on every supported platform: a Windows
+    ``st_mode`` carries no owner-exec bit at all and ``core.filemode`` is false there, so git takes
+    the mode from the index and a chmod-only fixture asserts nothing (which is exactly what hid the
+    wrong-verdict bug these tests now cover). The fixtures therefore state the intended mode in BOTH
+    authorities - chmod for a ``core.filemode=true`` checkout, this for the index - so git itself
+    reports the same mode on Linux and on Windows, and the assertions are the same on both.
+    """
+    _git(root, "update-index", "--chmod=+x" if executable else "--chmod=-x", relpath)
+
+
+def _diff_raw(root: Path, *args: str) -> str:
+    """GIT's own verdict on the change, so a test asserts the record matches git, not one OS."""
+    return _git(root, "diff", "--raw", "--no-renames", *args).stdout
+
+
 # --------------------------------------------------------------------------- change-set shapes
 
 
@@ -118,7 +157,7 @@ def test_clean_repository_is_empty_change_set(tmp_path: Path) -> None:
 
 def test_unstaged_modification(tmp_path: Path) -> None:
     root, _ = make_base_repo(tmp_path)
-    (root / "mod.txt").write_text("changed\n")
+    (root / "mod.txt").write_bytes(b"changed\n")
     _proc, record = changeset(root)
     entry = changed(record)["mod.txt"]
     assert entry["base"]["kind"] == "regular"
@@ -129,7 +168,7 @@ def test_unstaged_modification(tmp_path: Path) -> None:
 
 def test_staged_modification(tmp_path: Path) -> None:
     root, _ = make_base_repo(tmp_path)
-    (root / "mod.txt").write_text("staged\n")
+    (root / "mod.txt").write_bytes(b"staged\n")
     _git(root, "add", "mod.txt")
     _proc, record = changeset(root)
     assert changed(record)["mod.txt"]["candidate"]["content_digest"] == sha(b"staged\n")
@@ -137,9 +176,9 @@ def test_staged_modification(tmp_path: Path) -> None:
 
 def test_staged_and_unstaged_divergence_records_net_worktree(tmp_path: Path) -> None:
     root, _ = make_base_repo(tmp_path)
-    (root / "mod.txt").write_text("stagedA\n")
+    (root / "mod.txt").write_bytes(b"stagedA\n")
     _git(root, "add", "mod.txt")
-    (root / "mod.txt").write_text("worktreeB\n")
+    (root / "mod.txt").write_bytes(b"worktreeB\n")
     _proc, record = changeset(root)
     entry = changed(record)["mod.txt"]
     # workspace scope == exact local working-tree bytes: the net (B), not the staged intermediate.
@@ -150,7 +189,7 @@ def test_staged_and_unstaged_divergence_records_net_worktree(tmp_path: Path) -> 
 
 def test_addition_untracked(tmp_path: Path) -> None:
     root, _ = make_base_repo(tmp_path)
-    (root / "added.txt").write_text("new\n")
+    (root / "added.txt").write_bytes(b"new\n")
     _proc, record = changeset(root)
     entry = changed(record)["added.txt"]
     assert entry["base"] is None
@@ -169,7 +208,12 @@ def test_deletion(tmp_path: Path) -> None:
 
 def test_executable_mode_change(tmp_path: Path) -> None:
     root, _ = make_base_repo(tmp_path)
+    # State the new mode in both authorities (see _stage_exec_bit): where core.filemode is true the
+    # chmod is what git honours, where it is false (the Git-for-Windows default) the index is - and
+    # they agree, so git reports 100644 -> 100755 on either platform and so must the record.
     os.chmod(root / "keep.txt", 0o755)
+    _stage_exec_bit(root, "keep.txt", executable=True)
+    assert ":100644 100755" in _diff_raw(root, "HEAD"), "fixture must be a mode change to git itself"
     _proc, record = changeset(root)
     entry = changed(record)["keep.txt"]
     assert entry["base"]["mode"] == "100644"
@@ -179,21 +223,127 @@ def test_executable_mode_change(tmp_path: Path) -> None:
 
 
 def test_exec_bit_uses_owner_bit_not_any_exec_bit(tmp_path: Path) -> None:
-    # git canonicalizes the exec bit on the OWNER bit only. A file committed 100755 then chmod'd to
-    # a mode with group/other exec but NO owner exec (0o655) is a real git mode change
+    # git canonicalizes the exec bit on the OWNER bit only. A file committed 100755 whose worktree
+    # mode keeps group/other exec but drops OWNER exec (0o655) is a real git mode change
     # (100755 -> 100644) and must NOT be silently dropped by treating any exec bit as executable.
+    # The index flag states that same drop for a checkout where core.filemode is false, so the one
+    # assertion below is the real contract on both platforms instead of a posix-only one.
     root, _ = make_base_repo(tmp_path)
     exe = root / "run.sh"
-    exe.write_text("#!/bin/sh\n")
+    exe.write_bytes(b"#!/bin/sh\n")
     os.chmod(exe, 0o755)
+    _git(root, "add", "run.sh")
+    _stage_exec_bit(root, "run.sh", executable=True)
     commit_all(root, "add executable")  # committed as 100755 on main == HEAD
+    assert _git(root, "ls-files", "--stage", "--", "run.sh").stdout.startswith("100755")
     os.chmod(exe, 0o655)  # drop OWNER exec, keep group/other exec
-    # Sanity: git itself reports this as a modification (owner-exec removed).
-    assert "run.sh" in _git(root, "status", "--porcelain").stdout
+    _stage_exec_bit(root, "run.sh", executable=False)
+    # Sanity: git itself reports the de-executable (owner-exec removed).
+    assert ":100755 100644" in _diff_raw(root, "HEAD")
     _proc, record = changeset(root)
     entry = changed(record)["run.sh"]
     assert entry["base"]["mode"] == "100755"
     assert entry["candidate"]["mode"] == "100644"  # NOT silently equal to 100755
+
+
+def test_content_edit_of_an_executable_keeps_its_mode(tmp_path: Path) -> None:
+    """A content-only edit of a committed 100755 script must NOT claim to de-executable it.
+
+    Where core.filemode is false (the Git-for-Windows default) os.lstat carries no owner-exec bit at
+    all, so a mode derived from it reads 100644 for EVERY worktree file: the change set would state
+    that editing a script also dropped its exec bit, and would seal that fabricated fact into
+    record_digest + fingerprint. git reports the mode unchanged (:100755 100755). The knob is pinned
+    in the fixture so this asserts the same contract on both platforms.
+    """
+    root = init_repo(tmp_path / "repo")
+    _git(root, "config", "core.filemode", "false")
+    script = root / "run.sh"
+    script.write_bytes(b"#!/bin/sh\necho hi\n")
+    _git(root, "add", "run.sh")
+    _stage_exec_bit(root, "run.sh", executable=True)
+    _git(root, "commit", "-q", "-m", "add executable")
+    script.write_bytes(b"#!/bin/sh\necho changed\n")  # content only; nobody touched the mode
+    assert ":100755 100755" in _diff_raw(root, "HEAD")  # git: content modified, mode unchanged
+    _proc, record = changeset(root)
+    entry = changed(record)["run.sh"]
+    assert entry["base"]["mode"] == entry["candidate"]["mode"] == "100755"
+    assert entry["candidate"]["content_digest"] == sha(b"#!/bin/sh\necho changed\n")
+
+
+def test_trusted_filemode_keeps_the_index_out_of_the_mode(tmp_path: Path) -> None:
+    """Where core.filemode is true, the owner-exec bit of st_mode is the authority and the index is
+    not consulted at all - the posix derivation is exactly what it was before the index fallback.
+
+    Pinned true so the expectation is identical on both platforms: neither a posix 0o644 file nor a
+    Windows st_mode carries the owner-exec bit, so an index entry of 100755 must NOT move the mode.
+    """
+    root = init_repo(tmp_path / "repo")
+    _git(root, "config", "core.filemode", "true")
+    script = root / "run.sh"
+    script.write_bytes(b"#!/bin/sh\n")
+    os.chmod(script, 0o644)
+    _git(root, "add", "run.sh")
+    _stage_exec_bit(root, "run.sh", executable=True)  # the index now says 100755 ...
+    state = WorkspaceSourceView(root).state("run.sh")
+    assert state is not None
+    assert state.kind == "regular"
+    assert state.mode == "100644"  # ... and st_mode, the authority here, says otherwise
+
+
+def test_symlink_checked_out_as_a_placeholder_file_is_still_a_symlink(tmp_path: Path) -> None:
+    """With core.symlinks false, git materialises a tracked symlink as a REGULAR file whose bytes
+    are the target string. Deriving the kind from os.lstat then reports a RETARGET as
+    "symlink -> regular" - a false positive for any check gating on added or removed symlinks. git
+    reports :120000 120000 (a retarget) and so must the record; the digest is already right, since
+    the bytes of the placeholder ARE the target string.
+    """
+    root = init_repo(tmp_path / "repo")
+    _git(root, "config", "core.symlinks", "false")
+    (root / "keep.txt").write_bytes(b"hello\n")
+    _git(root, "add", "keep.txt")
+    target_oid = _git_stdin(root, "hash-object", "-w", "--stdin", stdin="keep.txt").strip()
+    _git(root, "update-index", "--add", "--cacheinfo", f"120000,{target_oid},link")
+    _git(root, "commit", "-q", "-m", "base")  # commit the staged index; `add -A` is not involved
+    _git(root, "checkout", "-q", "-f", "--", "link")
+    placeholder = root / "link"
+    assert placeholder.is_file() and not placeholder.is_symlink()  # the point of the fixture
+    assert placeholder.read_bytes() == b"keep.txt"
+    placeholder.write_bytes(b"mod.txt")  # a RETARGET, not a type change
+    assert ":120000 120000" in _diff_raw(root, "HEAD")
+    _proc, record = changeset(root)
+    entry = changed(record)["link"]
+    assert entry["base"]["kind"] == entry["candidate"]["kind"] == "symlink"
+    assert entry["base"]["mode"] == entry["candidate"]["mode"] == "120000"
+    assert entry["base"]["content_digest"] == sha(b"keep.txt")
+    assert entry["candidate"]["content_digest"] == sha(b"mod.txt")
+
+
+def test_unmerged_index_entry_fails_closed(tmp_path: Path) -> None:
+    """A conflicted path has index stages 1-3 and no stage 0, so wherever the index is the authority
+    for the mode there is no single recorded mode to attribute to it. Those modes feed record_digest
+    and fingerprint, so the kernel refuses instead of picking one of the three stages.
+
+    (Where core.filemode and core.symlinks are both true the filesystem IS the authority and no
+    index lookup happens, so the refusal is scoped to the checkouts that need the index - which is
+    why the fixture pins the knob rather than depending on the default of the host.)
+    """
+    from assurance.git_state import UnmergedIndexPath
+
+    root = init_repo(tmp_path / "repo")
+    _git(root, "config", "core.filemode", "false")
+    conflicted = root / "c.txt"
+    conflicted.write_bytes(b"base\n")
+    commit_all(root, "base")
+    _git(root, "checkout", "-q", "-b", "other")
+    conflicted.write_bytes(b"theirs\n")
+    commit_all(root, "theirs")
+    _git(root, "checkout", "-q", "main")
+    conflicted.write_bytes(b"ours\n")
+    commit_all(root, "ours")
+    _git(root, "merge", "other", check=False)  # a real conflict: stages 1-3, no stage 0
+    assert "UU c.txt" in _git(root, "status", "--porcelain").stdout
+    with pytest.raises(UnmergedIndexPath):
+        WorkspaceSourceView(root).state("c.txt")
 
 
 @pytest.mark.skipif(os.name != "posix", reason="requires posix chmod semantics")
@@ -204,7 +354,7 @@ def test_workspace_view_fails_closed_on_unreadable_regular_file(tmp_path: Path) 
     # A regular file we can stat but not READ must fail closed as SourceViewError (an AssuranceError
     # the CLI maps to exit 2), never escape as an unguarded OSError -> traceback -> exit 1.
     victim = tmp_path / "secret.txt"
-    victim.write_text("nope\n")
+    victim.write_bytes(b"nope\n")
     os.chmod(victim, 0o000)
     try:
         with pytest.raises(SourceViewError):
@@ -279,9 +429,9 @@ def test_symlink_target_change_is_not_followed(tmp_path: Path) -> None:
 
 def test_ignored_file_is_excluded(tmp_path: Path) -> None:
     root, _ = make_base_repo(tmp_path)
-    (root / ".gitignore").write_text("ignore.me\n")
+    (root / ".gitignore").write_bytes(b"ignore.me\n")
     commit_all(root, "add gitignore")
-    (root / "ignore.me").write_text("secret\n")
+    (root / "ignore.me").write_bytes(b"secret\n")
     _proc, record = changeset(root)
     assert "ignore.me" not in changed(record)
     assert record["payload"]["changed_path_count"] == 0
@@ -302,7 +452,7 @@ def test_rename_is_delete_plus_add(tmp_path: Path) -> None:
 def test_committed_branch_change_is_captured(tmp_path: Path) -> None:
     root, _ = make_base_repo(tmp_path)
     _git(root, "checkout", "-q", "-b", "feature")
-    (root / "mod.txt").write_text("feat\n")
+    (root / "mod.txt").write_bytes(b"feat\n")
     commit_all(root, "feature change")
     # worktree is clean, but the change set vs merge-base(feature, main) still shows it.
     proc, record = changeset(root, base="main")
@@ -331,7 +481,7 @@ def test_base_side_gitlink_is_modeled(tmp_path: Path) -> None:
 
 def test_fingerprint_is_stable_for_same_content(tmp_path: Path) -> None:
     root, _ = make_base_repo(tmp_path)
-    (root / "mod.txt").write_text("changed\n")
+    (root / "mod.txt").write_bytes(b"changed\n")
     _p1, r1 = changeset(root)
     _p2, r2 = changeset(root)
     assert r1["payload"]["fingerprint"] == r2["payload"]["fingerprint"]
@@ -339,16 +489,16 @@ def test_fingerprint_is_stable_for_same_content(tmp_path: Path) -> None:
 
 def test_fingerprint_invalidates_on_change(tmp_path: Path) -> None:
     root, _ = make_base_repo(tmp_path)
-    (root / "mod.txt").write_text("first\n")
+    (root / "mod.txt").write_bytes(b"first\n")
     _p1, r1 = changeset(root)
-    (root / "mod.txt").write_text("second\n")
+    (root / "mod.txt").write_bytes(b"second\n")
     _p2, r2 = changeset(root)
     assert r1["payload"]["fingerprint"] != r2["payload"]["fingerprint"]
 
 
 def test_deterministic_json_output(tmp_path: Path) -> None:
     root, _ = make_base_repo(tmp_path)
-    (root / "mod.txt").write_text("changed\n")
+    (root / "mod.txt").write_bytes(b"changed\n")
     p1 = run_cli(root, "changeset", "--scope", "workspace", "--base", "main")
     p2 = run_cli(root, "changeset", "--scope", "workspace", "--base", "main")
     assert p1.returncode == 0 and p2.returncode == 0
@@ -357,7 +507,7 @@ def test_deterministic_json_output(tmp_path: Path) -> None:
 
 def test_record_verifies_and_fingerprint_recomputes(tmp_path: Path) -> None:
     root, _ = make_base_repo(tmp_path)
-    (root / "mod.txt").write_text("changed\n")
+    (root / "mod.txt").write_bytes(b"changed\n")
     _proc, record = changeset(root)
     assert verify_record(record) is True
     payload = record["payload"]
@@ -382,11 +532,11 @@ def test_missing_base_ref_fails_closed(tmp_path: Path) -> None:
 
 def test_no_merge_base_fails_closed(tmp_path: Path) -> None:
     root = init_repo(tmp_path / "repo")
-    (root / "x.txt").write_text("1\n")
+    (root / "x.txt").write_bytes(b"1\n")
     commit_all(root, "c1")
     _git(root, "checkout", "-q", "--orphan", "island")
     _git(root, "rm", "-rfq", ".", check=False)
-    (root / "y.txt").write_text("island\n")
+    (root / "y.txt").write_bytes(b"island\n")
     commit_all(root, "orphan root")
     proc, _ = changeset(root, base="main")  # HEAD (island) is unrelated to main
     assert proc.returncode == 2
@@ -439,10 +589,10 @@ def test_scope_rejected_by_cli(tmp_path: Path) -> None:
 
 def test_worktree_mutation_during_collection_is_unstable(tmp_path: Path) -> None:
     root, _ = make_base_repo(tmp_path)
-    (root / "mod.txt").write_text("changed\n")
+    (root / "mod.txt").write_bytes(b"changed\n")
 
     def mutate() -> None:  # runs between the two snapshot passes
-        (root / "surprise.txt").write_text("appeared\n")
+        (root / "surprise.txt").write_bytes(b"appeared\n")
 
     with pytest.raises(ChangeSetUnstable):
         build_change_set_record(start_dir=root, _between_passes=mutate)
@@ -455,7 +605,7 @@ def test_linked_worktree(tmp_path: Path) -> None:
     root, _ = make_base_repo(tmp_path)
     wt = tmp_path / "wt"
     _git(root, "worktree", "add", "-q", "-b", "wt", str(wt))
-    (wt / "mod.txt").write_text("from-worktree\n")
+    (wt / "mod.txt").write_bytes(b"from-worktree\n")
     proc, record = changeset(wt, base="main")
     assert proc.returncode == 0, proc.stderr
     assert changed(record)["mod.txt"]["candidate"]["content_digest"] == sha(b"from-worktree\n")
@@ -463,12 +613,12 @@ def test_linked_worktree(tmp_path: Path) -> None:
 
 def test_shallow_clone_records_shallow_and_limits_merge_base(tmp_path: Path) -> None:
     source = init_repo(tmp_path / "src")
-    (source / "x.txt").write_text("1\n")
+    (source / "x.txt").write_bytes(b"1\n")
     commit_all(source, "c1")
     _git(source, "branch", "base_old")  # base_old := c1
-    (source / "x.txt").write_text("2\n")
+    (source / "x.txt").write_bytes(b"2\n")
     commit_all(source, "c2")
-    (source / "x.txt").write_text("3\n")
+    (source / "x.txt").write_bytes(b"3\n")
     commit_all(source, "c3")
 
     shallow = tmp_path / "shallow"
@@ -529,7 +679,7 @@ def test_verify_rejects_record_without_digest() -> None:
 def test_read_committed_file_distinguishes_absent_from_error(tmp_path: Path) -> None:
     from assurance.git_state import GitStateError, discover_git_context, read_committed_file
     repo = init_repo(tmp_path / "repo")
-    (repo / "policy.txt").write_text("v1\n")
+    (repo / "policy.txt").write_bytes(b"v1\n")
     commit_all(repo, "seed")
     ctx = discover_git_context(repo)
     assert read_committed_file(ctx, "HEAD", "policy.txt") == b"v1\n"      # a committed file reads back
