@@ -154,6 +154,14 @@ def _worker_env(worker_wheel_sha256: str | None = None) -> dict[str, str]:
         for key, value in os.environ.items()
         if key not in ("PYTHONPATH", "PYTHONHOME")
     }
+    # The parent writes the dispatch line and reads the protocol as UTF-8, so the child must agree.
+    # A stock Windows child otherwise defaults both to the locale code page (cp1252) and corrupts
+    # any non-ASCII in the plan into a configuration_hash mismatch reported as tampering. The worker
+    # also pins this in-process, but a PINNED OLDER worker wheel predating that fix cannot, and this
+    # is the only channel that reaches it. PYTHONIOENCODING is deliberate rather than PYTHONUTF8=1:
+    # it covers exactly the protocol streams, where PYTHONUTF8 would also change the default
+    # encoding of every open() in the trainer.
+    env["PYTHONIOENCODING"] = "utf-8"
     if worker_wheel_sha256 is not None:
         env[WORKER_WHEEL_SHA256_ENV] = worker_wheel_sha256
     else:

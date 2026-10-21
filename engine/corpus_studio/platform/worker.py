@@ -307,11 +307,40 @@ def _build_arg_parser() -> Any:
     return parser
 
 
+def _ensure_utf8_protocol_stdio() -> None:
+    """Pin the protocol channel to UTF-8 before a single frame is read or written.
+
+    The parent spawns this worker with ``encoding="utf-8"`` and writes the ``run_dispatch`` line as
+    UTF-8, but a child process's ``sys.stdin`` / ``sys.stdout`` default to the process locale
+    encoding, which is cp1252 on a stock Windows host. Any non-ASCII byte in the dispatch then
+    decodes to U+FFFD and the plan's ``configuration_hash`` stops matching its body, so the run is
+    refused for TAMPERING when nothing tampered with it. The backend manifest's ``display_name``
+    already carries U+00B7, and a run under an accented or CJK user-profile path carries more. Five
+    byte values undefined in cp1252 are worse still: they raise ``UnicodeDecodeError`` outright and
+    kill the worker after its ``hello`` with no diagnosis at all.
+
+    Safe no-op where a stream does not support reconfigure (test capture buffers), mirroring
+    ``cli._ensure_utf8_stdio``. This lives in ``main`` rather than the ``__main__`` entrypoint so
+    every caller gets it, including the in-process test fixtures that pass ``out=None``.
+    """
+    for stream in (sys.stdin, sys.stdout):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:
+            continue
+        try:
+            reconfigure(encoding="utf-8")
+        except (ValueError, OSError):
+            # Already-buffered or non-reconfigurable stream. The parent's own UTF-8 pipe plus
+            # PYTHONIOENCODING in the worker environment remain in force.
+            pass
+
+
 def main(out: TextIO | None = None) -> None:
     """CLI entrypoint: read the single ``run_dispatch`` line from stdin and run it. Invoked as
     ``python -m corpus_studio.platform.worker --runner <name>`` by the subprocess supervisor. ``out`` is
     the protocol stream: the ``__main__`` entrypoint binds a PRIVATE-fd stream (so trainer output on fd 1
     cannot corrupt the framed protocol); callers/tests that pass ``None`` use ``sys.stdout``."""
+    _ensure_utf8_protocol_stdio()
     args = _build_arg_parser().parse_args()
 
     environment_ref = Ref(
@@ -381,7 +410,10 @@ def _bind_protocol_stream() -> TextIO:
     os.dup2(2, 1)  # every write to fd 1 for the rest of the process now lands on stderr
     # Line-buffered so each newline-framed protocol message is delivered promptly (belt-and-suspenders
     # with _send's explicit flush), never batched behind an implementation-default block buffer.
-    return os.fdopen(protocol_fd, "w", encoding="utf-8", buffering=1, closefd=True)
+    # newline="" so a frame terminator stays a single LF on every platform. In text mode Windows
+    # would translate it to CRLF, which the parent's universal-newline read happens to tolerate but
+    # which makes the protocol's on-the-wire bytes host-dependent for identical messages.
+    return os.fdopen(protocol_fd, "w", encoding="utf-8", newline="", buffering=1, closefd=True)
 
 
 if __name__ == "__main__":
