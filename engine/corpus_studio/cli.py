@@ -6,6 +6,7 @@ import os
 import sqlite3
 import sys
 import tempfile
+from collections.abc import Iterator
 from typing import Any, Callable, Optional
 
 import typer
@@ -7438,6 +7439,57 @@ def _path_fields_requiring_existence(
     return found
 
 
+def _image_fields(fields: list[SchemaField], prefix: str = "") -> list[str]:
+    """Leaf paths of every ``image_path`` field, whether or not it declares ``path_must_exist``.
+
+    Reported whether or not --check-images ran, for the same reason the path-existence fields are:
+    a dataset whose images were never opened must not read as one whose images were checked.
+    """
+    found: list[str] = []
+    for field in fields:
+        name = f"{prefix}{field.name}"
+        if field.type == "object" and field.fields:
+            found.extend(_image_fields(field.fields, f"{name}."))
+        elif field.type == "list" and field.item_type == "object" and field.item_fields:
+            found.extend(_image_fields(field.item_fields, f"{name}[]."))
+        elif field.type == "image_path":
+            found.append(name)
+        elif field.type == "list" and field.item_type == "image_path":
+            found.append(f"{name}[]")
+    return found
+
+
+def _iter_image_values(
+    row: dict[str, Any],
+    fields: list[SchemaField],
+    prefix: str = "",
+) -> Iterator[tuple[str, Any]]:
+    """Yield ``(field path, value)`` for every declared ``image_path`` value present in the row.
+
+    List indices are 1-BASED to match the validator's field paths, so a finding on the second
+    sprite of a row reads ``frames[2]`` and lines up with what schema-validate reports beside it.
+    """
+    for field in fields:
+        name = f"{prefix}{field.name}"
+        value = row.get(field.name)
+        if value is None:
+            continue
+        if field.type == "object" and field.fields and isinstance(value, dict):
+            yield from _iter_image_values(value, field.fields, f"{name}.")
+        elif field.type == "list" and field.item_type == "object" and field.item_fields:
+            if isinstance(value, list):
+                for index, element in enumerate(value, start=1):
+                    if isinstance(element, dict):
+                        yield from _iter_image_values(
+                            element, field.item_fields, f"{name}[{index}]."
+                        )
+        elif field.type == "list" and field.item_type == "image_path" and isinstance(value, list):
+            for index, element in enumerate(value, start=1):
+                yield f"{name}[{index}]", element
+        elif field.type == "image_path":
+            yield name, value
+
+
 @app.command("schema-validate")
 def schema_validate(
     project_dir: Path,
@@ -7449,6 +7501,16 @@ def schema_validate(
         None,
         "--path-root",
         help="Root for the opt-in existence check on path fields that declare path_must_exist. Omit it and those fields stay string-only checks (the skipped ones are reported).",
+    ),
+    check_images: bool = typer.Option(
+        False,
+        "--check-images",
+        help="Also OPEN each declared image and report what it is (needs --path-root and the 'images' extra).",
+    ),
+    min_image_dimension: int = typer.Option(
+        0,
+        "--min-image-dimension",
+        help="Fail an image whose shorter side is below this. 0 (default) does not enforce a floor; dimensions are reported either way.",
     ),
     as_json: bool = typer.Option(False, "--json", help="Emit the result as JSON."),
 ):
@@ -7464,9 +7526,21 @@ def schema_validate(
     A path field that declares path_must_exist is only existence-checked when --path-root is given;
     the result always names which of those checks ran and which were skipped, so a validated file is
     never mistaken for one whose paths were confirmed to resolve.
+
+    --check-images goes further and OPENS each declared image, reporting dimensions, mode, alpha,
+    frame count, palette size and any integer upscale, and failing a row whose image cannot be
+    decoded, is multi-frame, uses a mode that needs conversion, or whose extension contradicts its
+    real format. It requires --path-root, because an image is only opened once its path has been
+    resolved and contained; dataset content is untrusted, and opening an uncontained path would be a
+    strictly larger exposure than probing one. Image fields are listed as checked or unchecked for
+    the same reason the path fields are.
     """
+    from corpus_studio.quality.images import image_content_problems, inspect_image
     from corpus_studio.schemas.project_schemas import SchemaError, resolve_schema
-    from corpus_studio.validators.basic_validator import validate_example_fields_against
+    from corpus_studio.validators.basic_validator import (
+        resolve_contained_path,
+        validate_example_fields_against,
+    )
 
     if not project_dir.is_dir():
         typer.echo(f"Project directory '{project_dir}' does not exist.", err=True)
@@ -7481,8 +7555,30 @@ def schema_validate(
         typer.echo(f"Path root '{path_root}' does not exist.", err=True)
         raise typer.Exit(code=1)
 
+    if check_images and path_root is None:
+        typer.echo(
+            "--check-images needs --path-root: an image is only opened after its declared path has "
+            "been resolved and contained under that root.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+    if min_image_dimension < 0:
+        typer.echo("--min-image-dimension must be 0 or greater.", err=True)
+        raise typer.Exit(code=1)
+    if check_images:
+        # Probe once: a run either inspects every image or refuses before opening any of them.
+        from corpus_studio.quality.images import ImageSupportUnavailable, ensure_image_support
+
+        try:
+            ensure_image_support()
+        except ImageSupportUnavailable as exc:
+            typer.echo(str(exc), err=True)
+            raise typer.Exit(code=1) from exc
+
     row_errors: list[dict[str, Any]] = []
     rows_checked = 0
+    images_inspected = 0
+    image_facts: list[dict[str, Any]] = []
     if data is not None:
         try:
             rows = list(read_jsonl(data))
@@ -7502,8 +7598,50 @@ def schema_validate(
                 row_errors.append(
                     {"row_number": number, "field": issue.field, "message": issue.message}
                 )
+            if check_images and path_root is not None:
+                for field_path, value in _iter_image_values(row, schema.fields):
+                    if not isinstance(value, str):
+                        # A non-string in an image field is already a type error from the
+                        # validator above; do not report it twice as an image problem.
+                        continue
+                    resolved, reason = resolve_contained_path(value, path_root)
+                    if resolved is None:
+                        # The validator already reported this field when the schema declared
+                        # path_must_exist, so only report it when it did not: an uncontained path
+                        # must never be silently skipped just because the schema omitted the
+                        # opt-in, and must never be reported twice when it did not.
+                        if not any(
+                            entry["row_number"] == number and entry["field"] == field_path
+                            for entry in row_errors
+                        ):
+                            row_errors.append(
+                                {"row_number": number, "field": field_path, "message": reason}
+                            )
+                        continue
+                    try:
+                        facts = inspect_image(resolved)
+                    except Exception as exc:  # noqa: BLE001 - any decode failure is a row problem
+                        row_errors.append(
+                            {
+                                "row_number": number,
+                                "field": field_path,
+                                "message": f"Image could not be read: {type(exc).__name__}: {exc}",
+                            }
+                        )
+                        continue
+                    images_inspected += 1
+                    image_facts.append(
+                        {"row_number": number, "field": field_path, **facts.model_dump()}
+                    )
+                    for problem in image_content_problems(
+                        facts, resolved, min_dimension=min_image_dimension
+                    ):
+                        row_errors.append(
+                            {"row_number": number, "field": field_path, "message": problem}
+                        )
 
     declared_path_fields = _path_fields_requiring_existence(schema.fields)
+    declared_image_fields = _image_fields(schema.fields)
     result = {
         "schema_id": schema_id,
         "source": source,
@@ -7516,6 +7654,14 @@ def schema_validate(
             "root": str(path_root) if path_root is not None else None,
             "checked_fields": declared_path_fields if path_root is not None else [],
             "skipped_fields": [] if path_root is not None else declared_path_fields,
+        },
+        "image_content": {
+            "checked": check_images,
+            "min_dimension": min_image_dimension,
+            "checked_fields": declared_image_fields if check_images else [],
+            "skipped_fields": [] if check_images else declared_image_fields,
+            "images_inspected": images_inspected,
+            "facts": image_facts[:50],
         },
     }
     if as_json:
@@ -7535,6 +7681,23 @@ def schema_validate(
                 )
             else:
                 typer.echo(f"Path existence checked under {path_root} for: {names}.")
+        if declared_image_fields:
+            image_names = ", ".join(declared_image_fields)
+            if not check_images:
+                typer.echo(
+                    f"Image content NOT checked for: {image_names} "
+                    "(pass --check-images to open them)."
+                )
+            else:
+                floor = (
+                    "no minimum dimension"
+                    if min_image_dimension == 0
+                    else f"minimum dimension {min_image_dimension}"
+                )
+                typer.echo(
+                    f"Image content checked for: {image_names} "
+                    f"({images_inspected} image(s) opened, {floor})."
+                )
     for entry in row_errors[:20]:
         field = entry.get("field")
         location = f"{field}: " if field else ""

@@ -104,52 +104,46 @@ def _type_error_message(field_type: str) -> str:
     return "Invalid value."
 
 
-def _path_existence_issues(
-    value: str,
-    full_name: str,
-    row_number: int | None,
-    path_root: Path,
-) -> list[ValidationIssue]:
-    """Resolve a declared path under ``path_root`` and report it if it is not a file there.
+def resolve_contained_path(value: str, path_root: Path) -> tuple[Path | None, str | None]:
+    """Resolve a declared path under ``path_root``; return ``(path, None)`` or ``(None, reason)``.
 
     The value is UNTRUSTED dataset content, so the root is a trust boundary and not just a
     convenience: an absolute path, or a relative one that climbs out of the root (``../..`` or a
     symlink pointing outside), is REJECTED rather than probed. Without that, validating a
     third-party JSONL file would let its rows test for the existence of arbitrary paths on the
-    machine running the validator. Only existence is checked - no file is opened.
+    machine running the validator. This resolves and contains only; it opens nothing.
+
+    Any caller that goes on to OPEN the file must resolve it through here first, or the same row
+    that cannot be probed could still be read. That is why this is one shared function rather than
+    a rule each caller reimplements.
     """
     # Read the value as posix, treating a Windows separator as one too: a row written on either
     # platform must be contained by the same rule.
     candidate = PurePosixPath(value.replace("\\", "/"))
     if candidate.is_absolute() or PureWindowsPath(value).is_absolute():
-        return [
-            _issue(
-                "Declared path must be relative to the path root, not absolute.",
-                row_number,
-                full_name,
-            )
-        ]
+        return None, "Declared path must be relative to the path root, not absolute."
 
     # resolve() on both sides normalizes '..' AND follows symlinks, so a link inside the root
     # that points outside it fails containment rather than being probed.
     root = path_root.resolve()
     resolved = (root / Path(*candidate.parts)).resolve()
     if not resolved.is_relative_to(root):
-        return [
-            _issue(
-                "Declared path escapes the path root.",
-                row_number,
-                full_name,
-            )
-        ]
+        return None, "Declared path escapes the path root."
     if not resolved.is_file():
-        return [
-            _issue(
-                f"Declared path does not exist under the path root: {value}",
-                row_number,
-                full_name,
-            )
-        ]
+        return None, f"Declared path does not exist under the path root: {value}"
+    return resolved, None
+
+
+def _path_existence_issues(
+    value: str,
+    full_name: str,
+    row_number: int | None,
+    path_root: Path,
+) -> list[ValidationIssue]:
+    """Report a declared path that is not a contained, existing file under ``path_root``."""
+    _resolved, reason = resolve_contained_path(value, path_root)
+    if reason is not None:
+        return [_issue(reason, row_number, full_name)]
     return []
 
 

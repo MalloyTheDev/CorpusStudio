@@ -43,6 +43,14 @@ tokenizer = [
 model-tokenizer = [
     "tokenizers>=0.15"
 ]
+# Optional image inspection for datasets that declare an `image_path` field (image-caption /
+# pixel-art corpora). The engine stays dependency-light by default and imports no image library;
+# `schema-validate --check-images` REFUSES with an install hint when this is absent rather than
+# reporting a pass for checks that did not run. `pip install corpus-studio-engine[images]`.
+# See corpus_studio/quality/images.py.
+images = [
+    "pillow>=10.0"
+]
 # Optional Parquet import/export. Parquet is a large columnar dependency (pyarrow),
 # so the engine stays dependency-light by default and Parquet paths fail fast with an
 # install hint when it's absent. `pip install corpus-studio-engine[parquet]`.
