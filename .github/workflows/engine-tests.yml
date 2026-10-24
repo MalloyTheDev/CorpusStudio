@@ -49,6 +49,16 @@ jobs:
           cd engine
           mypy
 
+      # mypy models ONE platform per run, and the bare invocation above models the host (linux).
+      # The POSIX-only call sites (fcntl, resource, os.fchmod, os.sysconf) are guarded on
+      # sys.platform so the checker can narrow them, which means a Windows-targeted run is clean and
+      # a regression there is a real defect on a supported platform. Blocking from the start because
+      # it already passes: see issues #969 and #973.
+      - name: Type check for Windows (mypy --platform win32)
+        run: |
+          cd engine
+          mypy --platform win32
+
       - name: Run tests with coverage
         run: |
           cd engine
@@ -63,6 +73,69 @@ jobs:
           path: engine/coverage.xml
           if-no-files-found: warn
           retention-days: 1
+
+  # Windows is a SUPPORTED platform, but until now CI only ever ran Linux, so nothing stopped it
+  # regressing. That is not hypothetical: three defects reached main invisibly because of it, the worst
+  # being a checkpoint fsync that opened O_RDONLY and so failed with EBADF on every durable write,
+  # inside a lane already marked workload_verified on Linux evidence. The suite now passes on Windows
+  # (issues #969, #972, #973), and this job is what keeps it that way.
+  #
+  # Intentionally NOT a required status check yet (soak first), matching the convention in
+  # security.yml: it informs, it does not block merges. No continue-on-error, so a failure stays
+  # visible rather than being swallowed. Promote it to required once it has been green for a while.
+  #
+  # Python 3.11 matches the Linux job on purpose: holding the interpreter constant means a difference
+  # between the two jobs is a PLATFORM difference and nothing else. A 3.12 axis is worth adding later,
+  # since 3.12 venvs no longer seed setuptools (see the wheel-build prerequisite in engine/pyproject.toml).
+  windows-engine:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: engine
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # Same reasoning as the Linux job: this job RUNS repository code, so the job token must
+          # not be left behind in .git/config.
+          persist-credentials: false
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      - name: Install engine
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]" -c constraints.txt
+
+      # Report the privilege rather than discover it through a wall of failures. Creating a symlink on
+      # Windows needs SeCreateSymbolicLinkPrivilege, which an unprivileged account lacks unless
+      # Developer Mode is on; without it the symlink-escape refusal tests cannot even build their
+      # fixture. Whichever way this prints, the log says so plainly (issue #972).
+      - name: Report symlink capability
+        # Explicit bash: the default shell on windows-latest is pwsh, where a multi-line quoted
+        # Python string is a quoting hazard. A heredoc keeps the probe readable and shell-agnostic.
+        shell: bash
+        run: |
+          python - <<'PY'
+          import os
+          import pathlib
+          import tempfile
+
+          root = pathlib.Path(tempfile.mkdtemp())
+          (root / "target").write_text("x", encoding="utf-8")
+          try:
+              os.symlink(root / "target", root / "link")
+              print("symlink: ALLOWED")
+          except OSError as exc:
+              print(f"symlink: REFUSED -> {exc}")
+          PY
+
+      - name: Run tests
+        # No coverage here: the 88% floor is enforced once, on Linux, in the python-engine job.
+        # This job exists to catch platform behaviour, not to re-measure coverage.
+        run: pytest -q --no-header
 
   # Codecov receives CODECOV_TOKEN, so it runs in its OWN job that NEVER executes repository code: it
   # only downloads the coverage artifact. Previously this step lived in `python-engine`, where `pytest`
