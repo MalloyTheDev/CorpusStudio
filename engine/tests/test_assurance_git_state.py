@@ -70,6 +70,14 @@ def init_repo(root: Path) -> Path:
     _git(root, "init", "-q", "-b", "main")
     _git(root, "config", "user.email", "assurance@example.com")
     _git(root, "config", "user.name", "assurance-test")
+    # No background git maintenance in a test repo. Auto-gc DETACHES by default, so it can rewrite
+    # .git/objects while a test is mid-assertion: test_changeset_never_mutates_committed_state
+    # snapshots the object store before and after a read-only changeset and flaked exactly that way
+    # in CI, where a git temporary name present in the first snapshot had become a pack-*.rev
+    # revindex by the second. Disabling maintenance removes the race instead of teaching the
+    # assertion to ignore git's housekeeping artifacts, which keeps it strict about what it covers.
+    _git(root, "config", "gc.auto", "0")
+    _git(root, "config", "maintenance.auto", "false")
     return root
 
 
